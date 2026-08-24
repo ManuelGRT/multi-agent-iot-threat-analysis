@@ -1,0 +1,243 @@
+# Guión de la demo completa del sistema (en vivo, con LLMs)
+
+> **AVISO PARA LA DEFENSA:** 0.9363 es una comparativa historica, no una metrica
+> final con split limpio. No usar el mensaje central de este guion hasta
+> completar las fases C-F de `plan_validacion_metricas_por_dataset.md` o
+> reformularlo explicitamente como resultado preliminar.
+
+**Proyecto:** `tfm_multiagent` · Sistema multiagente de ciberseguridad IoT/IIoT sobre MCP
+**Modo:** en vivo — estandarización y mitigación usan los LLM disponibles (Mistral API por defecto)
+**Duración estimada:** 15–20 minutos (los 5 bloques) · **Plan B:** modo `--offline` (100 % determinista)
+
+---
+
+## Mensaje central (repetirlo en apertura y cierre)
+
+> La aportación no es «otro clasificador que gana»: la arquitectura produce una
+> **representación canónica más rica y desacoplada** que habilita mejores modelos
+> posteriores (F1 multiclase **0,9363** frente a **0,7479** del mejor LLM
+> fine-tuned del TFM previo), con **trazabilidad completa por caso** y
+> **mitigación anclada a conocimiento verificable** (ATT&CK/CAPEC).
+
+---
+
+## 0. Preparación previa (el día antes — no en directo)
+
+### Qué hacer
+
+```powershell
+cd <ruta>\Proyecto_Sistema_Multiagente
+
+# 1) Entorno y suite completa (usar SIEMPRE el venv del proyecto)
+.\.venv\Scripts\python.exe -m pytest -q
+
+# 2) Configurar los LLM en vivo (misma terminal que usarás en la demo)
+$env:MISTRAL_API_KEY = "<clave>"
+$env:LLM_PROVIDER = "mistral"                    # estandarizacion en vivo
+$env:INGEST_LLM_MODEL = "mistral-small-latest"   # IMPRESCINDIBLE: sin esto el default es gemma3:12b (Ollama) y Mistral devuelve 400
+$env:MITIGATOR_LLM_PROVIDER = "mistral"          # mitigacion contextualizada
+$env:MITIGATOR_LLM_MODEL = "mistral-small-latest"
+$env:MISTRAL_RATE_LIMIT_RETRIES = "5"            # IMPORTANTE: el default es 0 reintentos;
+$env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # sin esto un solo 429 manda el mitigador a fallback
+
+# 3) Ensayo general completo (una pasada de los bloques 1-4)
+# 4) Red de seguridad: comprobar que el modo offline funciona
+.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --offline
+```
+
+### Resultado esperado
+
+- `232 passed` en la suite (unos minutos).
+- El ensayo offline termina con los 4 casos y **digests idénticos** a la
+  referencia (`exit 0`). Si algo falla el día de la demo, este es el plan B.
+
+> **Regla dura del proyecto:** en vivo solo se estandarizan **eventos
+> individuales**; nunca relanzar llamadas masivas a Mistral (el corpus ya está
+> congelado en la caché: 13.837 entradas, 0 errores).
+
+---
+
+## 1. Apertura — Auditoría E2E del sistema (~2 min)
+
+**Qué contar mientras corre:** «Antes de enseñar nada, el propio sistema se
+audita: humo de extremo a extremo en 4 datasets, métricas de los modelos
+desplegados reproduciendo su split de test exacto, certificación de los
+baselines congelados de la comparativa con el TFM previo, cobertura del mapeo
+CAPEC y chequeo de fuga de etiquetas con un caso trampa que debe ser detectado.»
+
+### Qué hacer
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_system_audit.py
+```
+
+### Resultado esperado
+
+- **7 semáforos en VERDE**, ejecución determinista en **menos de 10 segundos**, `exit 0`.
+- Smoke E2E: **20/20 casos válidos** (Edge-IIoTset, TON-IoT host y telemetry, IoT-23).
+- Batch de modelos desplegados: **delta 0,0** frente a las métricas congeladas.
+- Baselines certificados: 0,9363 ≥ 0,93 y > 0,7479 (sin re-experimentar).
+- Cobertura CAPEC del TFM previo: **14/14**.
+- Leakage: **0/200** y el caso trampa **sí detectado** (valida el detector de fugas).
+- Se genera `artifacts/informe_auditoria_sistema_<fecha>.md` (mostrarlo un segundo).
+
+---
+
+## 2. Flujo multiagente completo con mitigación LLM (~5 min)
+
+**Qué contar:** «Ahora el flujo completo: estandarización → detección →
+clasificación → mitigación → juez, con auditoría en vivo de cada caso. La
+mitigación combina el catálogo threat intel (base auditable) con el LLM, que
+solo contextualiza: nada fuera del catálogo puede presentarse como conocimiento
+auditado.»
+
+### Qué hacer
+
+```powershell
+.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --use-llm-mitigator
+```
+
+### Resultado esperado (4 casos por consola)
+
+| Caso | Salida esperada |
+|---|---|
+| **Edge-IIoTset (DDoS_UDP)** | `detect: malicioso=True p=0.986` · `classify: familia=ddos confianza=0.995` · `judge: accion=approve` · estado `completed`, auditoría `approve` |
+| **TON-IoT host** | `standardize: cache=True` (evento estandarizado por Mistral desde la caché congelada) |
+| **TON-IoT telemetry** | `cache=True`; si la confianza cae bajo los umbrales → `needs_human_review` (**explicarlo como comportamiento previsto**, no como fallo) |
+| **IoT-23 (flujo de red)** | `cache=True`, flujo completo con traza de 6 agentes |
+
+- En cada caso: `mitigate: fuente=hybrid` (catálogo + LLM) y referencias
+  `T14xx / CAPEC-xxx / M1037`. Los ítems contextualizados por el LLM van
+  marcados con su procedencia (`llm`); cualquier aportación sin respaldo saldría
+  como `llm_suggested`.
+- Traza impresa: `orchestrator -> final_standardizer -> final_detector ->
+  final_classifier -> final_mitigator -> final_judge`.
+- **Nota:** la verificación de digests idénticos aplica al modo `--offline`;
+  con LLM en vivo la redacción de las mitigaciones puede variar entre
+  ejecuciones (decirlo si alguien pregunta: por eso la evidencia congelada de
+  la memoria se generó en modo determinista).
+
+**Qué señalar en pantalla:** la línea de comparativa con el TFM previo
+(0,9363 vs 0,7479, delta +0,1884) y la cobertura CAPEC 14/14 que el script
+imprime al final vía tools MCP.
+
+---
+
+## 3. Protocolo MCP real (~1 min)
+
+**Qué contar:** «La capa de herramientas no es una abstracción de papel: cada
+servidor habla el protocolo MCP real por stdio. Lo demostramos con un handshake
+auténtico contra el servidor de threat intel.»
+
+### Qué hacer
+
+```powershell
+.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --offline --stdio-smoke
+```
+
+### Resultado esperado
+
+- Handshake MCP correcto: el servidor `threat_intel` arranca como proceso,
+  lista sus tools (`map_family_to_attack`, `suggest_mitigations`,
+  `get_jorge_capec_coverage`…) y responde a una llamada real.
+- **Si preguntan por qué no toda la demo va por stdio:** funciona (hay tests),
+  pero arrancar un servidor por llamada recarga los modelos y es inviable en
+  vivo; la operación real usaría servidores persistentes. Honestidad técnica.
+
+---
+
+## 4. Caso nuevo estandarizado EN VIVO por el LLM, en el frontal web (~5 min)
+
+**Qué contar:** «Hasta ahora los eventos venían de datasets conocidos. Ahora un
+evento que el sistema no ha visto nunca: la estandarización la hace Mistral en
+vivo, y el resto del flujo continúa sobre el evento canónico resultante. Lo
+vemos en el visor web del sistema, que pinta el caso agente a agente.»
+
+### Qué hacer
+
+Arrancar la API (hereda las variables de entorno de esta terminal) y abrir el
+frontal:
+
+```powershell
+.\.venv\Scripts\uvicorn.exe src.api.app:app --port 8000
+```
+
+Abrir **http://localhost:8000** en el navegador (a pantalla completa para la
+proyección) y:
+
+1. Seleccionar el ejemplo **«Flujo IoT-23 sospechoso (telnet)»**.
+2. Marcar las casillas **«Estandarización LLM en vivo»**, **«Mitigación
+   contextualizada por LLM»** y **«Persistir caso»**.
+3. Pulsar **Analizar caso** y narrar la animación del pipeline mientras corre.
+
+### Resultado esperado (y qué señalar en pantalla)
+
+- El pipeline se ilumina agente a agente: Orquestador → Estandarizador →
+  Detector → Clasificador → Mitigador → Juez.
+- Tarjeta del Estandarizador: **«Desde caché: no»** y modelo de ingesta LLM —
+  **este es el momento clave del bloque: la estandarización acaba de ocurrir
+  en vivo** (la latencia de unos segundos es el coste declarado de esa llamada).
+- Tarjeta del Detector: gauge de probabilidad **con la zona gris [0,4–0,6]
+  dibujada** — si cae dentro, la abstención y la derivación al juez SE VEN
+  (clasificador y mitigador quedan «omitido»): explicarla como comportamiento
+  previsto, no como fallo.
+- Tarjeta del Clasificador: familia con su top-5 de puntuaciones en barras (no
+  prometer una familia concreta en un evento inventado; el valor está en las
+  confianzas visibles).
+- Tarjeta del Mitigador: fuente `hybrid`, cada mitigación con su badge de
+  procedencia (`catalog`/`llm`/`llm_suggested`) y las referencias como chips
+  clicables a attack.mitre.org — clicar una en vivo (T1498) para mostrar que
+  las referencias son reales.
+- Banner final con el estado y el `case_id`; tabla de traza con los 6 agentes
+  y, plegado, el `CaseResult` JSON completo.
+
+**Remate del bloque:** desmarcar «Estandarización LLM en vivo» y repetir el
+mismo caso → el evento se resuelve con el adaptador determinista y el catálogo
+puro: es la degradación controlada que garantiza que el sistema nunca se rompe.
+
+**Alternativa sin navegador** (por si falla la proyección): la misma llamada
+por consola con `Invoke-RestMethod http://127.0.0.1:8000/cases/analyze` y el
+JSON del ejemplo (cuerpo con `"allow_llm": true, "use_llm_mitigator": true`).
+
+---
+
+## 5. Cierre — Trazabilidad y evidencia (~3 min)
+
+### Qué hacer
+
+1. Abrir el JSON del caso persistido (o `artifacts/demo/demo_case_edge_iiotset_*.json`)
+   y recorrer en 30 segundos: `case_id` → salidas por etapa → `trace[]` →
+   referencias con URL de MITRE.
+2. Mostrar el informe de auditoría generado en el bloque 1.
+3. Cerrar con la tabla de la memoria (capítulo 5): 0,4993 (crudo) → 0,9363
+   (canónico) vs 0,7479 (LLM FT previo).
+
+### Qué decir (cierre)
+
+> «Todo lo que han visto es reproducible: 347 tests, artefactos congelados,
+> digests estables en modo offline y una auditoría que certifica los baselines
+> en cada ejecución. La mejora no viene de un clasificador mejor, sino de
+> reorganizar el análisis en torno a una representación canónica y una
+> arquitectura auditable de extremo a extremo.»
+
+---
+
+## Riesgos y plan B
+
+| Riesgo | Señal | Reacción |
+|---|---|---|
+| API de Mistral caída o sin red | Error/timeout en bloque 2 o 4 | Los agentes hacen **fallback automático** (mitigación → catálogo puro, estandarización → adapter). Decirlo en voz alta: *esto es la degradación controlada funcionando*. Continuar la demo |
+| Rate limit de Mistral | HTTP 429 | Los reintentos están configurados (`MISTRAL_RATE_LIMIT_RETRIES`); esperar unos segundos y repetir la llamada |
+| Sin red total | Nada en vivo funciona | Ejecutar todo con `--offline` (bloques 1, 2 y 3 completos; el bloque 4 se sustituye por la misma llamada API con `allow_llm: false`) |
+| Respuesta LLM lenta en el bloque 4 | > 30 s | Rellenar explicando la traza del caso anterior; el timeout del proveedor está configurado y el fallback salta solo |
+| Pregunta incómoda: «¿el LLM se inventa mitigaciones?» | — | Enseñar `MitigationItem.source`: nada sale sin procedencia; lo no respaldado se marca `llm_suggested` (hay test que lo verifica) |
+
+## Checklist final antes de empezar
+
+- [ ] Terminal en la raíz del proyecto, venv activo (`.venv\Scripts\...`)
+- [ ] Variables de entorno de los LLM exportadas (bloque 0)
+- [ ] `pytest -q` verde ese mismo día
+- [ ] Ensayo offline con digests OK (plan B verificado)
+- [ ] `artifacts/` intacto (no borrar informes ni caché — regla dura)
+- [ ] API arrancada y frontal abierto en http://localhost:8000 (bloque 4)
+- [ ] `MISTRAL_RATE_LIMIT_RETRIES=5` exportada (sin ella, un 429 manda el mitigador a fallback)

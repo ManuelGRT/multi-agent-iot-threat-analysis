@@ -1,0 +1,18 @@
+* text=auto
+
+*.py text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+*.joblib binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.drawio text eol=lf

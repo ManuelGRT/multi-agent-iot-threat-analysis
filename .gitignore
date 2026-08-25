@@ -1,0 +1,60 @@
+# Entorno y cachés de Python
+.venv/
+.campaign_venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+
+# Datasets crudos (públicos, descargables aparte) — ~3.8 GB
+/data/
+/build/
+/dist/
+
+# Artefactos históricos y salidas de ejecución. Se conservan en disco, pero la
+# versión publicable solo incluye los dos modelos desplegados y el baseline.
+/artifacts/*
+!/artifacts/models/
+/artifacts/models/*
+!/artifacts/models/xgboost_detection_standardized_with_edge_20260705.joblib
+!/artifacts/models/xgboost_attack_family_balanced_group_20260705.joblib
+!/artifacts/baselines/
+/artifacts/baselines/*
+!/artifacts/baselines/jorge_and_current_baselines.json
+
+# Transferencias temporales
+_tmp_transfer/
+
+# Secretos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+
+# Estado y logs regenerables
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Editores y sistema operativo
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

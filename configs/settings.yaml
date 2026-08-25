@@ -1,0 +1,16 @@
+# configs/settings.yaml
+project_name: tfm-multiagent
+default_embed_model: embeddinggemma
+default_agent_model: gemma3:12b
+judge_model_local: gemma3:12b
+judge_model_remote: gpt-4o
+vector_backend: pgvector
+checkpoint_backend: postgres
+mapping_confidence:
+  high: 0.80
+  medium: 0.50
+  low: 0.00
+drift:
+  adwin_delta: 0.002
+  embedding_window: 512
+  mmd_alpha: 0.05

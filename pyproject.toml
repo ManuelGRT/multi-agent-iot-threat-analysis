@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tfm_multiagent"
+version = "0.1.0"
+description = "Arquitectura multiagente para deteccion, clasificacion y explicacion de eventos IoT/IIoT."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "langchain-core>=1.0",
+    "langchain-ollama>=1.1",
+    "langgraph>=0.2",
+    "joblib==1.5.3",
+    "numpy==2.5.1",
+    "pydantic>=2.7",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pyyaml>=6.0",
+    "river>=0.21",
+    # Los modelos joblib desplegados fueron serializados con esta version.
+    "scikit-learn==1.8.0",
+    "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+drift-advanced = ["alibi-detect>=0.12"]
+training = ["torch>=2.2", "pytorch-metric-learning>=2.5"]
+llm-training = [
+    "torch>=2.2",
+    "transformers>=4.45",
+    "datasets>=2.20",
+    "accelerate>=0.34",
+    "peft>=0.12",
+]
+postgres = ["psycopg[binary]>=3.1"]
+reports = ["reportlab>=4.5"]
+mcp = ["mcp[cli]>=1.2,<2"]
+# Mantener sincronizado con los modelos versionados de artifacts/models/.
+inference = ["xgboost==3.3.0"]
+evaluation = [
+    "xgboost==3.3.0",
+    "lightgbm==4.7.0",
+    "torch>=2.2",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+"src.mcp" = ["data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

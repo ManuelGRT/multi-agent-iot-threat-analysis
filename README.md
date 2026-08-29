@@ -38,7 +38,7 @@ Ideas clave del diseño:
   inventar referencias — lo no respaldado por el catálogo se marca y el caso
   se supervisa.
 
-## Resultados principales (campaña `validation_2026`)
+## Resultados principales
 
 Evaluación sobre 35.637 registros únicos de 5 datasets públicos, con
 particiones deduplicadas y congeladas **antes** de experimentar (el diagnóstico

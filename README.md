@@ -1,200 +1,146 @@
-# TFM Multiagent Architecture
+# Sistema Multiagente para el Análisis de Amenazas IoT/IIoT
 
-> **Estado de validacion cientifica:** la arquitectura y su suite son
-> ejecutables, pero la cifra 0.9363 es un baseline historico obtenido antes del
-> protocolo de deduplicacion. No debe presentarse como resultado final limpio.
-> La Fase C de `docs/plan_validacion_metricas_por_dataset.md` esta ejecutandose
-> con Mistral en vivo. La Fase D ya esta implementada y probada; sus metricas
-> finales se generan automaticamente cuando la cobertura LLM llegue al 100 %.
+Trabajo Fin de Máster (Máster en Inteligencia Artificial Aplicada). Este
+proyecto convierte un flujo clásico de detección de intrusiones —acoplado a un
+único dataset— en un **sistema multiagente**: los eventos de seguridad de
+cualquier fuente IoT/IIoT se transforman a un formato común (el *evento
+canónico*) y una cadena de agentes especializados los analiza, propone
+mitigaciones verificables y deja una traza completa auditable de cada decisión.
 
-Arquitectura multiagente de ciberseguridad IoT/IIoT: estandarizacion de
-fuentes heterogeneas a un evento canonico, deteccion, clasificacion,
-mitigacion anclada a threat intel y auditoria E2E, coordinadas por
-LangGraph sobre una capa MCP real (SDK oficial).
+## ¿Cómo funciona?
 
-## Arquitectura final MCP
+Cada evento recorre este flujo, coordinado por un orquestador (LangGraph)
+sobre una capa de herramientas MCP (Model Context Protocol):
 
-Documentacion completa en `docs/arquitectura_mcp_multiagente.md`; diagrama
-en `docs/comparativa_arquitectura_tfm_v4_mcp.drawio`; resultados y
-narrativa para la memoria en `docs/material_memoria_resultados.md`.
-
-- **Capa MCP** (`src/mcp/`): 5 servidores FastMCP — datasets, inference
-  (cache Mistral + modelos XGBoost desplegados), case-memory (SQLite),
-  threat-intel (catalogo ATT&CK/CAPEC, superset del mapeo del TFM previo)
-  y evaluation (metricas + baselines congelados). Cliente dual
-  in-process/stdio en `src/mcp/client.py`.
-- **Agentes finales** (`src/agents/final/`): standardizer (sanitizacion
-  anti-leakage), detector (abstencion en zona gris 0.4-0.6), classifier,
-  mitigator (LLM anclado al catalogo con marca `llm_suggested`; fallback
-  total) y judge. Auditor E2E (`CaseAuditor`) por caso.
-- **Grafo final** (`src/orchestration/mcp_graph.py`): todo caso devuelve
-  un `CaseResult` con `case_id` y `trace[]` completa; la API lo expone en
-  `POST /cases/analyze`.
-- **Comparativa historica (congelada, no validacion final)**: F1 multiclase **0.9363** (evento
-  canonico Edge-IIoTset) frente a **0.7479** (mejor LLM fine-tuned del TFM
-  previo).
-
-Comandos de referencia:
-
-```powershell
-# demo reproducible (defensa): 4 casos deterministas, digests estables
-.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --offline
-
-# auditoria E2E: informe con semaforos (exit 0 solo si todo verde)
-.\.venv\Scripts\python.exe scripts\run_system_audit.py
+```
+entrada cruda → Estandarizador → Detector → Clasificador → Mitigador → Juez
+                                    │ (zona gris)              │
+                                    └──────► revisión humana ◄─┘
 ```
 
-## Instalacion
+| Agente | Qué hace | Qué decide |
+|---|---|---|
+| **Estandarizador** | Convierte el registro crudo (de cualquier dataset) en un evento canónico, con ayuda de un LLM (Mistral) o de un adaptador determinista | Confianza del mapeo; si es baja (< 0,5), el caso va a revisión |
+| **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
+| **Clasificador** | Modelo XGBoost multiclase: ¿qué familia de ataque? | Familia y confianza; si < 0,65, el caso va a revisión |
+| **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC); un LLM opcional las contextualiza al caso concreto | Todo lo que el LLM añada sin respaldo del catálogo queda marcado `llm_suggested` |
+| **Juez** | Reglas deterministas sobre el caso completo | Aprobar o derivar a revisión humana |
+| **Auditor** | Revisa a posteriori el caso cerrado (coherencia, traza, umbrales, fugas) | Aprobar, revisar o rechazar |
 
-Usa Python 3.12 o superior. El stack ML esta fijado a las versiones con las que
-se validaron los modelos `joblib`; no reutilices un `.venv` copiado de otro equipo:
+Ideas clave del diseño:
+
+- **El sistema nunca ve las etiquetas.** La verdad terreno se separa de los
+  datos antes de entrar al flujo (como ocurriría en producción, donde los
+  eventos llegan sin etiquetar) y solo la usa la evaluación, fuera del grafo.
+- **Nada se acepta sin auditar**: también los casos benignos pasan por el juez,
+  y todo caso produce un `CaseResult` con su traza paso a paso.
+- **El LLM está anclado**: puede redactar y contextualizar, pero no puede
+  inventar referencias — lo no respaldado por el catálogo se marca y el caso
+  se supervisa.
+
+## Resultados principales (campaña `validation_2026`)
+
+Evaluación sobre 35.637 registros únicos de 5 datasets públicos, con
+particiones deduplicadas y congeladas **antes** de experimentar (el diagnóstico
+de duplicados que motivó este protocolo detectó hasta un 98,5 % de filas
+repetidas en alguna clase de IoT-23):
+
+| Qué se mide | Resultado |
+|---|---|
+| Multiclase Edge-IIoTset (15 clases, protocolo del TFM previo) | **F1 0,9144** frente a 0,7479 (mejor LLM *fine-tuned* del TFM previo) y 0,4987 (su mejor modelo clásico) |
+| Réplica del baseline previo (garantía de reproducción) | 0,4993 frente a 0,4987 ✓ |
+| Detector global (test congelado, n=5.064) | F1 0,9676; con abstención: **0,977 sobre lo decidido**, derivando el 4,8 % a revisión |
+| Clasificador de familia (n=2.088) | F1 0,9107; con umbral de confianza: 0,953 sobre lo decidido |
+| Mitigador | 100 % de ítems con procedencia de catálogo; anclaje verificado también con Mistral en vivo |
+| Auditor | 16/16 defectos inyectados detectados; 0 falsos rechazos |
+
+**Límite declarado:** el control *leave-one-dataset-out* muestra que los
+modelos no generalizan a una fuente no vista en entrenamiento; los resultados
+valen para los dominios representados. La mejora frente al TFM previo procede
+de la **representación canónica**, no del algoritmo (la réplica a igualdad de
+columnas reproduce su baseline).
+
+## Empezar en tres pasos
 
 ```powershell
+# 1. Instalar (Python 3.10+)
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[mcp,inference]"
-```
 
-Nota: el SDK MCP esta fijado a `mcp[cli]>=1.2,<2` (la v2 elimino
-`mcp.server.fastmcp`). Para instalar extras opcionales:
-
-```powershell
-python -m pip install -e ".[drift-advanced,postgres,training]"
-```
-
-## Tests
-
-```powershell
+# 2. Comprobar que todo está en verde (237 tests)
 python -m pytest -q
+
+# 3. Ver el sistema funcionando: demo reproducible de 4 casos (sin APIs externas)
+python scripts\demo_mcp_multiagent_case.py --offline
 ```
 
-Suite actual: 347 tests (los 74 de la linea base se preservan integros).
+La demo es determinista: cada caso se audita en vivo y su resultado se firma
+con un resumen SHA-256; repetirla otro día debe producir firmas idénticas.
 
-## Campana de validacion 2026
-
-La ejecucion larga es reanudable y no guarda la credencial en artefactos. El
-supervisor espera al runner activo, reintenta fallbacks con backoff y solo
-entonces ejecuta los cuatro modelos de Jorge por dataset, el detector global y
-el clasificador global de familias:
+## Probar el sistema con el visor web
 
 ```powershell
-python scripts\run_validation_campaign.py --wait-pid <PID> --workers 2
+uvicorn src.api.app:app --port 8000
 ```
 
-La Fase D estricta tambien puede lanzarse por separado una vez cerrados los
-JSONL. Usa splits congelados, deduplicacion por tarea, seleccion exclusivamente
-en validacion y un worker PyTorch externo para el MLP exacto:
+Abre `http://localhost:8000`: un visor con ejemplos precargados muestra el
+flujo completo (pipeline por agente, decisiones, mitigaciones con referencias
+y la traza del caso). Sin las casillas de LLM, el flujo es 100 % determinista;
+para la contextualización por LLM define `MISTRAL_API_KEY` en el entorno del
+servidor.
 
-```powershell
-python scripts\eval_validacion_por_dataset.py
-```
-
-Los informes y candidatos quedan bajo `artifacts/validation_2026/evaluation/`;
-no sustituyen implicitamente los modelos desplegados.
-
-## Analisis de casos (flujo final MCP)
+También puedes llamar a la API directamente:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/cases/analyze -Method Post `
   -ContentType "application/json" `
-  -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42,"persist":true}'
+  -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42}'
 ```
 
-Devuelve el `CaseResult` completo (deteccion, familia, mitigaciones con
-referencias ATT&CK/CAPEC, veredicto del juez y traza por agente). Con
-`"use_llm_mitigator": true` activa la contextualizacion LLM anclada al
-catalogo (el proveedor/modelo se configura con `MITIGATOR_LLM_PROVIDER`,
-`MITIGATOR_LLM_MODEL` y las credenciales del proveedor; sin peticion
-explicita manda la variable `LLM_MITIGATOR_ENABLED`). Si el LLM falla hay
-fallback total al catalogo.
+Devuelve el `CaseResult` completo. Con `"use_llm_mitigator": true` se activa la
+contextualización LLM anclada (proveedor y modelo vía `MITIGATOR_LLM_PROVIDER`
+y `MITIGATOR_LLM_MODEL`; si el LLM falla, hay *fallback* total al catálogo).
 
-## API local
+## Auditoría del sistema
 
 ```powershell
-uvicorn src.api.app:app --reload
+python scripts\run_system_audit.py
 ```
 
-Healthcheck:
+Ejecuta la auditoría de extremo a extremo: casos de todas las fuentes por el
+grafo completo, certificación de los modelos desplegados contra las métricas
+congeladas de la campaña (con integridad SHA-256 de la pertenencia del test),
+baselines, cobertura del catálogo y chequeo de fuga de etiquetas (incluido un
+caso trampa). El código de salida es 0 solo si los siete semáforos están en
+verde.
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/health
-```
+## Estructura del repositorio
 
-Analisis de evento:
+| Carpeta | Contenido |
+|---|---|
+| `src/contracts/` | Esquemas Pydantic: evento canónico, salidas de agentes, `CaseResult` y traza |
+| `src/agents/final/` | Los seis agentes del flujo final |
+| `src/mcp/` | Capa de herramientas: 5 servidores MCP (datasets, inferencia, memoria de casos, threat intel, evaluación) y cliente dual in-process/stdio |
+| `src/orchestration/` | Grafos LangGraph (el flujo final está en `mcp_graph.py`) |
+| `src/eval/` | Código de la campaña de validación (contratos de datos, modelos candidatos, benchmarks del TFM previo) |
+| `src/api/` | API FastAPI + visor web (`static/index.html`) |
+| `scripts/` | Los 5 scripts activos (demo, auditoría, entrenamiento, LODO, estandarización en vivo); los históricos están archivados en `scripts/archive/` |
+| `artifacts/` | Artefactos congelados: modelos desplegados, baselines, métricas de la campaña (`validation_2026/evaluation/`), demo |
+| `validacion_fase_c/` | Scripts y resultados de las validaciones por agente del capítulo 5 de la memoria |
+| `docs/` | Arquitectura, planes de trabajo y material para la memoria |
+| `tests/` | Suite completa (237 tests) |
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/events/analyze `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body '{"dataset":"iot23","source_file":"sample.log","row_id":1,"row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","duration":"1.2","orig_pkts":120,"orig_ip_bytes":4096,"label":"Mirai"}}'
-```
+Los datos crudos (`data/`), la caché de estandarización y los resultados
+masivos de la campaña quedan fuera de git por tamaño, pero **no deben borrarse
+del disco**: son la procedencia de los resultados congelados.
 
-Entrada generica sin adapter especifico:
+## Reglas del proyecto
 
-```powershell
-$body = '{"dataset":"future_dataset","text":"src_ip=10.0.0.1 dst_ip=10.0.0.2 proto=tcp label=normal"}'
-Invoke-RestMethod -Uri http://127.0.0.1:8000/events/analyze -Method Post -ContentType "application/json" -Body $body
-```
-
-En la API async, `generic` y datasets desconocidos intentan usar el parser LLM por defecto si Ollama esta disponible. Si quieres forzar el adapter determinista clasico, envia `use_llm:false`.
-
-Entrada generica forzando LLM local de Ollama:
-
-```powershell
-$body = '{"dataset":"future_dataset","use_llm":true,"text":"Connection from 10.0.0.1:4444 to 10.0.0.2:23 over tcp, Mirai attack"}'
-Invoke-RestMethod -Uri http://127.0.0.1:8000/events/analyze -Method Post -ContentType "application/json" -Body $body
-```
-
-Backend LLM:
-
-```powershell
-$env:OLLAMA_HOST="http://127.0.0.1:11434"
-$env:OLLAMA_AGENT_MODEL="gemma3:12b"
-$env:LLM_BACKEND="langchain" # por defecto; usa ChatOllama de LangChain
-```
-
-Para depuracion puedes forzar el cliente HTTP directo anterior:
-
-```powershell
-$env:LLM_BACKEND="httpx"
-```
-
-Orquestacion:
-
-- `build_graph(...)` compila el grafo LangGraph sincrono para smoke tests deterministas.
-- `build_async_graph(...)` compila el grafo LangGraph async para ingesta LLM.
-- La API usa `AsyncGraphOrchestrator`, que ejecuta el flujo sobre LangGraph y aplica `recursion_limit`.
-
-Analizar un CSV/log real:
-
-```powershell
-$env:TFM_DATA_DIR="C:\ruta\a\datasets" # raiz permitida para lecturas
-$body = '{"dataset":"iot23","path":"C:\\ruta\\a\\datasets\\conn.log","limit":10}'
-Invoke-RestMethod -Uri http://127.0.0.1:8000/datasets/analyze-file -Method Post -ContentType "application/json" -Body $body
-```
-
-La ruta debe estar dentro de `TFM_DATA_DIR` (por defecto, `data/` del
-proyecto). El analisis de ficheros usa adaptadores deterministas; para activar
-explicitamente la ingesta LLM envia `"use_llm": true`.
-
-Datasets/adapters soportados:
-
-```powershell
-Invoke-RestMethod http://127.0.0.1:8000/datasets/supported
-```
-
-## Servicios externos
-
-El `docker-compose.yml` levanta Ollama y Postgres con pgvector:
-
-```powershell
-docker compose up -d
-```
-
-Modelos Ollama sugeridos:
-
-```powershell
-ollama pull embeddinggemma
-ollama pull gemma3:12b
-```
+1. **No relanzar llamadas masivas al proveedor LLM**: la estandarización de la
+   campaña está congelada en `artifacts/validation_2026/standardized/`.
+2. **No borrar ni regenerar artefactos históricos** de `artifacts/`.
+3. **Ninguna columna target puede usarse como feature** (hay verificación
+   automática y un caso trampa en la auditoría).
+4. La suite de tests debe quedar en verde tras cada cambio.

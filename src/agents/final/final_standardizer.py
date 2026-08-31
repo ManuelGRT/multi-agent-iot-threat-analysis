@@ -1,12 +1,13 @@
 """Agente final de estandarizacion sobre la tool MCP ``standardize_event``.
 
-Para toda entrada cruda, la tool exige Mistral en vivo y nunca usa cache ni
-adaptadores. Si la llamada o la validacion no pueden completarse, el agente se
-abstiene y deriva el registro al juez para revision humana.
+Para una entrada cruda, la tool reutiliza una estandarizacion Mistral valida si
+existe un duplicado exacto en cache; en caso contrario exige Mistral en vivo.
+Nunca usa adaptadores. Si no hay hit y la llamada o la validacion fallan, el
+agente se abstiene y deriva el registro al juez para revision humana.
 
-La sanitizacion no pertenece a este agente: es una politica tecnica de la
-frontera MCP, aplicada antes del prompt, a la salida canonica y antes de la
-featurizacion predictiva.
+La sanitizacion no pertenece al sistema multiagente. Las entradas operativas
+se consideran ya preparadas; el runtime valida contratos y rechaza resultados
+invalidos, pero no elimina campos silenciosamente.
 """
 from __future__ import annotations
 
@@ -109,6 +110,7 @@ class FinalStandardizer(FinalAgent):
             canonical_event=raw_input.get("canonical_event"),
             source_file=raw_input.get("source_file", "api"),
             row_id=raw_input.get("row_id", 0),
+            split=raw_input.get("split", "stream"),
         )
 
         if result.get("ok") is not True:
@@ -146,8 +148,10 @@ class FinalStandardizer(FinalAgent):
                 "model": validated["model"],
                 "provider": validated["provider"],
                 "source": source,
-                "from_cache": False,
+                "from_cache": validated["from_cache"],
                 "selected_columns": validated["selected_columns"],
+                "cache_content_hash": validated["cache_content_hash"],
+                "cache_pipeline_hash": validated["cache_pipeline_hash"],
             }
         )
 
@@ -156,7 +160,8 @@ class FinalStandardizer(FinalAgent):
             status="ok",
             confidence=mapping_confidence,
             summary=(
-                f"fuente={ingest_output['source']} modelo={result.get('model')} "
+                f"fuente={ingest_output['source']} cache={ingest_output['from_cache']} "
+                f"modelo={result.get('model')} "
                 f"mapping_confidence={mapping_confidence:.2f} ruta={route}"
             ),
         )

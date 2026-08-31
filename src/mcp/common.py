@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-MCP_LAYER_VERSION = "0.1.0"
+MCP_LAYER_VERSION = "0.2.0"
 
 
 def repo_root() -> Path:
@@ -68,6 +68,10 @@ def resolve_confined_path(
 # Artefactos canonicos del proyecto (handoff 2026-08-02). Se pueden
 # sobreescribir con variables de entorno para tests o entornos alternativos.
 DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
+    "standardization_cache_db": lambda: Path(
+        os.getenv("TFM_STANDARDIZATION_CACHE_DB")
+        or artifacts_dir() / "cache" / "mistral_standardization_v2.sqlite3"
+    ),
     "mistral_cache": lambda: Path(
         os.getenv("TFM_MISTRAL_CACHE")
         or artifacts_dir() / "cache" / "mistral_prebalanced_no_simulated_logs_20260704.jsonl"

@@ -2,17 +2,21 @@
 """Servidor MCP de inferencia: estandarizacion, deteccion y clasificacion.
 
 Expone los modelos preparados del TFM:
-- Estandarizacion final: Mistral en vivo obligatorio para toda entrada cruda,
-  sin cache ni adaptadores. Un fallo produce una abstencion estructurada para
-  que el juez solicite revision humana.
+- Estandarizacion final: reutiliza por contenido exacto un exito Mistral
+  validado; en cache miss, Mistral en vivo es obligatorio. Nunca usa
+  adaptadores. Un fallo produce una abstencion para revision humana.
 - Deteccion: ``xgboost_detection_validation_2026_20260822.joblib``.
 - Clasificacion: ``xgboost_attack_family_validation_2026_20260822.joblib``.
 """
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 try:  # SDK MCP oficial; opcional para el modo in-process
@@ -21,10 +25,21 @@ except ImportError:  # pragma: no cover - sin SDK solo se pierde el modo stdio
     FastMCP = None
 
 from src.mcp import model_registry
-from src.mcp.common import register_tools, tool_result
-from src.mcp.standardization_guard import sanitize_canonical_event, sanitize_llm_input
+from src.contracts.canonical import CanonicalEvent
+from src.mcp.common import register_tools, resolve_path, tool_result
+from src.mcp.standardization_cache import (
+    StandardizationCache,
+    bind_event_identity,
+    canonicalize_row,
+    compute_content_hash,
+)
+from src.mcp.standardization_contract import validate_target_free_canonical
 
 mcp_app = FastMCP("mcp-inference") if FastMCP is not None else None
+
+_CACHE_INSTANCES: dict[Path, StandardizationCache] = {}
+_CACHE_INSTANCES_LOCK = threading.Lock()
+_CACHE_MODES = frozenset({"read_write", "bypass"})
 
 
 def _configured_ingest_model() -> str:
@@ -33,6 +48,81 @@ def _configured_ingest_model() -> str:
         or os.getenv("MISTRAL_AGENT_MODEL")
         or "mistral-small-2603"
     )
+
+
+def _standardization_cache() -> StandardizationCache:
+    path = resolve_path("standardization_cache_db").resolve(strict=False)
+    with _CACHE_INSTANCES_LOCK:
+        cache = _CACHE_INSTANCES.get(path)
+        if cache is None:
+            cache = StandardizationCache(path)
+            _CACHE_INSTANCES[path] = cache
+        return cache
+
+
+def _pipeline_hash(model: str) -> str:
+    """Versiona todo lo que puede cambiar una estandarizacion Mistral."""
+    from src.agents.llm_ingest_parser import (
+        CANONICAL_EVENT_SCHEMA,
+        COLUMN_SELECTION_SCHEMA,
+        LLM_PARSER_VERSION,
+        LLM_COLUMN_SELECTION_SYSTEM,
+        LLM_INGEST_SYSTEM,
+    )
+
+    contract = {
+        "contract_version": "mistral-standardization-v2",
+        "provider": "mistral",
+        "model": model,
+        "parser_version": LLM_PARSER_VERSION,
+        "require_llm_column_selection": True,
+        "strict_output_validation": True,
+        "input_canonicalization": "recursive-json-sort-v1",
+        "max_selected_columns": 40,
+        "ingest_prompt": LLM_INGEST_SYSTEM,
+        "column_selection_prompt": LLM_COLUMN_SELECTION_SYSTEM,
+        "canonical_schema": CANONICAL_EVENT_SCHEMA,
+        "column_selection_schema": COLUMN_SELECTION_SCHEMA,
+    }
+    encoded = json.dumps(
+        contract,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _validated_canonical_payload(
+    event_data: dict[str, Any] | CanonicalEvent,
+) -> dict[str, Any]:
+    if isinstance(event_data, CanonicalEvent):
+        payload = event_data.model_dump(mode="json")
+    else:
+        if not isinstance(event_data, dict):
+            raise TypeError("canonical_event debe ser un objeto")
+        unknown = sorted(set(event_data).difference(CanonicalEvent.model_fields))
+        if unknown:
+            raise ValueError(
+                "canonical_event contiene campos fuera del contrato: "
+                + ", ".join(unknown)
+            )
+        payload = CanonicalEvent(**event_data).model_dump(mode="json")
+    validate_target_free_canonical(payload)
+    return payload
+
+
+def _selected_columns_are_compatible(
+    selected_columns: list[str],
+    row: dict[str, Any] | None,
+) -> bool:
+    if row:
+        return (
+            bool(selected_columns)
+            and len(selected_columns) == len(set(selected_columns))
+            and all(column in row for column in selected_columns)
+        )
+    return not selected_columns
 
 
 def _build_llm_parser():
@@ -102,15 +192,60 @@ def standardize_event(
     canonical_event: dict[str, Any] | None = None,
     source_file: str = "api",
     row_id: int | str = 0,
+    split: str = "stream",
+    cache_mode: str = "read_write",
 ) -> dict[str, Any]:
     """Convierte una entrada cruda en CanonicalEvent.
 
-    Toda entrada cruda se envia a Mistral. No existe una ruta de cache ni un
-    adaptador de reserva. ``canonical_event`` es la unica excepcion: ya es un
-    artefacto estandarizado y solo atraviesa la frontera tecnica de validacion
-    y saneamiento.
+    Un duplicado exacto puede reutilizar un exito Mistral validado. En cache
+    miss se llama obligatoriamente a Mistral; nunca se usa un adaptador. La
+    entrada se consume tal como llega: su sanitizacion corresponde al proceso
+    offline que prepara datasets de entrenamiento o evaluacion.
     """
-    has_raw_input = row is not None or bool(str(text or "").strip())
+    if cache_mode not in _CACHE_MODES:
+        return _abstention(
+            ValueError(f"cache_mode no valido: {cache_mode!r}"),
+            failure_code="standardization_input_invalid",
+        )
+    if split not in {"train", "val", "test", "stream"}:
+        return _abstention(
+            ValueError(f"split no valido: {split!r}"),
+            failure_code="standardization_input_invalid",
+        )
+    if not isinstance(dataset, str) or not dataset.strip():
+        return _abstention(
+            ValueError("dataset debe ser una cadena no vacia"),
+            failure_code="standardization_input_invalid",
+        )
+    if source_file is not None and not isinstance(source_file, str):
+        return _abstention(
+            TypeError("source_file debe ser una cadena o null"),
+            failure_code="standardization_input_invalid",
+        )
+    if isinstance(row_id, bool) or not isinstance(row_id, (str, int, type(None))):
+        return _abstention(
+            TypeError("row_id debe ser una cadena, entero o null"),
+            failure_code="standardization_input_invalid",
+        )
+    if row is not None and not isinstance(row, dict):
+        return _abstention(
+            TypeError("row debe ser un objeto JSON"),
+            failure_code="standardization_input_invalid",
+        )
+    if text is not None and not isinstance(text, str):
+        return _abstention(
+            TypeError("text debe ser una cadena"),
+            failure_code="standardization_input_invalid",
+        )
+
+    has_row = isinstance(row, dict) and bool(row)
+    has_text = bool(str(text or "").strip())
+    if row is not None and has_text:
+        return _abstention(
+            ValueError("row y text son alternativas y no pueden combinarse"),
+            failure_code="standardization_input_ambiguous",
+        )
+    has_raw_input = has_row or has_text
     if canonical_event is not None and has_raw_input:
         return _abstention(
             ValueError(
@@ -120,7 +255,7 @@ def standardize_event(
         )
     if canonical_event is not None:
         try:
-            canonical = sanitize_canonical_event(canonical_event)
+            canonical = _validated_canonical_payload(canonical_event)
         except Exception as exc:  # el juez recibe una abstencion controlada
             return _abstention(exc, failure_code="canonical_event_invalid")
         return {
@@ -131,58 +266,178 @@ def standardize_event(
             "model": "prestandardized_passthrough",
             "mapping_confidence": float(canonical.get("mapping_confidence", 0.0) or 0.0),
             "selected_columns": [],
-            "notes": ["security_boundary:sanitized", "source:prestandardized"],
+            "notes": ["source:prestandardized"],
         }
 
-    if row is None and not str(text or "").strip():
+    if not has_raw_input:
         return _abstention(
             ValueError("se requiere row o text para estandarizar"),
             failure_code="standardization_input_missing",
         )
 
+    dataset_name = dataset.strip()
+    source_name = source_file
     try:
-        raw_input = sanitize_llm_input(
-            {
-                "dataset": dataset,
-                "row": row,
-                "text": text,
-                "source_file": source_file,
-                "row_id": row_id,
-            }
+        prompt_row = canonicalize_row(row) if row is not None else None
+    except (TypeError, ValueError) as exc:
+        return _abstention(
+            exc,
+            failure_code="standardization_input_invalid",
         )
-        sanitized_row = raw_input.get("row")
-        sanitized_text = str(raw_input.get("text") or "").strip()
-        if (
-            (not isinstance(sanitized_row, dict) or not sanitized_row)
-            and not sanitized_text
-        ):
-            return _abstention(
-                ValueError(
-                    "la sanitizacion no dejo campos tecnicos para estandarizar"
-                ),
-                failure_code="standardization_input_without_technical_fields",
-            )
-        # En registros tabulares, incluso la preseleccion de columnas debe ser
-        # una decision del LLM. En modo estricto, su fallo no activa heuristicas.
-        if isinstance(raw_input.get("row"), dict) and raw_input["row"]:
-            raw_input["use_column_selection"] = True
-        parser = _build_llm_parser()
-        event = _parse_with_llm(parser, raw_input)
-        canonical = sanitize_canonical_event(event)
-    except Exception as exc:
-        return _abstention(exc)
-
-    selection = parser.last_column_selection or {}
-    return {
-        "canonical_event": canonical,
-        "from_cache": False,
-        "source": "llm",
-        "provider": "mistral",
-        "model": str(getattr(parser.agent, "model", _configured_ingest_model())),
-        "mapping_confidence": float(canonical.get("mapping_confidence", 0.0) or 0.0),
-        "selected_columns": list(selection.get("selected_columns") or []),
-        "notes": ["parsed_by_llm", "security_boundary:sanitized"],
+    raw_input = {
+        "dataset": dataset_name,
+        "row": prompt_row,
+        "text": text,
+        "source_file": source_name,
+        "row_id": row_id,
+        "split": split,
     }
+    if isinstance(prompt_row, dict) and prompt_row:
+        # En modo final incluso la preseleccion pertenece al LLM. Su fallo no
+        # activa una seleccion heuristica.
+        raw_input["use_column_selection"] = True
+
+    configured_model = _configured_ingest_model()
+    cache_pipeline_hash = _pipeline_hash(configured_model)
+    try:
+        cache_content_hash = compute_content_hash(
+            row=prompt_row if prompt_row is not None else None,
+            text=text if prompt_row is None else None,
+        )
+    except (TypeError, ValueError):
+        # Una entrada no serializable tampoco podra llegar correctamente al
+        # proveedor, pero el fallo de la cache nunca sustituye la ruta Mistral.
+        cache_content_hash = None
+
+    cache = (
+        _standardization_cache()
+        if cache_mode != "bypass" and cache_content_hash is not None
+        else None
+    )
+
+    def cached_response() -> dict[str, Any] | None:
+        if cache is None or cache_content_hash is None:
+            return None
+        cached = cache.get(cache_content_hash, cache_pipeline_hash)
+        if cached is None:
+            return None
+        try:
+            if cached.model != configured_model:
+                raise ValueError("modelo de cache incompatible")
+            if not _selected_columns_are_compatible(cached.selected_columns, row):
+                raise ValueError("columnas de cache incompatibles")
+            rebound = bind_event_identity(
+                cached.event_core,
+                dataset=dataset_name,
+                source_file=source_name,
+                row_id=row_id,
+                split=split,
+                parser_version=cached.parser_version,
+            )
+            canonical = _validated_canonical_payload(rebound)
+        except (TypeError, ValueError):
+            cache.delete(cache_content_hash, cache_pipeline_hash)
+            return None
+        return {
+            "canonical_event": canonical,
+            "from_cache": True,
+            "source": "llm",
+            "provider": "mistral",
+            "model": cached.model,
+            "mapping_confidence": float(
+                canonical.get("mapping_confidence", 0.0) or 0.0
+            ),
+            "selected_columns": list(cached.selected_columns),
+            "notes": ["parsed_by_llm", "source:mistral_cache"],
+            "cache_content_hash": cache_content_hash,
+            "cache_pipeline_hash": cache_pipeline_hash,
+            "cache_created_at": cached.created_at,
+        }
+
+    def live_response() -> dict[str, Any]:
+        try:
+            parser = _build_llm_parser()
+            event = _parse_with_llm(parser, raw_input)
+            canonical = _validated_canonical_payload(event)
+            selection = parser.last_column_selection or {}
+            selected_columns = list(selection.get("selected_columns") or [])
+            if not _selected_columns_are_compatible(selected_columns, row):
+                raise ValueError(
+                    "la seleccion LLM no coincide con las columnas recibidas"
+                )
+            model = str(getattr(parser.agent, "model", configured_model))
+            if model != configured_model:
+                raise ValueError("el modelo ejecutado no coincide con el configurado")
+            parser_version = str(
+                (canonical.get("provenance") or {}).get("parser_version")
+                or "llm-0.2.0"
+            )
+            canonical = _validated_canonical_payload(
+                bind_event_identity(
+                    canonical,
+                    dataset=dataset_name,
+                    source_file=source_name,
+                    row_id=row_id,
+                    split=split,
+                    parser_version=parser_version,
+                )
+            )
+        except Exception as exc:
+            return _abstention(exc)
+
+        return {
+            "canonical_event": canonical,
+            "from_cache": False,
+            "source": "llm",
+            "provider": "mistral",
+            "model": model,
+            "mapping_confidence": float(
+                canonical.get("mapping_confidence", 0.0) or 0.0
+            ),
+            "selected_columns": selected_columns,
+            "notes": ["parsed_by_llm", "source:mistral_live"],
+            "cache_content_hash": cache_content_hash,
+            "cache_pipeline_hash": cache_pipeline_hash,
+        }
+
+    if cache is not None:
+        hit = cached_response()
+        if hit is not None:
+            return hit
+
+    if cache is None or cache_mode != "read_write" or cache_content_hash is None:
+        return live_response()
+
+    # Evita llamadas repetidas cuando varios duplicados llegan a la vez. Tras
+    # adquirir el lock se consulta de nuevo porque otro hilo pudo completarla.
+    with cache.singleflight(cache_content_hash, cache_pipeline_hash):
+        hit = cached_response()
+        if hit is not None:
+            return hit
+        live = live_response()
+        if live.get("canonical_event") is None:
+            return live
+        canonical = live["canonical_event"]
+        parser_version = str(
+            (canonical.get("provenance") or {}).get("parser_version")
+            or "llm-0.2.0"
+        )
+        inserted = cache.put(
+            cache_content_hash,
+            cache_pipeline_hash,
+            canonical,
+            live["selected_columns"],
+            live["model"],
+            parser_version,
+        )
+        if not inserted:
+            # Otro proceso puede haber ganado el INSERT OR IGNORE. En ese caso
+            # se devuelve el primer exito persistido para mantener una politica
+            # first-success-wins estable.
+            winner = cached_response()
+            if winner is not None:
+                return winner
+        return live
 
 
 @tool_result
@@ -206,31 +461,46 @@ def get_mapping_confidence(canonical_event: dict[str, Any]) -> dict[str, Any]:
 @tool_result
 def detect_event(canonical_event: dict[str, Any]) -> dict[str, Any]:
     """Deteccion binaria benigno/malicioso sobre un CanonicalEvent."""
-    return model_registry.detect(canonical_event)
+    return model_registry.detect(_validated_canonical_payload(canonical_event))
 
 
 @tool_result
 def detect_batch(canonical_events: list[dict[str, Any]]) -> dict[str, Any]:
-    results = [model_registry.detect(event) for event in canonical_events]
+    results = [
+        model_registry.detect(_validated_canonical_payload(event))
+        for event in canonical_events
+    ]
     return {"count": len(results), "results": results}
 
 
 @tool_result
 def classify_event(canonical_event: dict[str, Any], top_k: int = 3) -> dict[str, Any]:
     """Clasificacion de familia de ataque sobre un CanonicalEvent."""
-    return model_registry.classify(canonical_event, top_k=top_k)
+    return model_registry.classify(
+        _validated_canonical_payload(canonical_event),
+        top_k=top_k,
+    )
 
 
 @tool_result
 def classify_batch(canonical_events: list[dict[str, Any]], top_k: int = 3) -> dict[str, Any]:
-    results = [model_registry.classify(event, top_k=top_k) for event in canonical_events]
+    results = [
+        model_registry.classify(
+            _validated_canonical_payload(event),
+            top_k=top_k,
+        )
+        for event in canonical_events
+    ]
     return {"count": len(results), "results": results}
 
 
 @tool_result
 def get_family_scores(canonical_event: dict[str, Any]) -> dict[str, Any]:
     """Puntuaciones completas por familia (todas las clases del modelo)."""
-    return model_registry.classify(canonical_event, top_k=100)
+    return model_registry.classify(
+        _validated_canonical_payload(canonical_event),
+        top_k=100,
+    )
 
 
 TOOLS = {

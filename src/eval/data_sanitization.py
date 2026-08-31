@@ -1,8 +1,8 @@
-"""Frontera tecnica de seguridad para la estandarizacion.
+"""Preparacion offline sin targets para entrenamiento, validacion y evaluacion.
 
-Este modulo no es un agente: aplica una politica transversal en la frontera
-MCP. Evita que etiquetas/targets entren en el prompt del LLM o salgan en el
-evento canonico que se conserva en el caso y se entrega a los modelos.
+No se importa desde el grafo multiagente ni desde las tools MCP operacionales.
+El sistema final recibe artefactos ya limpios y rechaza contratos invalidos en
+lugar de reparar o eliminar campos durante la inferencia.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from src.agents.predictive_sanitization import (
+from src.eval.predictive_sanitization import (
     is_predictive_target_field,
     is_predictive_target_value,
     scrub_predictive_text,

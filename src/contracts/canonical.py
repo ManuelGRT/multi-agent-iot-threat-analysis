@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Modality = Literal["network_flow", "telemetry", "host_log", "alert", "pcap_ref"]
 Severity = Literal["low", "medium", "high", "critical"]
@@ -18,6 +18,8 @@ SchemaProfile = Literal[
 ]
 
 class Provenance(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     dataset: str
     source_file: str | None = None
     row_id: str | int | None = None
@@ -65,6 +67,13 @@ class CanonicalEvent(BaseModel):
     provenance: Provenance
     mapping_confidence: float = Field(ge=0.0, le=1.0)
     missing_fields: list[str] = Field(default_factory=list)
+
+    @field_validator("semantic_text")
+    @classmethod
+    def semantic_text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("semantic_text no puede estar vacio")
+        return value
 
     @property
     def is_labeled_malicious(self) -> bool | None:

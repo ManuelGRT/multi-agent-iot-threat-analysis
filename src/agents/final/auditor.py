@@ -9,7 +9,7 @@ Valida un ``CaseResult`` terminado en cuatro dimensiones:
    orden temporal sin retrocesos.
 3. **Target leakage**: el evento canonico del caso no arrastra campos de
    label/attack (ni en claves, ni en semantic_text, ni en las features que
-   veran los modelos) — reutiliza ``predictive_sanitization``.
+   veran los modelos). Solo detecta y reporta; nunca modifica el caso.
 4. **Umbrales**: mapping_confidence, zona gris de deteccion y confianza de
    clasificacion deben haberse traducido en revision humana cuando toca.
 
@@ -23,13 +23,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from src.agents.predictive_sanitization import (
+from src.contracts.leakage import (
     contains_predictive_target_text,
+    is_allowed_canonical_target_path,
     is_predictive_target_field,
     is_predictive_target_value,
 )
 from src.contracts.case import CaseResult
-from src.mcp.standardization_guard import is_allowed_canonical_target_path
 
 GRAY_ZONE_LOW = 0.4
 GRAY_ZONE_HIGH = 0.6
@@ -78,7 +78,7 @@ BEHAVIORAL_FIELD_ALLOWLIST = {"attack_indicators"}
 
 
 def canonical_leakage_issues(canonical_event: dict[str, Any]) -> list[str]:
-    """Problemas de target leakage en un evento canonico ya sanitizado.
+    """Problemas de target leakage en un evento canonico ya preparado.
 
     Un evento del flujo final NO debe llevar valores en NINGUNA clave target
     del nivel superior (label_raw, attack_family, label, class...), ni

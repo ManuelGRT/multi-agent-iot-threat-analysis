@@ -8,7 +8,7 @@ from typing import Any
 
 import joblib
 
-from src.agents.predictive_sanitization import is_predictive_target_field, scrub_predictive_payload
+from src.eval.predictive_sanitization import is_predictive_target_field, scrub_predictive_payload
 from src.contracts.agents import ClassificationOutput, DetectionOutput
 from src.contracts.canonical import CanonicalEvent
 

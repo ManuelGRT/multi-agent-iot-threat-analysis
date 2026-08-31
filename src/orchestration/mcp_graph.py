@@ -55,6 +55,16 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _optional_float_env(name: str) -> float | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def default_mitigator_llm() -> LLMMitigationAgent:
     """Construye el backend LLM del mitigador desde variables de entorno.
 
@@ -63,8 +73,6 @@ def default_mitigator_llm() -> LLMMitigationAgent:
     como provider global. Por defecto: mistral-small-latest si el proveedor
     es mistral (plan F4), o el modelo Ollama del resto de agentes.
     """
-    from src.orchestration.graph import _optional_float_env
-
     provider = (
         os.getenv("MITIGATOR_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "ollama"
     ).strip().lower()

@@ -32,6 +32,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from src.eval.data_sanitization import sanitize_llm_input
+
 csv.field_size_limit(10_000_000)
 
 REPO = Path(__file__).resolve().parents[1]
@@ -199,13 +201,16 @@ def build_manifest(spec: dict, seed: int, out_dir: Path) -> dict:
             cls, is_attack = spec["labeler"](row)
             if cls is None:
                 continue
+            # Las etiquetas se extraen antes; el artefacto que entra en el
+            # sistema multiagente se prepara aqui, fuera del runtime.
+            prepared_row = sanitize_llm_input({"row": row})["row"]
             if cls not in reservoirs:
                 base = BINARY_QUOTA_PER_SIDE if cls == normal_class else mc_quota
                 reservoirs[cls] = ClassReservoir(int(base * OVERSAMPLE) + 50, seed, f"{name}:{cls}")
             reservoirs[cls].offer({
-                "source_file": rel, "row_id": idx, "row": row,
+                "source_file": rel, "row_id": idx, "row": prepared_row,
                 "class": cls, "is_attack": is_attack,
-            }, row_digest(row))
+            }, row_digest(prepared_row))
 
     availability = {
         cls: {"rows": r.seen, "distinct": r.distinct}
@@ -301,10 +306,7 @@ def build_manifest(spec: dict, seed: int, out_dir: Path) -> dict:
     manifest_path = out_dir / f"{name}_manifest.jsonl"
     with open(manifest_path, "w", encoding="utf-8") as fh:
         for item in selected:
-            row_features = {
-                k: v for k, v in item["row"].items()
-                if k.strip().lower() not in TARGET_COLS
-            }
+            row_features = sanitize_llm_input({"row": item["row"]})["row"]
             fh.write(json.dumps({
                 "manifest_id": f"{name}::{item['source_file']}::{item['row_id']}",
                 "dataset": name,

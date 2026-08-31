@@ -121,7 +121,8 @@ def test_benign_case_skips_classification_but_is_judged():
     agents = stub_bundle(
         {
             ("inference", "standardize_event"): standardize_ok(
-                selected_columns=["temp"]
+                selected_columns=["temp"],
+                dataset="ton_iot",
             ),
             ("inference", "detect_event"): detect_ok(0.03),
         }
@@ -154,7 +155,12 @@ def test_gray_zone_case_abstains_to_human_review():
 
 def test_low_mapping_confidence_goes_straight_to_judge():
     agents = stub_bundle(
-        {("inference", "standardize_event"): standardize_ok(mapping_confidence=0.2)}
+        {
+            ("inference", "standardize_event"): standardize_ok(
+                mapping_confidence=0.2,
+                dataset="generic",
+            )
+        }
     )
     case = run_case({"dataset": "generic", "text": "algo raro"}, agents=agents)
 
@@ -367,7 +373,7 @@ def test_edge_iiotset_event_full_pipeline_with_prepared_models():
     assert case.explanation.mitigations
     assert case.explanation.references
     assert case.explanation.source == "catalog"
-    # sanitizacion: el evento canonico del caso no arrastra targets
+    # precondicion de entrada: el evento canonico del caso no arrastra targets
     assert case.canonical_event.get("label_raw") is None
     assert case.canonical_event.get("attack_family") is None
 

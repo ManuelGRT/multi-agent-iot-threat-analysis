@@ -11,10 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agents.predictive_sanitization import is_predictive_target_field
 from src.agents.supervised_general import GeneralizedFeatureStandardizer
 from src.contracts.canonical import CanonicalEvent
-from src.mcp.standardization_guard import sanitize_canonical_event
 
 _STANDARDIZER = GeneralizedFeatureStandardizer(include_origin=False, feature_set="full")
 _FORBIDDEN_PREFIXES = (
@@ -33,15 +31,18 @@ _FORBIDDEN_KEYS = {
 
 
 def event_features(event_data: dict[str, Any] | CanonicalEvent) -> dict[str, Any]:
-    # Defensa final para llamadas MCP directas que no hayan atravesado el
-    # grafo. La politica vive fuera de los agentes y falla cerrado al validar.
-    event = CanonicalEvent(**sanitize_canonical_event(event_data))
+    # Proyeccion fija compartida con el entrenamiento. La entrada operacional
+    # ya debe estar libre de targets; aqui no se elimina ni reescribe ningun
+    # campo del evento.
+    event = (
+        event_data
+        if isinstance(event_data, CanonicalEvent)
+        else CanonicalEvent(**event_data)
+    )
     features = _STANDARDIZER.event_to_features(event)
     clean: dict[str, Any] = {}
     for key, value in features.items():
         key_text = str(key)
-        if is_predictive_target_field(key_text):
-            continue
         if key_text.startswith(_FORBIDDEN_PREFIXES):
             continue
         if key_text in _FORBIDDEN_KEYS:

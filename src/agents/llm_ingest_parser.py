@@ -17,12 +17,7 @@ from src.agents.base import (
     OpenRouterChatAgent,
     TransformersChatAgent,
 )
-from src.agents.predictive_sanitization import is_predictive_target_field, scrub_predictive_payload
 from src.contracts.canonical import CanonicalEvent, Provenance
-from src.mcp.standardization_guard import (
-    is_allowed_raw_technical_field,
-    sanitize_llm_input,
-)
 
 
 CANONICAL_FIELDS = {
@@ -54,6 +49,8 @@ CANONICAL_FIELDS = {
     "provenance",
     "mapping_confidence",
 }
+
+LLM_PARSER_VERSION = "llm-0.2.0"
 
 
 LLM_INGEST_SYSTEM = """
@@ -117,6 +114,7 @@ Responde exclusivamente con JSON valido.
 
 COLUMN_SELECTION_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "selected_columns": {"type": "array", "items": {"type": "string"}},
         "modality_guess": {"type": ["string", "null"]},
@@ -129,6 +127,7 @@ COLUMN_SELECTION_SCHEMA = {
 
 CANONICAL_EVENT_SCHEMA = {
     "type": "object",
+    "additionalProperties": False,
     "properties": {
         "event_id": {"type": "string"},
         "modality": {"type": "string", "enum": ["network_flow", "telemetry", "host_log", "alert", "pcap_ref"]},
@@ -163,6 +162,7 @@ CANONICAL_EVENT_SCHEMA = {
         "semantic_text": {"type": "string", "minLength": 1},
         "provenance": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "dataset": {"type": "string"},
                 "source_file": {"type": ["string", "null"]},
@@ -241,7 +241,10 @@ def _validate_json_schema(value: Any, schema: dict[str, Any], path: str) -> None
         )
     if "enum" in schema and value not in schema["enum"]:
         raise ValueError(f"respuesta LLM invalida en {path}: valor fuera del enum")
-    if isinstance(value, str) and len(value) < int(schema.get("minLength", 0)):
+    if (
+        isinstance(value, str)
+        and len(value.strip()) < int(schema.get("minLength", 0))
+    ):
         raise ValueError(f"respuesta LLM invalida en {path}: texto vacio")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         if "minimum" in schema and value < schema["minimum"]:
@@ -259,7 +262,11 @@ def _validate_json_schema(value: Any, schema: dict[str, Any], path: str) -> None
         for key, item in value.items():
             child_schema = properties.get(key)
             if child_schema is None:
-                child_schema = schema.get("additionalProperties")
+                child_schema = schema.get("additionalProperties", True)
+                if child_schema is False:
+                    raise ValueError(
+                        f"respuesta LLM invalida en {path}: campo no permitido {key!r}"
+                    )
             if isinstance(child_schema, dict):
                 _validate_json_schema(item, child_schema, f"{path}.{key}")
     if isinstance(value, list) and isinstance(schema.get("items"), dict):
@@ -385,7 +392,7 @@ class LLMIngestParser:
                 raise RuntimeError("fallo la seleccion de columnas mediante LLM") from exc
             selected = []
 
-        columns = self._sanitize_selected_columns(selected, row)
+        columns = self._validated_selected_columns(selected, row)
         if not columns:
             if self.require_llm_column_selection:
                 raise ValueError("el LLM no selecciono ninguna columna tecnica valida")
@@ -394,20 +401,16 @@ class LLMIngestParser:
 
     def _column_selection_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         row = raw_input.get("row") or {}
-        safe_row = (
-            sanitize_llm_input({"row": row})["row"]
-            if isinstance(row, dict)
-            else {}
-        )
-        columns = list(safe_row)
+        input_row = row if isinstance(row, dict) else {}
+        columns = list(input_row)
         return {
-            "total_columns": len(row) if isinstance(row, dict) else len(columns),
+            "total_columns": len(input_row),
             "max_selected_columns": self.max_selected_columns,
             "columns": [str(key) for key in columns],
             "value_previews": {
-                str(key): self._value_preview(safe_row.get(key))
+                str(key): self._value_preview(input_row.get(key))
                 for key in columns
-                if not self._is_empty_or_zero(safe_row.get(key))
+                if not self._is_empty_or_zero(input_row.get(key))
             },
             "canonical_output_fields": [
                 "origin",
@@ -443,14 +446,20 @@ class LLMIngestParser:
             return text
         return text[:limit] + "..."
 
-    def _sanitize_selected_columns(self, selected: Any, row: dict[str, Any]) -> list[str]:
+    def _validated_selected_columns(self, selected: Any, row: dict[str, Any]) -> list[str]:
+        """Conserva solo columnas existentes, sin decidir cuales son targets.
+
+        La retirada de targets corresponde al preprocesamiento offline. En el
+        runtime esta funcion valida la respuesta del LLM, pero no limpia la
+        fila recibida ni aplica una seleccion determinista por etiqueta.
+        """
         if not isinstance(selected, list):
             selected = []
         available = {str(key): key for key in row}
         ordered = []
         for column in selected:
             key = available.get(str(column))
-            if key is not None and key not in ordered and not self._is_label_like_key(key):
+            if key is not None and key not in ordered:
                 ordered.append(key)
 
         if not self.require_llm_column_selection:
@@ -544,7 +553,7 @@ class LLMIngestParser:
         filtered = {
             key: value
             for key, value in row.items()
-            if str(key) in selected and not self._is_label_like_key(key)
+            if str(key) in selected
         }
         copy = dict(raw_input)
         copy["row"] = filtered
@@ -569,15 +578,26 @@ class LLMIngestParser:
     ) -> dict[str, Any]:
         row = raw_input.get("row")
         if not isinstance(row, dict):
-            return raw_input
+            return {
+                "text": str(raw_input.get("text") or ""),
+                "schema_profiles": [
+                    "network_flow",
+                    "network_packet",
+                    "host_metrics",
+                    "iot_telemetry",
+                    "alert_text",
+                    "pcap_ref",
+                    "unknown",
+                ],
+                "instruction": "Infer schema_profile and map the text to the canonical cybersecurity event schema without generating attack labels, families or subtypes.",
+            }
 
-        safe_row = sanitize_llm_input({"row": row})["row"]
         meaningful = {
             str(key): value
-            for key, value in safe_row.items()
+            for key, value in row.items()
             if not self._is_empty_or_zero(value)
         }
-        columns = list(safe_row)
+        columns = list(row)
         compacted = {
             "columns": [str(key) for key in columns],
             "meaningful_values": meaningful,
@@ -609,8 +629,6 @@ class LLMIngestParser:
 
     def _complete_payload(self, payload: dict[str, Any], raw_input: dict[str, Any]) -> dict[str, Any]:
         payload = self._clean_empty_values(payload)
-        for target_field in ("label_raw", "attack_family", "attack_subtype"):
-            payload.pop(target_field, None)
         origin = self._origin_from_raw(raw_input)
         dataset = str(origin.get("source_name") or "generic")
         source_file = raw_input.get("source_file", "inline")
@@ -620,7 +638,7 @@ class LLMIngestParser:
         payload["event_id"] = f"llm::{dataset}::{source_file}::{row_id}"
         payload["modality"] = self._normalize_modality(payload.get("modality"), raw_input)
         if not payload.get("semantic_text"):
-            payload["semantic_text"] = str(raw_input)
+            payload["semantic_text"] = self._technical_semantic_fallback(raw_input)
         if payload.get("mapping_confidence") is None:
             payload["mapping_confidence"] = 0.5
         payload["schema_profile"] = self._normalize_schema_profile(payload.get("schema_profile"), payload, raw_input)
@@ -644,12 +662,9 @@ class LLMIngestParser:
         payload.setdefault("telemetry", {})
         payload.setdefault("host", {})
         payload["ts"] = self._normalize_timestamp(payload.get("ts"), raw_input)
-        payload["telemetry"] = scrub_predictive_payload(self._compact_object(payload.get("telemetry"), primitive_only=True))
-        payload["host"] = scrub_predictive_payload(self._compact_object(payload.get("host")))
+        payload["telemetry"] = self._compact_object(payload.get("telemetry"), primitive_only=True)
+        payload["host"] = self._compact_object(payload.get("host"))
         self._preserve_unmapped_technical_values(payload, raw_input)
-        payload["semantic_text"] = scrub_predictive_payload(payload.get("semantic_text") or "")
-        payload["feature_groups"] = scrub_predictive_payload(payload.get("feature_groups") or {})
-        payload["evidence_fields"] = scrub_predictive_payload(payload.get("evidence_fields") or [])
         for key in ("src_port", "dst_port", "packet_count", "byte_count"):
             payload[key] = self._normalize_optional_int(payload.get(key))
         payload["duration_ms"] = self._normalize_optional_float(payload.get("duration_ms"))
@@ -669,15 +684,32 @@ class LLMIngestParser:
             source_file=None if source_file is None else str(source_file),
             row_id=row_id,
             split=split,
-            parser_version="llm-0.1.0",
+            parser_version=LLM_PARSER_VERSION,
         ).model_dump(mode="json")
         return payload
+
+    @staticmethod
+    def _technical_semantic_fallback(raw_input: dict[str, Any]) -> str:
+        """Build a fallback only from event content, never its identity envelope."""
+
+        row = raw_input.get("row")
+        if isinstance(row, dict) and row:
+            return json.dumps(
+                row,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        text = raw_input.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+        return "technical event without semantic summary"
 
     def _preserve_unmapped_technical_values(self, payload: dict[str, Any], raw_input: dict[str, Any]) -> None:
         row = raw_input.get("row")
         if not isinstance(row, dict):
             return
-        row = sanitize_llm_input({"row": row})["row"]
         telemetry = payload.get("telemetry")
         host = payload.get("host")
         if not isinstance(telemetry, dict):
@@ -687,7 +719,7 @@ class LLMIngestParser:
         mapped_names = {str(key) for key in telemetry} | {str(key) for key in host}
         for key, value in row.items():
             key_text = str(key)
-            if key_text in mapped_names or self._is_blank(value) or self._is_label_like_key(key_text):
+            if key_text in mapped_names or self._is_blank(value):
                 continue
             group = self._generic_feature_group(key_text)
             target = host if payload.get("modality") == "host_log" or group == "host_metrics" else telemetry
@@ -695,8 +727,8 @@ class LLMIngestParser:
             mapped_names.add(key_text)
             if len(telemetry) + len(host) >= 120:
                 break
-        payload["telemetry"] = scrub_predictive_payload(self._compact_object(telemetry, primitive_only=True))
-        payload["host"] = scrub_predictive_payload(self._compact_object(host))
+        payload["telemetry"] = self._compact_object(telemetry, primitive_only=True)
+        payload["host"] = self._compact_object(host)
 
     @staticmethod
     def _primitive_feature_value(value: Any) -> Any:
@@ -802,7 +834,7 @@ class LLMIngestParser:
             return {}
         groups: dict[str, list[str]] = {}
         for key, value in row.items():
-            if self._is_blank(value) or self._is_label_like_key(key):
+            if self._is_blank(value):
                 continue
             group = self._generic_feature_group(str(key))
             groups.setdefault(group, []).append(str(key))
@@ -854,9 +886,6 @@ class LLMIngestParser:
             return "statistics"
         return "other"
 
-    def _is_label_like_key(self, key: Any) -> bool:
-        return is_predictive_target_field(key) and not is_allowed_raw_technical_field(key)
-
     def _clean_empty_values(self, value: Any) -> Any:
         if isinstance(value, dict):
             return {key: self._clean_empty_values(item) for key, item in value.items()}
@@ -903,22 +932,6 @@ class LLMIngestParser:
         for key, value in row.items():
             if str(key).strip().lower() == expected_key:
                 return value
-        return None
-
-    def _first_label_candidate(
-        self,
-        row: dict[str, Any],
-        include_tokens: tuple[str, ...],
-        exclude_tokens: tuple[str, ...],
-        reject_binary: bool = False,
-    ) -> Any:
-        for key, value in row.items():
-            normalized = str(key).lower()
-            if any(token in normalized for token in include_tokens) and not any(token in normalized for token in exclude_tokens):
-                if not self._is_blank(value):
-                    if reject_binary and str(value).strip().lower() in {"0", "0.0", "1", "1.0", "true", "false"}:
-                        continue
-                    return value
         return None
 
     def _calibrate_mapping_confidence(self, value: Any, payload: dict[str, Any]) -> float:

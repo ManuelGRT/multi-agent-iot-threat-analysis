@@ -107,10 +107,13 @@ def release_system_awake(platform_name: str | None = None, setter=None) -> bool:
 
 def standardize_one(entry: dict) -> dict:
     """Estandariza una fila por la misma tool estricta del flujo final."""
-    from src.agents.predictive_sanitization import is_predictive_target_field
+    from src.eval.predictive_sanitization import is_predictive_target_field
     from src.mcp.inference_server import standardize_event
     from src.mcp.standardization_contract import validate_standardization_success
-    from src.mcp.standardization_guard import is_allowed_raw_technical_field
+    from src.eval.data_sanitization import (
+        is_allowed_raw_technical_field,
+        sanitize_llm_input,
+    )
 
     row = entry["row"]
     leaked = [
@@ -121,6 +124,11 @@ def standardize_one(entry: dict) -> dict:
     ]
     if leaked:
         raise RuntimeError(f"target en features del manifiesto: {leaked} ({entry['manifest_id']})")
+    if sanitize_llm_input({"row": row})["row"] != row:
+        raise RuntimeError(
+            "la fila del manifiesto no fue sanitizada durante la preparacion: "
+            + str(entry["manifest_id"])
+        )
 
     t0 = time.time()
     result = standardize_event(
@@ -128,6 +136,8 @@ def standardize_one(entry: dict) -> dict:
         row=row,
         source_file=entry["source_file"],
         row_id=entry["row_id"],
+        split=entry.get("split") or "stream",
+        cache_mode="bypass",
     )
     try:
         validated = validate_standardization_success(
@@ -136,6 +146,7 @@ def standardize_one(entry: dict) -> dict:
                 "row": row,
                 "source_file": entry["source_file"],
                 "row_id": entry["row_id"],
+                "split": entry.get("split") or "stream",
             },
             result,
         )
@@ -164,6 +175,7 @@ def standardize_one(entry: dict) -> dict:
         "manifest_id": entry["manifest_id"],
         "ok": True,
         "parsed_by_llm": True,
+        "from_cache": validated["from_cache"],
         "provider": validated["provider"],
         "model": validated["model"],
         "notes": validated["notes"],

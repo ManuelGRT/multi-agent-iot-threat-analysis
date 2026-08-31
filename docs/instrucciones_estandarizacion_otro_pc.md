@@ -15,6 +15,8 @@ y relanzar sin perder trabajo.
 
 Cada fila tabular requiere dos llamadas (selección de columnas y extracción).
 La duración y el coste dependen de la cuota y tarifa vigentes del proveedor.
+Este runner fuerza `cache_mode=bypass`: la caché operativa del sistema no
+interviene y cada resultado aceptado corresponde a una llamada en vivo.
 
 ## 1. Qué copiar a la máquina
 

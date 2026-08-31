@@ -335,12 +335,17 @@ def test_datasets_load_standardized_sample():
 class FakeLLMParser:
     """Doble hermetico del parser Mistral; nunca usa red ni adaptadores."""
 
-    def __init__(self, event: dict | None = None, error: Exception | None = None):
+    def __init__(
+        self,
+        event: dict | None = None,
+        error: Exception | None = None,
+        selected_columns: list[str] | None = None,
+    ):
         self.event = dict(event or CANONICAL_EVENT)
         self.error = error
         self.agent = SimpleNamespace(model="mistral-small-2603")
         self.last_column_selection = {
-            "selected_columns": ["proto", "duration", "orig_pkts"]
+            "selected_columns": list(selected_columns or ["proto"])
         }
         self.received: dict | None = None
 
@@ -351,17 +356,10 @@ class FakeLLMParser:
         return CanonicalEvent(**self.event)
 
 
-def test_standardize_event_always_uses_mistral_and_sanitizes(monkeypatch):
+def test_standardize_event_forwards_input_without_runtime_sanitization(monkeypatch):
     import src.mcp.inference_server as inference_server
 
-    leaky = {
-        **CANONICAL_EVENT,
-        "label_raw": "Mirai",
-        "attack_family": "malware",
-        "semantic_text": "tcp flow label=Mirai",
-        "telemetry": {"attack_type": "malware", "temperature": 21.5},
-    }
-    parser = FakeLLMParser(leaky)
+    parser = FakeLLMParser(selected_columns=["proto", "label"])
     monkeypatch.setattr(inference_server, "_build_llm_parser", lambda: parser)
 
     result = inference_server.standardize_event(
@@ -369,20 +367,17 @@ def test_standardize_event_always_uses_mistral_and_sanitizes(monkeypatch):
         row={"proto": "tcp", "label": "Mirai"},
         source_file="test.log",
         row_id=999999,
+        cache_mode="bypass",
     )
 
     assert result["ok"] is True
     assert parser.received is not None
-    assert "label" not in parser.received["row"]
+    assert parser.received["row"] == {"proto": "tcp", "label": "Mirai"}
     assert parser.received["use_column_selection"] is True
     assert result["from_cache"] is False
     assert result["model"] == "mistral-small-2603"
-    assert result["selected_columns"] == ["proto", "duration", "orig_pkts"]
-    assert result["canonical_event"]["label_raw"] is None
-    assert result["canonical_event"]["attack_family"] is None
-    assert "Mirai" not in result["canonical_event"]["semantic_text"]
-    assert "attack_type" not in result["canonical_event"]["telemetry"]
-    assert result["canonical_event"]["telemetry"]["temperature"] == 21.5
+    assert result["selected_columns"] == ["proto", "label"]
+    assert result["notes"] == ["parsed_by_llm", "source:mistral_live"]
 
 
 def test_standardize_event_llm_failure_is_controlled_abstention(monkeypatch):
@@ -396,6 +391,7 @@ def test_standardize_event_llm_failure_is_controlled_abstention(monkeypatch):
         row={"proto": "tcp"},
         source_file="test.log",
         row_id=7,
+        cache_mode="bypass",
     )
 
     assert result["ok"] is False
@@ -406,27 +402,85 @@ def test_standardize_event_llm_failure_is_controlled_abstention(monkeypatch):
     assert "canonical_event" not in result
 
 
-def test_standardize_event_abstains_if_guard_removes_all_input_fields(monkeypatch):
+def test_standardize_event_does_not_filter_target_like_input(monkeypatch):
     import src.mcp.inference_server as inference_server
 
-    monkeypatch.setattr(
-        inference_server,
-        "_build_llm_parser",
-        lambda: pytest.fail("no debe llamar a Mistral sin evidencia tecnica"),
-    )
+    parser = FakeLLMParser(selected_columns=["risk", "family_hint"])
+    monkeypatch.setattr(inference_server, "_build_llm_parser", lambda: parser)
 
     result = inference_server.standardize_event(
         dataset="iot23",
         row={"risk": "Mirai", "family_hint": "DDoS"},
+        cache_mode="bypass",
+    )
+
+    assert result["ok"] is True
+    assert parser.received["row"] == {"risk": "Mirai", "family_hint": "DDoS"}
+
+
+def test_standardize_event_rejects_dirty_llm_output_instead_of_cleaning(monkeypatch):
+    import src.mcp.inference_server as inference_server
+
+    leaky = {
+        **CANONICAL_EVENT,
+        "label_raw": "Mirai",
+        "telemetry": {"attack_type": "malware", "temperature": 21.5},
+    }
+    monkeypatch.setattr(
+        inference_server,
+        "_build_llm_parser",
+        lambda: FakeLLMParser(leaky),
+    )
+
+    result = inference_server.standardize_event(
+        dataset="iot23",
+        row={"proto": "tcp"},
+        cache_mode="bypass",
     )
 
     assert result["ok"] is False
     assert result["abstain"] is True
     assert result["requires_human_review"] is True
-    assert (
-        result["failure_code"]
-        == "standardization_input_without_technical_fields"
+    assert "campo predictivo no permitido" in result["error"]
+
+
+@pytest.mark.parametrize(
+    "dirty_fields,expected_error",
+    [
+        (
+            {"semantic_text": "tcp flow label=Mirai"},
+            "patron predictivo no permitido",
+        ),
+        (
+            {"telemetry": {"risk": "Mirai", "temperature": 21.5}},
+            "valor predictivo no permitido",
+        ),
+    ],
+)
+def test_standardize_event_rejects_dirty_llm_values_without_rewriting(
+    monkeypatch,
+    dirty_fields,
+    expected_error,
+):
+    import src.mcp.inference_server as inference_server
+
+    dirty_event = {**CANONICAL_EVENT, **dirty_fields}
+    monkeypatch.setattr(
+        inference_server,
+        "_build_llm_parser",
+        lambda: FakeLLMParser(dirty_event),
     )
+
+    result = inference_server.standardize_event(
+        dataset="iot23",
+        row={"proto": "tcp"},
+        cache_mode="bypass",
+    )
+
+    assert result["ok"] is False
+    assert result["abstain"] is True
+    assert expected_error in result["error"]
+    assert "canonical_event" not in result
 
 
 @pytest.mark.asyncio
@@ -439,13 +493,117 @@ async def test_standardize_event_can_run_inside_an_active_event_loop(monkeypatch
     result = inference_server.standardize_event(
         dataset="iot23",
         row={"proto": "tcp"},
+        cache_mode="bypass",
     )
 
     assert result["ok"] is True
     assert result["source"] == "llm"
 
 
-def test_standardize_event_prestandardized_is_guarded_without_llm(monkeypatch):
+def test_standardize_event_reuses_mistral_cache_for_exact_duplicate_and_rebinds_identity(
+    monkeypatch,
+    tmp_path,
+):
+    import src.mcp.inference_server as inference_server
+
+    monkeypatch.setenv(
+        "TFM_STANDARDIZATION_CACHE_DB",
+        str(tmp_path / "mistral_standardization.sqlite3"),
+    )
+    inference_server._CACHE_INSTANCES.clear()
+    parser = FakeLLMParser(selected_columns=["proto"])
+    builds = 0
+
+    def build_parser():
+        nonlocal builds
+        builds += 1
+        return parser
+
+    monkeypatch.setattr(inference_server, "_build_llm_parser", build_parser)
+
+    first = inference_server.standardize_event(
+        dataset="iot23",
+        row={"z_metric": 2, "proto": "tcp"},
+        source_file="first.csv",
+        row_id=1,
+        split="train",
+    )
+    second = inference_server.standardize_event(
+        dataset="edge_iiotset",
+        row={"proto": "tcp", "z_metric": 2},
+        source_file="duplicate.csv",
+        row_id=99,
+        split="test",
+    )
+
+    assert first["ok"] is True and first["from_cache"] is False
+    assert second["ok"] is True and second["from_cache"] is True
+    assert builds == 1
+    assert list(parser.received["row"]) == ["proto", "z_metric"]
+    assert first["canonical_event"]["event_id"] == "llm::iot23::first.csv::1"
+    assert first["canonical_event"]["origin"]["row_id"] == 1
+    assert first["canonical_event"]["provenance"]["dataset"] == "iot23"
+    assert first["canonical_event"]["provenance"]["split"] == "train"
+    assert second["canonical_event"]["event_id"] == (
+        "llm::edge_iiotset::duplicate.csv::99"
+    )
+    assert second["canonical_event"]["origin"]["row_id"] == 99
+    assert second["canonical_event"]["provenance"]["dataset"] == "edge_iiotset"
+    assert second["canonical_event"]["provenance"]["split"] == "test"
+    assert second["cache_content_hash"] == first["cache_content_hash"]
+    assert second["notes"] == ["parsed_by_llm", "source:mistral_cache"]
+
+
+def test_invalid_blank_semantic_output_is_not_cached_for_later_duplicates(
+    monkeypatch,
+    tmp_path,
+):
+    import src.mcp.inference_server as inference_server
+
+    monkeypatch.setenv(
+        "TFM_STANDARDIZATION_CACHE_DB",
+        str(tmp_path / "mistral_standardization.sqlite3"),
+    )
+    inference_server._CACHE_INSTANCES.clear()
+    invalid_event = {**CANONICAL_EVENT, "semantic_text": "   "}
+    parsers = iter(
+        [
+            FakeLLMParser(invalid_event, selected_columns=["proto"]),
+            FakeLLMParser(selected_columns=["proto"]),
+        ]
+    )
+    builds = 0
+
+    def build_parser():
+        nonlocal builds
+        builds += 1
+        return next(parsers)
+
+    monkeypatch.setattr(inference_server, "_build_llm_parser", build_parser)
+
+    first = inference_server.standardize_event(
+        dataset="first_dataset",
+        row={"proto": "tcp"},
+        source_file="first.csv",
+        row_id=1,
+    )
+    second = inference_server.standardize_event(
+        dataset="second_dataset",
+        row={"proto": "tcp"},
+        source_file="second.csv",
+        row_id=2,
+    )
+
+    assert first["ok"] is False
+    assert second["ok"] is True
+    assert second["from_cache"] is False
+    assert builds == 2
+    assert second["canonical_event"]["event_id"] == (
+        "llm::second_dataset::second.csv::2"
+    )
+
+
+def test_standardize_event_rejects_dirty_prestandardized_without_llm(monkeypatch):
     import src.mcp.inference_server as inference_server
 
     def unexpected_llm():
@@ -463,11 +621,33 @@ def test_standardize_event_prestandardized_is_guarded_without_llm(monkeypatch):
         canonical_event=leaky,
     )
 
-    assert result["ok"] is True
-    assert result["model"] == "prestandardized_passthrough"
-    assert result["from_cache"] is False
-    assert result["canonical_event"]["label_raw"] is None
-    assert "attack_type" not in result["canonical_event"]["telemetry"]
+    assert result["ok"] is False
+    assert result["abstain"] is True
+    assert result["failure_code"] == "canonical_event_invalid"
+    assert "canonical_event" not in result
+
+
+def test_standardize_event_rejects_unknown_provenance_field_without_rewriting(
+    monkeypatch,
+):
+    import src.mcp.inference_server as inference_server
+
+    monkeypatch.setattr(
+        inference_server,
+        "_build_llm_parser",
+        lambda: pytest.fail("un CanonicalEvent no debe volver a Mistral"),
+    )
+    provenance = dict(CANONICAL_EVENT["provenance"])
+    provenance["label"] = "Mirai"
+
+    result = inference_server.standardize_event(
+        dataset="edge_iiotset",
+        canonical_event={**CANONICAL_EVENT, "provenance": provenance},
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "canonical_event_invalid"
+    assert "extra_forbidden" in result["error"]
 
 
 def test_standardize_event_rejects_ambiguous_raw_and_canonical_input(monkeypatch):
@@ -489,6 +669,56 @@ def test_standardize_event_rejects_ambiguous_raw_and_canonical_input(monkeypatch
     assert result["abstain"] is True
     assert result["requires_human_review"] is True
     assert result["failure_code"] == "standardization_input_ambiguous"
+
+
+def test_standardize_event_rejects_ambiguous_row_and_text(monkeypatch):
+    import src.mcp.inference_server as inference_server
+
+    monkeypatch.setattr(
+        inference_server,
+        "_build_llm_parser",
+        lambda: pytest.fail("una entrada ambigua no debe invocar Mistral"),
+    )
+
+    result = inference_server.standardize_event(
+        dataset="iot23",
+        row={"proto": "tcp"},
+        text="proto=tcp",
+    )
+
+    assert result["ok"] is False
+    assert result["abstain"] is True
+    assert result["failure_code"] == "standardization_input_ambiguous"
+
+
+def test_standardize_event_rejects_unsupported_read_only_cache_mode(monkeypatch):
+    import src.mcp.inference_server as inference_server
+
+    monkeypatch.setattr(
+        inference_server,
+        "_build_llm_parser",
+        lambda: pytest.fail("un modo invalido no debe invocar Mistral"),
+    )
+
+    result = inference_server.standardize_event(
+        dataset="iot23",
+        row={"proto": "tcp"},
+        cache_mode="read_only",
+    )
+
+    assert result["ok"] is False
+    assert result["failure_code"] == "standardization_input_invalid"
+
+
+def test_predictive_tool_rejects_dirty_canonical_event_without_sanitizing():
+    import src.mcp.inference_server as inference_server
+
+    result = inference_server.detect_event(
+        {**CANONICAL_EVENT, "label_raw": "Mirai"}
+    )
+
+    assert result["ok"] is False
+    assert "campo predictivo no permitido" in result["error"]
     assert "canonical_event" not in result
 
 
@@ -552,6 +782,7 @@ def test_feature_parity_with_training_script():
         pytest.skip(f"script de entrenamiento no importable aqui: {exc}")
 
     from src.mcp.features import event_features
+    from src.eval.data_sanitization import sanitize_canonical_event
 
     parity_event = {
         **CANONICAL_EVENT,
@@ -567,7 +798,10 @@ def test_feature_parity_with_training_script():
         "telemetry": {"temperature": 21.5, "risk": "Mirai"},
         "host": {"cpu": 12.0, "family_hint": "DDoS"},
     }
-    ours = event_features(parity_event)
+    # La sanitizacion pertenece al preprocesamiento de entrenamiento/evaluacion,
+    # no a ``event_features`` ni al runtime.
+    prepared_event = sanitize_canonical_event(parity_event)
+    ours = event_features(prepared_event)
     theirs = module.event_features(parity_event)
     assert ours == theirs
 

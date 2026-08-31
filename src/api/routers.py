@@ -4,12 +4,21 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-
-from src.agents.ingest_parser import ADAPTERS
-
+from pydantic import BaseModel, ConfigDict, Field
 
 router = APIRouter()
+LEGACY_SUPPORTED_DATASETS = (
+    "bot-iot",
+    "bot_iot",
+    "edge-iiotset",
+    "edge_iiotset",
+    "generic",
+    "iot-23",
+    "iot23",
+    "ton-iot",
+    "ton_iot",
+    "unknown",
+)
 LEGACY_ANALYSIS_DETAIL = (
     "Endpoint retirado: usa /cases/analyze. El flujo final exige Mistral, "
     "abstencion controlada y revision por el juez."
@@ -32,6 +41,8 @@ class AnalyzeRequest(BaseModel):
 
 class CaseAnalyzeRequest(BaseModel):
     """Entrada del flujo final de casos (grafo MCP + agentes finales)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     dataset: str = Field(default="generic")
     row: dict[str, Any] | None = None
@@ -111,7 +122,7 @@ def adapt_event(request: AnalyzeRequest) -> dict[str, Any]:
 def supported_datasets() -> dict[str, Any]:
     """Metadatos de formatos legacy; no son rutas del flujo final."""
     return {
-        "datasets": sorted(ADAPTERS),
+        "datasets": list(LEGACY_SUPPORTED_DATASETS),
         "scope": "legacy_adapter_metadata_only",
         "analysis_endpoint": "/cases/analyze",
     }

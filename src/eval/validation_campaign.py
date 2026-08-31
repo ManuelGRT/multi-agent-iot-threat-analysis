@@ -24,10 +24,10 @@ from statistics import fmean
 from typing import Any, Iterable, Iterator, Literal, Mapping, Sequence
 import unicodedata
 
-from src.agents.predictive_sanitization import is_predictive_target_field
+from src.eval.predictive_sanitization import is_predictive_target_field
 from src.contracts.canonical import CanonicalEvent
 from src.mcp import features as canonical_features
-from src.mcp.standardization_guard import (
+from src.eval.data_sanitization import (
     ALLOWED_CANONICAL_TARGET_LIKE_PATHS as _ALLOWED_CANONICAL_TARGET_LIKE_PATHS,
 )
 

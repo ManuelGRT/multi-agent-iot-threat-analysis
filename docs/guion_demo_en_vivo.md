@@ -6,7 +6,7 @@
 > reformularlo explicitamente como resultado preliminar.
 
 **Proyecto:** `tfm_multiagent` · Sistema multiagente de ciberseguridad IoT/IIoT sobre MCP
-**Modo:** en vivo — toda entrada cruda usa Mistral obligatoriamente; la contextualización LLM del mitigador es opcional
+**Modo:** en vivo — la entrada llega limpia; un duplicado exacto puede reutilizar un éxito Mistral y todo *cache miss* exige Mistral; la contextualización LLM del mitigador es opcional
 **Duración estimada:** 15–20 minutos (los 5 bloques) · **Plan B:** modo `--offline` con `canonical_event` congelados (100 % determinista)
 
 ---
@@ -50,13 +50,13 @@ $env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # espera base si la respuesta n
 - La suite completa termina en verde (el número de pruebas puede crecer).
 - El ensayo offline termina con los 4 `canonical_event` congelados y
   **digests idénticos** a la referencia (`exit 0`). No llama al estandarizador
-  LLM: solo aplica la validación/sanitización técnica MCP. Si algo falla el
+  LLM: solo aplica la validación contractual MCP. Si algo falla el
   día de la demo, este es el plan B.
 
-> **Regla dura del proyecto:** en vivo solo se estandarizan **eventos
-> individuales**; nunca relanzar llamadas masivas a Mistral. La caché de la
-> campaña (13.837 entradas, 0 errores) es evidencia histórica y no una ruta de
-> inferencia ni un fallback del sistema final.
+> **Regla dura del proyecto:** el grafo recibe entradas limpias; la sanitización
+> anti-leakage se realiza antes, al preparar entrenamiento, validación y
+> evaluación. En operación, la caché SQLite por hash exacto solo reutiliza
+> éxitos Mistral para duplicados; un *miss* siempre requiere Mistral.
 
 ---
 
@@ -91,7 +91,7 @@ CAPEC y chequeo de fuga de etiquetas con un caso trampa que debe ser detectado.�
 **Qué contar:** «Ahora el flujo completo sobre cuatro eventos canónicos
 congelados: validación técnica → detección → clasificación → mitigación →
 juez, con auditoría en vivo de cada caso. Al estar ya estandarizados, no se
-repite Mistral; la sanitización es una frontera MCP, no una tarea del agente.
+repite Mistral; el runtime solo valida el contrato y no sanitiza.
 La mitigación combina el catálogo threat intel (base auditable) con el LLM,
 que solo contextualiza: nada fuera del catálogo puede presentarse como
 conocimiento auditado.»
@@ -154,10 +154,10 @@ auténtico contra el servidor de threat intel.»
 ## 4. Caso nuevo estandarizado EN VIVO por el LLM, en el frontal web (~5 min)
 
 **Qué contar:** «Hasta ahora hemos usado eventos canónicos congelados. Ahora
-entra un registro crudo que el sistema no ha visto nunca: Mistral realiza dos
-llamadas obligatorias, primero selecciona las columnas relevantes y después
-extrae el evento canónico. No hay caché ni adaptador de reserva. La frontera
-MCP valida y sanitiza la salida antes de que continúe el resto del flujo.»
+entra un registro crudo ya limpio. El runtime calcula su hash exacto: si no hay
+un éxito Mistral previo, Mistral realiza dos llamadas obligatorias, primero
+selecciona las columnas relevantes y después extrae el evento canónico. La
+salida se valida —no se limpia— antes de continuar. Nunca hay adaptador.»
 
 ### Qué hacer
 
@@ -203,10 +203,11 @@ proyección) y:
   y, plegado, el `CaseResult` JSON completo.
 
 **Remate del bloque:** explicar la degradación controlada real: si falla la
-selección, la extracción o la validación de Mistral, el estandarizador se
-abstiene, no inventa un evento mediante caché o adaptador, y el juez cierra el
-caso con `human_interrupt` / `needs_human_review`. La sanitización pertenece a
-la frontera técnica MCP y no constituye razonamiento del agente.
+selección, la extracción o la validación de Mistral después de un *cache miss*,
+el estandarizador se abstiene y el juez cierra el caso con `human_interrupt` /
+`needs_human_review`. Un *hit* solo puede reutilizar un éxito Mistral para el
+mismo contenido limpio y reconstruye identidad/procedencia; nunca se ejecuta
+un adaptador. La sanitización no forma parte del runtime ni del grafo.
 
 **Alternativa sin navegador** (por si falla la proyección): la misma llamada
 por consola con `Invoke-RestMethod http://127.0.0.1:8000/cases/analyze` y el
@@ -239,7 +240,7 @@ JSON del ejemplo (cuerpo con `"use_llm_mitigator": true`).
 
 | Riesgo | Señal | Reacción |
 |---|---|---|
-| API de Mistral caída o sin red | Abstención/timeout en el bloque 4 | El estandarizador no usa caché ni adaptador: deriva el registro al juez, que responde `human_interrupt`. El mitigador sí conserva su fallback independiente al catálogo. Continuar con los `canonical_event` congelados del modo offline |
+| API de Mistral caída o sin red | Abstención/timeout en el bloque 4 | Un duplicado exacto con éxito Mistral previo puede resolverse desde SQLite; ante *cache miss*, el estandarizador se abstiene y el juez responde `human_interrupt`. Nunca usa adaptadores. El mitigador sí conserva su fallback independiente al catálogo |
 | Rate limit de Mistral | HTTP 429 | Los reintentos están configurados (`MISTRAL_RATE_LIMIT_RETRIES`); esperar unos segundos y repetir la llamada |
 | Sin red total | Nada en vivo funciona | Ejecutar los bloques 1, 2 y 3 con `--offline`, usando los eventos canónicos congelados. El bloque de entrada cruda se sustituye por un `canonical_event` o se omite |
 | Respuesta LLM lenta en el bloque 4 | supera el timeout configurado | Si vence `INGEST_LLM_TIMEOUT_SECONDS`, se registra la abstención y el juez solicita revisión humana |

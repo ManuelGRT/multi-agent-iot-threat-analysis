@@ -8,7 +8,6 @@ from typing import Any
 
 import joblib
 
-from src.agents.predictive_sanitization import is_predictive_target_field
 from src.contracts.agents import ClassificationOutput, DetectionOutput
 from src.contracts.canonical import CanonicalEvent
 
@@ -79,11 +78,6 @@ class GeneralizedFeatureStandardizer:
         group_abs_log_sum: dict[str, float] = {}
         group_numeric_values: dict[str, list[float]] = {}
         for key, value in raw_values.items():
-            # Defensa en profundidad: una columna target desconocida para el
-            # adapter no debe quedar anonimizada dentro de estadisticas de
-            # grupo (p. ej. ground_truth -> group_mean.other).
-            if is_predictive_target_field(key):
-                continue
             group = feature_group(str(key))
             group_counts[group] = group_counts.get(group, 0) + 1
             features[f"has_group.{group}"] = 1

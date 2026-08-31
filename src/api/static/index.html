@@ -223,6 +223,8 @@ function pintarTarjetas(caso) {
     <div class="kv"><span class="k">Modelo</span><span>${std.model ?? "—"}</span></div>
     <div class="kv"><span class="k">Fuente</span><span>${std.source ?? "—"}</span></div>
     <div class="kv"><span class="k">Proveedor</span><span>${std.provider ?? "—"}</span></div>
+    <div class="kv"><span class="k">Caché Mistral</span><span>${std.from_cache ? "sí (duplicado exacto)" : "no (llamada en vivo o preestandarizado)"}</span></div>
+    ${std.cache_content_hash ? `<div class="kv"><span class="k">Hash del contenido</span><span title="${std.cache_content_hash}" style="font-size:11px">${std.cache_content_hash.slice(0, 16)}…</span></div>` : ""}
     <div class="kv"><span class="k">Perfil de esquema</span><span>${std.schema_profile ?? "—"}</span></div>
     <div class="kv"><span class="k">Modalidad</span><span>${std.modality ?? "—"}</span></div>
     <div class="kv"><span class="k">Confianza de mapeo</span><span>${pct(std.mapping_confidence)}</span></div>

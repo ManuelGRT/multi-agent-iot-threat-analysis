@@ -12,7 +12,7 @@ Casos (seleccion determinista):
                        Mistral (artefacto congelado 20260621): comparacion
                        directa con el TFM de Jorge (F1 0.9363 vs 0.7479).
                        Entra como ``canonical_event`` y solo atraviesa la
-                       validacion/sanitizacion tecnica del limite MCP.
+                       validacion estricta del contrato MCP.
 2. ton_iot_host      — evento canonico TON-IoT host conservado en el
                        artefacto historico de Mistral.
 3. ton_iot_telemetry — evento canonico TON-IoT telemetria conservado en el
@@ -175,7 +175,7 @@ def build_case_specs(scan_cap: int) -> list[dict[str, Any]]:
                 "name": "edge_iiotset",
                 "titulo": (
                     "Edge-IIoTset: evento canonico estandarizado por Mistral "
-                    "(artefacto congelado; passthrough sanitizado) - comparativa con Jorge"
+                    "(artefacto congelado; passthrough validado) - comparativa con Jorge"
                 ),
                 "raw_input": {
                     "dataset": "edge_iiotset",

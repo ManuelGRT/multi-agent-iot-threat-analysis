@@ -115,10 +115,14 @@ recupera (§4).
 
 ## 7. Otras limitaciones a declarar
 
-- **Dependencia de Mistral para estandarización en vivo**: todo evento crudo
-  nuevo requiere la API. No hay caché ni adaptador de respaldo en el flujo
-  final: un fallo produce abstención y revisión humana. Para la defensa, el
-  modo `--offline` utiliza `canonical_event` congelados y ya estandarizados.
+- **Dependencia de Mistral para estandarización en vivo**: el sistema exige
+  entrada cruda limpia. Una caché SQLite por hash exacto puede reutilizar solo
+  éxitos Mistral previos para contenido duplicado, reconstruyendo la identidad
+  y procedencia actuales. En un *cache miss* se requiere la API; un fallo
+  produce abstención y revisión humana, sin adaptadores. La sanitización
+  anti-leakage pertenece exclusivamente a la preparación de entrenamiento,
+  validación y evaluación, fuera del grafo. Para la defensa, el modo
+  `--offline` utiliza `canonical_event` congelados y ya estandarizados.
 - **Raw vs canónico en Edge**: parte de la mejora frente al baseline crudo
   proviene de usar todas las columnas y de la representación; la réplica
   estricta de Jorge (0.4993) aísla esa comparación honestamente.

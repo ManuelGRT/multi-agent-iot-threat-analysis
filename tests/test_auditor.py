@@ -13,7 +13,7 @@ from src.agents.final.auditor import (
     canonical_leakage_issues,
     feature_leakage_issues,
 )
-from src.agents.predictive_sanitization import contains_predictive_target_text
+from src.contracts.leakage import contains_predictive_target_text
 from src.contracts.case import (
     CaseResult,
     ClassificationInfo,
@@ -427,7 +427,7 @@ def test_top_level_target_key_beyond_named_fields_is_detected():
     assert "campo_target_con_valor:class" in flagged
 
 
-def test_common_target_aliases_are_detected_before_group_aggregation():
+def test_common_target_aliases_are_detected_and_removed_during_offline_preparation():
     aliases = ("ground_truth", "target_value", "class_id", "outcome", "y")
     event = {**CANONICAL_EVENT, "telemetry": {key: 1 for key in aliases}}
 
@@ -435,11 +435,12 @@ def test_common_target_aliases_are_detected_before_group_aggregation():
     for key in aliases:
         assert any(f"telemetry.{key}" in issue for issue in issues)
 
-    # Aunque el auditor reciba directamente un evento contaminado, esos
-    # valores tampoco deben sobrevivir anonimizados como estadisticas.
+    # La proyeccion runtime asume entrada limpia. Es el preprocesamiento de
+    # evaluacion el que retira los aliases antes de generar features.
+    from src.eval.data_sanitization import sanitize_canonical_event
     from src.mcp.features import event_features
 
-    features = event_features(event)
+    features = event_features(sanitize_canonical_event(event))
     assert "group_mean.other" not in features
 
 
@@ -448,7 +449,8 @@ def test_attack_indicators_are_allowlisted_behavioral_signal():
     assert canonical_leakage_issues(event) == []
 
 
-def test_label_like_context_never_reaches_predictive_features():
+def test_offline_preparation_keeps_label_like_context_out_of_features():
+    from src.eval.data_sanitization import sanitize_canonical_event
     from src.mcp.features import event_features
 
     base_event = {
@@ -478,8 +480,8 @@ def test_label_like_context_never_reaches_predictive_features():
         },
     }
 
-    expected = event_features(base_event)
-    features = event_features(event)
+    expected = event_features(sanitize_canonical_event(base_event))
+    features = event_features(sanitize_canonical_event(event))
     serialized = " ".join(f"{key}={value}" for key, value in features.items()).casefold()
 
     assert features == expected

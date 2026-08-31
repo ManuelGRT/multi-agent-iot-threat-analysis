@@ -5,7 +5,19 @@ import json
 import pytest
 
 from scripts import run_live_standardization as live
+from src.mcp.standardization_cache import bind_event_identity
 from tests.test_final_agents import CANONICAL_EVENT
+
+
+def _strict_live_event() -> dict:
+    return bind_event_identity(
+        CANONICAL_EVENT,
+        dataset="iot23",
+        source_file="sample.csv",
+        row_id=1,
+        split="stream",
+        parser_version="llm-0.2.0",
+    )
 
 
 def test_load_project_env_reads_key_without_echoing_or_overriding(tmp_path, monkeypatch):
@@ -77,8 +89,8 @@ def test_standardize_one_accepts_only_strict_llm_result(monkeypatch):
             "from_cache": False,
             "mapping_confidence": 0.9,
             "selected_columns": ["proto"],
-            "notes": ["parsed_by_llm", "security_boundary:sanitized"],
-            "canonical_event": dict(CANONICAL_EVENT),
+            "notes": ["parsed_by_llm", "source:mistral_live"],
+            "canonical_event": _strict_live_event(),
         }
 
     monkeypatch.setattr(inference_server, "standardize_event", strict_result)
@@ -100,6 +112,8 @@ def test_standardize_one_accepts_only_strict_llm_result(monkeypatch):
         "row": {"proto": "tcp"},
         "source_file": "sample.csv",
         "row_id": 1,
+        "split": "stream",
+        "cache_mode": "bypass",
     }
 
 
@@ -121,7 +135,6 @@ def test_standardize_one_accepts_only_strict_llm_result(monkeypatch):
             {
                 "notes": [
                     "parsed_by_llm",
-                    "security_boundary:sanitized",
                     "fallback_adapter",
                 ]
             },
@@ -145,8 +158,8 @@ def test_standardize_one_turns_invalid_success_into_abstention(
         "from_cache": False,
         "mapping_confidence": 0.9,
         "selected_columns": ["proto"],
-        "notes": ["parsed_by_llm", "security_boundary:sanitized"],
-        "canonical_event": dict(CANONICAL_EVENT),
+        "notes": ["parsed_by_llm", "source:mistral_live"],
+        "canonical_event": _strict_live_event(),
     }
     response.update(invalid_metadata)
     if remove_canonical:

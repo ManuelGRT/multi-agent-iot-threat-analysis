@@ -9,8 +9,9 @@ mitigaciones verificables y deja una traza completa auditable de cada decisión.
 
 ## ¿Cómo funciona?
 
-Cada evento recorre este flujo, coordinado por un orquestador (LangGraph)
-sobre una capa de herramientas MCP (Model Context Protocol):
+Cada evento recorre este flujo, coordinado por el orquestador final activo
+`src/orchestration/mcp_graph.py` (LangGraph) sobre una capa de herramientas MCP
+(Model Context Protocol):
 
 ```
 entrada cruda → Estandarizador → Detector → Clasificador → Mitigador → Juez
@@ -20,7 +21,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 
 | Agente | Qué hace | Qué decide |
 |---|---|---|
-| **Estandarizador** | Convierte cada registro crudo (de cualquier dataset) en un evento canónico mediante Mistral en vivo. Para filas tabulares, Mistral selecciona primero las columnas y después genera el evento. Un `canonical_event` ya estandarizado solo atraviesa la validación y sanitización técnica del límite MCP | Confianza del mapeo; si Mistral no está disponible, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana. No usa caché ni adaptadores como *fallback* |
+| **Estandarizador** | Recibe una entrada cruda ya limpia. Una caché SQLite por hash exacto reutiliza únicamente éxitos previos de Mistral para contenido duplicado y reconstruye la identidad y procedencia del caso actual. En un *cache miss*, Mistral selecciona las columnas y genera el evento; un `canonical_event` previo solo se valida | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana. Nunca usa adaptadores |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase: ¿qué familia de ataque? | Familia y confianza; si < 0,65, el caso va a revisión |
 | **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC); un LLM opcional las contextualiza al caso concreto | Todo lo que el LLM añada sin respaldo del catálogo queda marcado `llm_suggested` |
@@ -29,15 +30,22 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 
 Ideas clave del diseño:
 
-- **Las columnas target reconocidas no llegan a Mistral ni a los modelos.** La
-  frontera MCP las retira antes del prompt y de la extracción de features. La
-  entrada cruda puede conservarse en `CaseResult` únicamente como trazabilidad;
-  en la evaluación, la verdad terreno se mantiene separada y fuera del grafo.
-- **Toda entrada cruda se estandariza con Mistral en vivo.** Si esa llamada no
-  puede completarse de forma válida, el sistema no fabrica un mapeo
-  determinista: registra una abstención controlada y entrega el caso al juez
-  para revisión humana. Los eventos canónicos congelados pueden reutilizarse
-  sin repetir el LLM, pero siempre pasan por validación y sanitización técnica.
+- **La entrada limpia es una precondición.** La sanitización anti-leakage y la
+  separación de columnas target se realizan al preparar los datos de
+  entrenamiento, validación y evaluación, siempre fuera del grafo. El runtime
+  final no limpia ni inspecciona targets dentro del `row`: presupone una entrada
+  preparada y valida su estructura. Sí rechaza contaminación predictiva en el
+  `CanonicalEvent`, tanto si llega preestandarizado como si lo produce Mistral.
+- **Mistral es obligatorio en cada *cache miss*.** La caché SQLite se indexa
+  por el hash exacto del contenido limpio y solo reutiliza respuestas Mistral
+  exitosas para duplicados. En un *hit* se reconstruyen la identidad y la
+  procedencia actuales y se reutiliza la selección que Mistral hizo para ese
+  mismo contenido; no aparece una heurística determinista. Si no hay *hit* y
+  Mistral falla, el sistema se abstiene y entrega el caso al juez para revisión
+  humana. No existe ruta por adaptador. El mecanismo *single-flight* evita
+  llamadas repetidas para una misma clave dentro de cada proceso; entre
+  procesos, SQLite aplica la política del primer éxito escrito, aunque dos
+  *misses* simultáneos pueden llegar a invocar Mistral.
 - **Todo caso pasa por el juez y queda auditable**: también los benignos se
   revisan operacionalmente y todos producen un `CaseResult` con su traza. El
   `CaseAuditor` es una comprobación posterior e independiente.
@@ -85,7 +93,7 @@ python scripts\demo_mcp_multiagent_case.py --offline
 
 La demo es determinista porque utiliza cuatro eventos canónicos congelados:
 no envía registros crudos al estandarizador ni realiza llamadas externas. Cada
-caso sí atraviesa la validación/sanitización técnica, se audita en vivo y su
+caso sí atraviesa la validación contractual, se audita en vivo y su
 resultado se firma con un resumen SHA-256; repetirla otro día debe producir
 firmas idénticas.
 
@@ -97,10 +105,11 @@ uvicorn src.api.app:app --port 8000
 
 Abre `http://localhost:8000`: un visor con ejemplos precargados muestra el
 flujo completo (pipeline por agente, decisiones, mitigaciones con referencias
-y la traza del caso). Para analizar un registro crudo debes definir
-`MISTRAL_API_KEY`: el estandarizador llama siempre a Mistral en vivo y nunca
-recurre a caché ni a adaptadores. Si el proveedor no responde o devuelve una
-salida inválida, el caso termina en el juez como abstención y revisión humana.
+y la traza del caso). La entrada cruda debe llegar limpia. El estandarizador
+busca primero un éxito Mistral con el mismo hash exacto en la caché SQLite; en
+un *miss* necesitas `MISTRAL_API_KEY` y se llama a Mistral en vivo. Si el
+proveedor no responde o devuelve una salida inválida, el caso termina en el
+juez como abstención y revisión humana. La ruta final nunca usa adaptadores.
 `INGEST_LLM_TIMEOUT_SECONDS` permite acotar cada llamada (por ejemplo, `60`
 en una demo; una fila tabular realiza selección y extracción por separado).
 La contextualización LLM del mitigador sigue siendo opcional. Para una
@@ -144,26 +153,34 @@ verde.
 | `src/contracts/` | Esquemas Pydantic: evento canónico, salidas de agentes, `CaseResult` y traza |
 | `src/agents/final/` | Los seis agentes del flujo final |
 | `src/mcp/` | Capa de herramientas: 5 servidores MCP (datasets, inferencia, memoria de casos, threat intel, evaluación) y cliente dual in-process/stdio |
-| `src/orchestration/` | Grafos LangGraph (el flujo final está en `mcp_graph.py`) |
-| `src/eval/` | Código de la campaña de validación (contratos de datos, modelos candidatos, benchmarks del TFM previo) |
+| `src/orchestration/` | `mcp_graph.py` es el único grafo final activo; `graph.py` conserva el orquestador previo como código legacy inactivo |
+| `src/eval/` | Preparación/sanitización anti-leakage y código de evaluación (contratos de datos, modelos candidatos, benchmarks del TFM previo) |
 | `src/api/` | API FastAPI + visor web (`static/index.html`) |
 | `scripts/` | Los 5 scripts activos (demo, auditoría, entrenamiento, LODO, estandarización en vivo); los históricos están archivados en `scripts/archive/` |
-| `artifacts/` | Artefactos congelados: modelos desplegados, baselines, métricas de la campaña (`validation_2026/evaluation/`), demo |
+| `artifacts/` | Artefactos congelados: modelos desplegados, baselines, métricas de evaluación y demo |
 | `validacion_fase_c/` | Scripts y resultados de las validaciones por agente del capítulo 5 de la memoria |
 | `docs/` | Arquitectura, planes de trabajo y material para la memoria |
 | `tests/` | Suite automatizada completa |
 
-Los datos crudos (`data/`), la caché histórica de estandarización y los
-resultados masivos de la campaña quedan fuera de git por tamaño, pero **no
-deben borrarse del disco**: son la procedencia de los resultados congelados.
-La caché histórica no se consulta como *fallback* al procesar nuevas entradas
-crudas; la demo offline solo reutiliza los eventos canónicos ya conservados en
-esos artefactos.
+Los agentes y adaptadores anteriores que no están bajo `src/agents/final/`,
+junto con `src/orchestration/graph.py`, se conservan únicamente como código
+legacy/inactivo y compatibilidad histórica. Pueden mantener preprocesamiento de
+compatibilidad, pero no forman parte de la ruta final ni contradicen su frontera:
+`mcp_graph.py` presupone el `row` preparado y no ejecuta adaptadores.
+
+Los datos crudos (`data/`), las cachés de estandarización y los resultados
+masivos de evaluación quedan fuera de git por tamaño, pero **no deben borrarse
+del disco**: son la procedencia de los resultados congelados. En operación, la
+caché SQLite por hash exacto evita repetir Mistral para contenido limpio
+duplicado; solo almacena éxitos y reconstruye la identidad/procedencia del
+registro actual. La caché JSONL histórica se conserva intacta como evidencia,
+pero no se mezcla automáticamente con la caché operativa porque corresponde a
+otro modelo/contrato. La demo offline reutiliza eventos canónicos congelados.
 
 ## Reglas del proyecto
 
-1. **No relanzar llamadas masivas al proveedor LLM**: la estandarización de la
-   campaña está congelada en `artifacts/validation_2026/standardized/`.
+1. **No relanzar llamadas masivas al proveedor LLM**: los resultados de la
+   campaña experimental están congelados en sus artefactos.
 2. **No borrar ni regenerar artefactos históricos** de `artifacts/`.
 3. **Ninguna columna target puede usarse como feature** (hay verificación
    automática y un caso trampa en la auditoría).

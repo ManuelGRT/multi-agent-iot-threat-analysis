@@ -14,7 +14,8 @@ from src.agents.final import (
     FinalStandardizer,
 )
 from src.mcp.client import MCPToolClient
-from src.mcp.standardization_guard import sanitize_canonical_event, sanitize_llm_input
+from src.eval.data_sanitization import sanitize_canonical_event, sanitize_llm_input
+from src.mcp.standardization_cache import bind_event_identity
 
 
 CANONICAL_EVENT = {
@@ -75,18 +76,41 @@ def standardize_ok(
     selected_columns=None,
     source="llm",
     provider="mistral",
+    from_cache=False,
+    dataset="iot23",
+    source_file="api",
+    row_id=0,
+    split="stream",
+    bind_identity=True,
 ):
     canonical = dict(event or CANONICAL_EVENT)
     canonical["mapping_confidence"] = mapping_confidence
+    if source == "llm" and not from_cache and bind_identity:
+        parser_version = str(
+            (canonical.get("provenance") or {}).get("parser_version")
+            or "llm-0.2.0"
+        )
+        canonical = bind_event_identity(
+            canonical,
+            dataset=dataset,
+            source_file=source_file,
+            row_id=row_id,
+            split=split,
+            parser_version=parser_version,
+        )
     notes = (
-        ["security_boundary:sanitized", "source:prestandardized"]
+        ["source:prestandardized"]
         if source == "prestandardized"
-        else ["parsed_by_llm", "security_boundary:sanitized"]
+        else (
+            ["parsed_by_llm", "source:mistral_cache"]
+            if from_cache
+            else ["parsed_by_llm", "source:mistral_live"]
+        )
     )
     return {
         "ok": True,
         "canonical_event": canonical,
-        "from_cache": False,
+        "from_cache": from_cache,
         "source": source,
         "provider": provider,
         "model": model,
@@ -97,6 +121,8 @@ def standardize_ok(
             else selected_columns
         ),
         "notes": notes,
+        "cache_content_hash": "a" * 64 if from_cache else None,
+        "cache_pipeline_hash": "b" * 64 if from_cache else None,
     }
 
 
@@ -120,7 +146,7 @@ def classify_ok(family="ddos", confidence=0.95):
 
 
 # ---------------------------------------------------------------------------
-# sanitizacion (anti target-leakage)
+# preparacion offline para evaluacion (anti target-leakage)
 # ---------------------------------------------------------------------------
 
 def test_sanitize_removes_target_fields_and_scrubs_text():
@@ -263,7 +289,10 @@ def test_standardizer_uses_llm_mcp_result_and_routes_detect():
     assert update["ingest_output"]["model"] == "mistral-small-2603"
     assert update["ingest_output"]["from_cache"] is False
     assert update["ingest_output"]["selected_columns"] == ["proto"]
-    assert "security_boundary:sanitized" in update["ingest_output"]["notes"]
+    assert update["ingest_output"]["notes"] == [
+        "parsed_by_llm",
+        "source:mistral_live",
+    ]
     _, _, arguments = stub.call_arguments[-1]
     assert "allow_llm" not in arguments
     assert "cache_key" not in arguments
@@ -274,7 +303,12 @@ def test_standardizer_uses_llm_mcp_result_and_routes_detect():
 
 def test_standardizer_low_mapping_confidence_routes_judge():
     stub = StubClient(
-        {("inference", "standardize_event"): standardize_ok(mapping_confidence=0.3)}
+        {
+            ("inference", "standardize_event"): standardize_ok(
+                mapping_confidence=0.3,
+                dataset="generic",
+            )
+        }
     )
     update = FinalStandardizer(client=stub).run({"raw_input": {"dataset": "generic"}})
     assert update["route"] == "judge"
@@ -294,16 +328,59 @@ def test_standardizer_prestandardized_passthrough():
         }
     )
     update = FinalStandardizer(client=stub).run(
-        {"raw_input": {"dataset": "edge_iiotset", "canonical_event": dict(LEAKY_EVENT)}}
+        {"raw_input": {"dataset": "edge_iiotset", "canonical_event": dict(clean)}}
     )
-    # La validacion y la sanitizacion pertenecen al limite MCP, tambien para
-    # eventos ya estandarizados; el agente no implementa ese trabajo.
+    # El agente no limpia el evento: el limite MCP debe validarlo o rechazarlo.
     assert ("inference", "standardize_event") in stub.calls
     _, _, arguments = stub.call_arguments[-1]
-    assert arguments["canonical_event"] == LEAKY_EVENT
+    assert arguments["canonical_event"] == clean
     assert update["route"] == "detect"
     assert update["canonical_event"]["label_raw"] is None
     assert update["ingest_output"]["model"] == "prestandardized_passthrough"
+
+
+def test_standardizer_accepts_valid_mistral_cache_hit():
+    from src.mcp.standardization_cache import compute_content_hash
+
+    cached_event = {
+        **CANONICAL_EVENT,
+        "event_id": "llm::iot23::duplicate.csv::17",
+        "origin": {
+            "source_name": "iot23",
+            "source_file": "duplicate.csv",
+            "row_id": 17,
+            "schema_profile": "network_flow",
+        },
+        "provenance": {
+            "dataset": "iot23",
+            "source_file": "duplicate.csv",
+            "row_id": 17,
+            "split": "test",
+            "parser_version": "llm-0.2.0",
+        },
+    }
+    result = standardize_ok(cached_event, from_cache=True)
+    result["cache_content_hash"] = compute_content_hash(row={"proto": "tcp"})
+    stub = StubClient({("inference", "standardize_event"): result})
+
+    update = FinalStandardizer(client=stub).run(
+        {
+            "raw_input": {
+                "dataset": "iot23",
+                "row": {"proto": "tcp"},
+                "source_file": "duplicate.csv",
+                "row_id": 17,
+                "split": "test",
+            }
+        }
+    )
+
+    assert update["route"] == "detect"
+    assert update["ingest_output"]["from_cache"] is True
+    assert update["ingest_output"]["cache_content_hash"] == result["cache_content_hash"]
+    assert update["ingest_output"]["cache_pipeline_hash"] == "b" * 64
+    _, _, arguments = stub.call_arguments[-1]
+    assert arguments["split"] == "test"
 
 
 def test_standardizer_llm_failure_abstains_to_judge():
@@ -330,6 +407,28 @@ def test_standardizer_llm_failure_abstains_to_judge():
         == "llm_standardization_failed"
     )
     assert update["trace"][-1]["status"] == "abstain"
+
+
+def test_standardizer_rejects_live_identity_from_a_different_record():
+    result = standardize_ok(bind_identity=False)
+    stub = StubClient({("inference", "standardize_event"): result})
+
+    update = FinalStandardizer(client=stub).run(
+        {
+            "raw_input": {
+                "dataset": "iot23",
+                "row": {"proto": "tcp"},
+                "source_file": "new.csv",
+                "row_id": 77,
+            }
+        }
+    )
+
+    assert update["route"] == "judge"
+    assert update["ingest_output"]["failure_code"] == (
+        "invalid_standardization_response"
+    )
+    assert "event_id" in update["ingest_output"]["failure_reason"]
 
 
 def test_standardizer_malformed_success_abstains_instead_of_crashing():
@@ -377,10 +476,10 @@ def test_standardizer_malformed_success_abstains_instead_of_crashing():
         {
             "notes": [
                 "parsed_by_llm",
-                "security_boundary:sanitized",
                 "fallback_adapter",
             ]
         },
+        {"notes": ["parsed_by_llm"]},
         {"mapping_confidence": "0.9"},
     ],
 )

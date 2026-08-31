@@ -57,3 +57,36 @@ def test_supported_datasets_is_metadata_only():
     assert "iot23" in response.json()["datasets"]
     assert response.json()["scope"] == "legacy_adapter_metadata_only"
     assert response.json()["analysis_endpoint"] == "/cases/analyze"
+
+
+def test_final_case_rejects_unknown_top_level_field_instead_of_dropping_it():
+    response = TestClient(app).post(
+        "/cases/analyze",
+        json={
+            "dataset": "iot23",
+            "row": {"proto": "tcp"},
+            "label": "Mirai",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_final_case_forwards_row_unchanged_without_runtime_sanitization(monkeypatch):
+    from src.api import routers
+
+    received = {}
+
+    def fake_run(raw_input, **_kwargs):
+        received.update(raw_input)
+        return {"ok": True}
+
+    monkeypatch.setattr(routers, "_run_final_case", fake_run)
+    row = {"proto": "tcp", "label": "Mirai"}
+    response = TestClient(app).post(
+        "/cases/analyze",
+        json={"dataset": "iot23", "row": row},
+    )
+
+    assert response.status_code == 200
+    assert received["row"] == row

@@ -1,3 +1,9 @@
+"""Sanitizacion anti-leakage para preparar datos de evaluacion/entrenamiento.
+
+Este modulo no forma parte del grafo multiagente ni de la inferencia. Las
+entradas operacionales se consideran ya preparadas; el runtime valida sus
+contratos, pero nunca elimina targets silenciosamente.
+"""
 from __future__ import annotations
 
 import json

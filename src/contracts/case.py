@@ -72,6 +72,8 @@ class StandardizationInfo(BaseModel):
     mapping_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     selected_columns: list[str] = Field(default_factory=list)
     from_cache: bool = False
+    cache_content_hash: str | None = None
+    cache_pipeline_hash: str | None = None
     schema_profile: str | None = None
     modality: str | None = None
     abstain: bool = False
@@ -228,6 +230,8 @@ class CaseResult(BaseModel):
                 mapping_confidence=float(ingest.get("mapping_confidence", canonical.get("mapping_confidence", 0.0) or 0.0)),
                 selected_columns=list(ingest.get("selected_columns") or []),
                 from_cache=bool(ingest.get("from_cache", False)),
+                cache_content_hash=ingest.get("cache_content_hash"),
+                cache_pipeline_hash=ingest.get("cache_pipeline_hash"),
                 schema_profile=canonical.get("schema_profile"),
                 modality=ingest.get("modality") or canonical.get("modality"),
                 abstain=bool(ingest.get("abstain", False)),

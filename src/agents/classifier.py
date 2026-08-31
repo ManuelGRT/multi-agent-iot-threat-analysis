@@ -5,7 +5,7 @@ import os
 from typing import Any
 
 from src.agents.base import OllamaChatAgent, OpenRouterChatAgent, TransformersChatAgent
-from src.agents.predictive_sanitization import scrub_predictive_payload
+from src.eval.predictive_sanitization import scrub_predictive_payload
 from src.contracts.agents import ClassificationOutput, DetectionOutput
 from src.contracts.canonical import CanonicalEvent
 from src.contracts.taxonomy import ATTACK_FAMILY_KEYWORDS, infer_label_info

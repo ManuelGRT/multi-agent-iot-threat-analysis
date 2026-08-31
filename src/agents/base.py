@@ -127,7 +127,9 @@ class OpenAICompatibleChatAgent:
         self.api_key = api_key or _first_env_value(self.api_key_env)
         self.extra_headers = extra_headers or {}
         self.json_mode = _env_bool(self.json_mode_env, default=True)
-        self.rate_limit_retries = int(_first_env_value(self.rate_limit_retries_env) or 0)
+        # Los proveedores remotos aplican limites de tasa. Un 429 puntual no
+        # debe degradar silenciosamente el agente a su ruta de reserva.
+        self.rate_limit_retries = int(_first_env_value(self.rate_limit_retries_env) or 3)
         self.retry_status_codes = _retry_status_codes(
             _first_env_value(self.retry_status_codes_env),
             default={429},

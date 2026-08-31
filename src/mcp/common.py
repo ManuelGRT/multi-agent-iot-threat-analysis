@@ -76,13 +76,15 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         os.getenv("TFM_STANDARDIZED_DATASET")
         or artifacts_dir() / "datasets" / "mistral_prebalanced_no_simulated_logs_standardized_20260704_all.jsonl"
     ),
+    # Modelos desplegados tras la campana de validacion final. Los modelos de
+    # julio permanecen versionados como referencia historica.
     "detection_model": lambda: Path(
         os.getenv("TFM_DETECTION_MODEL")
-        or artifacts_dir() / "models" / "xgboost_detection_standardized_with_edge_20260705.joblib"
+        or artifacts_dir() / "models" / "xgboost_detection_validation_2026_20260822.joblib"
     ),
     "family_model": lambda: Path(
         os.getenv("TFM_FAMILY_MODEL")
-        or artifacts_dir() / "models" / "xgboost_attack_family_balanced_group_20260705.joblib"
+        or artifacts_dir() / "models" / "xgboost_attack_family_validation_2026_20260822.joblib"
     ),
     "baselines": lambda: Path(
         os.getenv("TFM_BASELINES")

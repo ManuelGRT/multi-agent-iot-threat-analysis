@@ -76,20 +76,20 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 def detect(event_data: dict[str, Any]) -> dict[str, Any]:
-    """Deteccion binaria con el modelo XGBoost estandarizado (con Edge)."""
+    """Deteccion binaria con el candidato global de validation_2026."""
     model = load_model("detection_model")
     features = event_features(event_data)
     probability = float(model.predict_proba([features])[0][1])
     return {
         "is_malicious": probability >= 0.5,
         "probability": probability,
-        "model_name": "xgboost_detection_standardized_with_edge_20260705",
+        "model_name": "xgboost_detection_validation_2026_20260822",
         "feature_count": len(features),
     }
 
 
 def classify(event_data: dict[str, Any], top_k: int = 3) -> dict[str, Any]:
-    """Clasificacion de familia con el modelo XGBoost balanceado por grupo."""
+    """Clasificacion de familia con el candidato global de validation_2026."""
     model = load_model("family_model")
     features = event_features(event_data)
     proba = model.predict_proba([features])[0]
@@ -100,6 +100,6 @@ def classify(event_data: dict[str, Any], top_k: int = 3) -> dict[str, Any]:
         "attack_family": str(family),
         "confidence": float(confidence),
         "top_scores": {str(name): float(score) for name, score in ranked[:top_k]},
-        "model_name": "xgboost_attack_family_balanced_group_20260705",
+        "model_name": "xgboost_attack_family_validation_2026_20260822",
         "feature_count": len(features),
     }

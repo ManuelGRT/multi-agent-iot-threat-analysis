@@ -5,8 +5,8 @@ Expone los modelos preparados del TFM:
 - Estandarizacion: cache Mistral primero (regla del handoff: no repetir
   llamadas masivas); fallback al adapter determinista; LLM en vivo solo si se
   pide explicitamente y hay credenciales.
-- Deteccion: ``xgboost_detection_standardized_with_edge_20260705.joblib``.
-- Clasificacion: ``xgboost_attack_family_balanced_group_20260705.joblib``.
+- Deteccion: ``xgboost_detection_validation_2026_20260822.joblib``.
+- Clasificacion: ``xgboost_attack_family_validation_2026_20260822.joblib``.
 """
 from __future__ import annotations
 
@@ -101,6 +101,7 @@ def standardize_event(
         "row_id": row_id,
     }
 
+    llm_error: str | None = None
     if allow_llm:
         try:
             from src.orchestration.graph import default_agents
@@ -122,20 +123,27 @@ def standardize_event(
                 "mapping_confidence": output.mapping_confidence,
                 "notes": notes,
             }
-        except Exception:
-            pass  # cae al adapter determinista
+        except Exception as exc:
+            # El adapter mantiene el servicio disponible, pero la causa debe
+            # viajar en la salida para que el estandarizador deje traza.
+            llm_error = f"{type(exc).__name__}: {exc}"
 
     from src.orchestration.graph import default_agents
 
     agents = default_agents(use_llm=False)
     event, output = agents.ingest.ingest(raw_input)
-    return {
+    result = {
         "canonical_event": event.model_dump(mode="json"),
         "from_cache": False,
         "cache_key": key,
         "model": "deterministic_adapter",
         "mapping_confidence": output.mapping_confidence,
     }
+    if llm_error is not None:
+        result["model"] = "deterministic_adapter_after_llm_error"
+        result["llm_error"] = llm_error
+        result["notes"] = ["llm_failed", "fallback_adapter"]
+    return result
 
 
 @tool_result

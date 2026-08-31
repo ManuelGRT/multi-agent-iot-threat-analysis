@@ -433,14 +433,20 @@ def _optional_float_env(name: str) -> float | None:
 
 
 def _llm_model(specific_env: str) -> str:
+    """Selecciona un modelo por defecto compatible con el proveedor activo."""
     if os.getenv(specific_env):
         return os.getenv(specific_env, "")
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if provider == "mistral":
+        return os.getenv("MISTRAL_AGENT_MODEL", "mistral-small-latest")
+    if provider == "transformers":
+        return os.getenv("TRANSFORMERS_AGENT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+    if provider == "openrouter":
+        return os.getenv("OPENROUTER_AGENT_MODEL", "openai/gpt-oss-120b:free")
+    if provider == "groq":
+        return os.getenv("GROQ_AGENT_MODEL", "llama-3.3-70b-versatile")
     if os.getenv("OLLAMA_AGENT_MODEL"):
         return os.getenv("OLLAMA_AGENT_MODEL", "")
-    if (os.getenv("LLM_PROVIDER") or "").strip().lower() == "transformers":
-        return os.getenv("TRANSFORMERS_AGENT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
-    if (os.getenv("LLM_PROVIDER") or "").strip().lower() == "openrouter":
-        return os.getenv("OPENROUTER_AGENT_MODEL", "openai/gpt-oss-120b:free")
     return "gemma3:12b"
 
 

@@ -13,8 +13,8 @@ y relanzar sin perder trabajo.
 | bot_iot | 2.956 | Normal solo 477 en origen (declarado) |
 | urban_iot | 1.000 | sin etiquetas: solo validación de estandarización |
 
-**Duración estimada:** con 8 workers, ~2-4 h (≈3-5 filas/s). Coste API estimado:
-~15-20 $ con mistral-small.
+Cada fila tabular requiere dos llamadas (selección de columnas y extracción).
+La duración y el coste dependen de la cuota y tarifa vigentes del proveedor.
 
 ## 1. Qué copiar a la máquina
 
@@ -40,7 +40,7 @@ Variables de entorno (misma terminal donde se lance):
 ```powershell
 $env:MISTRAL_API_KEY = "<clave>"
 $env:LLM_PROVIDER = "mistral"
-$env:INGEST_LLM_MODEL = "mistral-small-latest"   # IMPRESCINDIBLE (sin esto: 400)
+$env:INGEST_LLM_MODEL = "mistral-small-2603"    # opcional; modelo fijado por defecto
 # opcionales de robustez:
 $env:MISTRAL_RATE_LIMIT_RETRIES = "5"
 $env:MISTRAL_RETRY_WAIT_SECONDS = "3"
@@ -52,11 +52,11 @@ $env:MISTRAL_RETRY_WAIT_SECONDS = "3"
 .\.venv\Scripts\python.exe scripts\run_live_standardization.py --dataset iot23 --limit 5
 ```
 
-Esperado: `llm_ok=5` (o 4-5 con algún fallback), `avg_mapping_confidence`
-en torno a 0,85-0,95, y el fichero
+Esperado: `llm_ok=5`, salvo que alguna fila quede como abstención reintentable,
+y el fichero
 `artifacts/validation_2026/standardized/iot23_standardized.jsonl` con 5 líneas
-donde `"parsed_by_llm": true`. Si todo sale `fallback_adapter`, revisa las
-variables de entorno (el error concreto viene en `notes`).
+donde todo resultado aceptado tenga `"parsed_by_llm": true`. Si aparecen
+abstenciones, revisa las variables de entorno y el campo `error`.
 
 ## 4. Campaña completa
 
@@ -68,10 +68,10 @@ variables de entorno (el error concreto viene en `notes`).
 - **Reanudación:** si se corta (red, cuota, reinicio), relanzar la misma orden;
   las filas ya procesadas se saltan.
 - Si Mistral devuelve muchos 429, bajar a `--workers 4`.
-- Al final, reintentar las filas que hayan caído a adapter:
+- Al final, reintentar las filas que hayan quedado en abstención o error:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_live_standardization.py --retry-fallbacks --workers 4
+.\.venv\Scripts\python.exe scripts\run_live_standardization.py --retry-failures --workers 4
 ```
 
 ## 5. Qué devolver
@@ -85,7 +85,8 @@ comparativa con Jorge y actualización de memoria) en el equipo principal.
 
 ## Criterios de calidad de la campaña
 
-- `parsed_by_llm` ≥ 95 % por dataset (el resto, reintentado con --retry-fallbacks).
-- `avg_mapping_confidence` ≥ 0,8 en datasets con adapter; urban_iot puede ser
+- 100 % de los resultados aceptados con `parsed_by_llm: true`; no se admiten
+  resultados de adaptador. Las abstenciones se reintentan con `--retry-failures`.
+- `avg_mapping_confidence` ≥ 0,8 en los datasets conocidos; urban_iot puede ser
   menor (fuente desconocida — ese dato ES el resultado).
 - 0 errores de tipo «target en features» (el runner aborta si detecta etiquetas).

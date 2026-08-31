@@ -4,7 +4,7 @@
 > esta cerrada: 0.9363 es un baseline historico pendiente de sustitucion por el
 > protocolo limpio de `plan_validacion_metricas_por_dataset.md` (fases C-F).
 
-**Proyecto:** `tfm_multiagent` · **Fecha:** 2026-08-06 · **Estado:** arquitectura implementada, 347 tests; Fase C en ejecucion y evaluador de Fase D listo.
+**Proyecto:** `tfm_multiagent` · **Fecha:** 2026-08-06 · **Estado:** arquitectura implementada y suite automatizada; Fase C en ejecucion y evaluador de Fase D listo.
 
 Este documento describe la arquitectura tal y como está construida: capas,
 servidores MCP y sus tools, agentes finales, contrato de caso, rutas de
@@ -21,8 +21,8 @@ abstención, auditoría E2E y cómo ejecutar cada pieza.
 └──────────────────────────────┬─────────────────────────────────────────┘
                                ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│ ADAPTERS + SANITIZACIÓN ANTI-LEAKAGE  →  CanonicalEvent                │
-│ (src/adapters/, src/agents/predictive_sanitization.py)                 │
+│ RAW → MISTRAL EN VIVO → FRONTERA MCP → CanonicalEvent                  │
+│ (inference_server.py + standardization_guard.py)                       │
 └──────────────────────────────┬─────────────────────────────────────────┘
                                ▼
         ┌──────────────── ORQUESTADOR LangGraph ────────────────┐
@@ -38,8 +38,8 @@ abstención, auditoría E2E y cómo ejecutar cada pieza.
 │ mcp-threat-intel  mcp-evaluation                                       │
 └──────┬──────────────────┬──────────────────┬───────────────────────────┘
        ▼                  ▼                  ▼
-  modelos .joblib    cache Mistral      catálogo ATT&CK/CAPEC ·
-  desplegados        congelado          SQLite de casos · baselines
+  modelos .joblib    Mistral API        catálogo ATT&CK/CAPEC ·
+  desplegados        en vivo            SQLite de casos · baselines
                │                                        │
                ▼                                        ▼
    AGENTES FINALES (src/agents/final/)      AGENTE DE AUDITORÍA E2E
@@ -66,7 +66,7 @@ subprocesos), que usan los tests y la demo `--offline`.
 | Servidor | Módulo | Tools | Envuelve |
 |---|---|---|---|
 | `mcp-datasets` | `src/mcp/datasets_server.py` | `list_datasets`, `load_sample`, `load_batch`, `get_schema_profile` | datasets crudos (`data/`) + corpus estandarizado |
-| `mcp-inference` | `src/mcp/inference_server.py` | `standardize_event`, `standardize_batch`, `get_mapping_confidence`, `detect_event`, `detect_batch`, `classify_event`, `classify_batch`, `get_family_scores` | cache Mistral (primero), adapter determinista (fallback), LLM en vivo (opcional) + modelos `.joblib` |
+| `mcp-inference` | `src/mcp/inference_server.py` | `standardize_event`, `standardize_batch`, `get_mapping_confidence`, `detect_event`, `detect_batch`, `classify_event`, `classify_batch`, `get_family_scores` | Mistral en vivo obligatorio para entradas crudas, frontera técnica de validación/sanitización para `canonical_event` y modelos `.joblib` |
 | `mcp-case-memory` | `src/mcp/case_memory_server.py` | `create_case`, `update_case`, `append_trace`, `get_case`, `list_cases`, `retrieve_similar_cases` | SQLite (`artifacts/case_memory.db`) |
 | `mcp-threat-intel` | `src/mcp/threat_intel_server.py` | `list_families`, `map_family_to_attack`, `map_family_to_capec`, `suggest_mitigations`, `get_jorge_capec_coverage` | catálogo estático `src/mcp/data/threat_intel_catalog.json` (v1.1) |
 | `mcp-evaluation` | `src/mcp/evaluation_server.py` | `score_run`, `compare_with_baseline`, `get_baselines`, `export_report` | `sklearn.metrics` + baselines congelados |
@@ -80,8 +80,18 @@ Notas de diseño:
 - Los modelos `.joblib` se cargan una sola vez por proceso
   (`src/mcp/model_registry.py`, con el shim `EncodedClassifier` para
   deserializar el clasificador de familia).
-- `standardize_event` consulta **primero** el cache Mistral congelado
-  (13.837 entradas, 0 errores); regla dura: no relanzar llamadas masivas.
+- `standardize_event` no consulta caché ni adaptadores. Para un `row` crudo
+  realiza **dos llamadas a Mistral**: selección semántica de columnas y
+  extracción del `CanonicalEvent`. Ambas son obligatorias; si cualquiera
+  falla o la salida no valida, devuelve una abstención estructurada y el juez
+  termina el caso con `human_interrupt`.
+- Un `canonical_event` ya estandarizado no repite Mistral: atraviesa únicamente
+  `src/mcp/standardization_guard.py`, la frontera técnica que elimina campos
+  sensibles y valida el contrato. Esta sanitización no es una decisión ni una
+  responsabilidad cognitiva del agente estandarizador.
+- La caché Mistral de la campaña es un artefacto histórico congelado, no una
+  ruta de inferencia. Se conserva como procedencia y para obtener los eventos
+  canónicos de la demo offline; regla dura: no relanzar campañas masivas.
 - Paridad de features entrenamiento/inferencia garantizada:
   `src/mcp/features.py` replica `event_features` del script de
   entrenamiento y un test lo vigila.
@@ -97,7 +107,7 @@ inicio, fin, confianza y errores; todos operan contra la capa MCP.
 
 | Agente | Tool principal | Salida / decisión |
 |---|---|---|
-| `FinalStandardizer` | `standardize_event` (cache → LLM opcional → adapter) | `CanonicalEvent` **sin target leakage** (scrub de label/attack + semantic_text); acepta eventos pre-estandarizados (passthrough sanitizado); `mapping_confidence < 0.5 → judge` |
+| `FinalStandardizer` | `standardize_event` | Solicita Mistral obligatoriamente para entrada cruda y consume el resultado ya validado por la frontera MCP. Si la tool se abstiene o `mapping_confidence < 0.5`, enruta al juez; un `canonical_event` preestandarizado solo pasa la validación/sanitización MCP |
 | `FinalDetector` | `detect_event` (XGBoost estandarizado con Edge) | `is_malicious`, probabilidad; **zona gris 0.4–0.6 → abstención**; benigno también pasa por el juez |
 | `FinalClassifier` | `classify_event` (XGBoost familia balanced_group) | familia, confianza, top-k scores |
 | `FinalMitigator` | `suggest_mitigations` + LLM opcional | explicación + mitigaciones por fase + referencias ATT&CK/CAPEC; `source: catalog\|hybrid` |
@@ -132,8 +142,14 @@ canónico sanitizado, salidas de cada etapa (`StandardizationInfo`,
 `status ∈ {completed, needs_human_review, error}`. La API lo devuelve
 íntegro y la memoria de casos lo persiste.
 
-Rutas de abstención (todo caso queda auditado):
+Rutas de abstención (todo caso pasa por el juez y queda auditable; el
+`CaseAuditor` se ejecuta después de forma independiente):
 
+- fallo, timeout o respuesta inválida de Mistral durante la selección de
+  columnas o la extracción → abstención del estandarizador → juez
+  `human_interrupt` (sin caché ni adaptador)
+- `canonical_event` inválido en la frontera MCP → abstención → juez
+  `human_interrupt`
 - `mapping_confidence < 0.5` → juez → revisión humana
 - probabilidad de detección en zona gris `[0.4, 0.6]` → abstención → juez
 - confianza de clasificación `< 0.65` → juez la deriva a revisión
@@ -159,8 +175,10 @@ Rutas de abstención (todo caso queda auditado):
 ## 6. Demo reproducible (Fase 6)
 
 `scripts/demo_mcp_multiagent_case.py --offline`: 4 casos obligatorios
-(Edge-IIoTset ataque + TON-IoT host + TON-IoT telemetry + IoT-23, los tres
-últimos estandarizados **desde el cache Mistral**), auditados en vivo,
+(Edge-IIoTset ataque + TON-IoT host + TON-IoT telemetry + IoT-23) entregados
+como `canonical_event` congelados. Los tres últimos se seleccionan del
+artefacto histórico Mistral, pero el grafo no recibe `cache_key` ni consulta
+la caché. Todos atraviesan la validación/sanitización MCP, se auditan en vivo,
 con digest SHA256 estable por caso y referencia sin fecha
 (`artifacts/demo/demo_digests.json`): repetir la orden produce digests
 idénticos y el script lo verifica. `--stdio-smoke` añade un handshake por
@@ -172,7 +190,7 @@ protocolo MCP real. Salidas en `artifacts/demo/`.
 # instalación (Windows; usar SIEMPRE el venv del proyecto)
 .\.venv\Scripts\python.exe -m pip install -e ".[mcp,inference]"
 
-# suite completa (347 tests)
+# suite completa
 .\.venv\Scripts\python.exe -m pytest -q
 
 # demo reproducible (defensa)
@@ -196,6 +214,19 @@ Invoke-RestMethod http://127.0.0.1:8000/cases/analyze -Method Post `
   -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42,"persist":true}'
 ```
 
+### Configuración de Mistral para el estandarizador
+
+```powershell
+$env:MISTRAL_API_KEY="..."                 # obligatoria para entradas crudas
+$env:INGEST_LLM_MODEL="mistral-small-2603" # opcional; modelo por defecto
+$env:INGEST_LLM_TIMEOUT_SECONDS="60"       # opcional; limite por llamada
+```
+
+El flujo final no permite desactivar el LLM de estandarización: una entrada
+`row` usa siempre Mistral en vivo (selección de columnas + extracción). Si no
+está disponible, el caso se abstiene y el juez solicita revisión humana. Un
+`canonical_event` congelado no requiere la API porque ya fue estandarizado.
+
 ### Configuración del LLM del mitigador (opcional)
 
 ```powershell
@@ -205,8 +236,9 @@ $env:MITIGATOR_LLM_MODEL="mistral-small-latest"   # opcional (default por provee
 $env:MISTRAL_API_KEY="..."                 # según proveedor
 ```
 
-Sin nada de esto (o con fallo del LLM) el mitigador funciona en modo
-catálogo puro: la demo nunca se rompe.
+Sin la configuración específica del mitigador (o con fallo de ese LLM), el
+mitigador funciona en modo catálogo puro. Este fallback pertenece solo al
+mitigador; el estandarizador nunca sustituye Mistral por caché o adaptadores.
 
 ## 8. Dónde está cada cosa
 

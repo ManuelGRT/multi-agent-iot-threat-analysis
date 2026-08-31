@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
+import math
 import os
 import re
 from typing import Any
@@ -18,6 +19,10 @@ from src.agents.base import (
 )
 from src.agents.predictive_sanitization import is_predictive_target_field, scrub_predictive_payload
 from src.contracts.canonical import CanonicalEvent, Provenance
+from src.mcp.standardization_guard import (
+    is_allowed_raw_technical_field,
+    sanitize_llm_input,
+)
 
 
 CANONICAL_FIELDS = {
@@ -155,7 +160,7 @@ CANONICAL_EVENT_SCHEMA = {
         "host_context": {"type": "object"},
         "telemetry_context": {"type": "object"},
         "anomaly_summary": {"type": ["string", "null"]},
-        "semantic_text": {"type": "string"},
+        "semantic_text": {"type": "string", "minLength": 1},
         "provenance": {
             "type": "object",
             "properties": {
@@ -167,7 +172,7 @@ CANONICAL_EVENT_SCHEMA = {
             },
             "required": ["dataset"],
         },
-        "mapping_confidence": {"type": "number"},
+        "mapping_confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         "missing_fields": {"type": "array", "items": {"type": "string"}},
     },
     "required": [
@@ -203,6 +208,65 @@ CANONICAL_EVENT_SCHEMA = {
 }
 
 
+def _matches_json_type(value: Any, expected: str) -> bool:
+    if expected == "null":
+        return value is None
+    if expected == "object":
+        return isinstance(value, dict)
+    if expected == "array":
+        return isinstance(value, list)
+    if expected == "string":
+        return isinstance(value, str)
+    if expected == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if expected == "number":
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        )
+    if expected == "boolean":
+        return isinstance(value, bool)
+    return True
+
+
+def _validate_json_schema(value: Any, schema: dict[str, Any], path: str) -> None:
+    """Valida el subconjunto de JSON Schema usado por los contratos LLM."""
+    declared = schema.get("type")
+    expected_types = [declared] if isinstance(declared, str) else list(declared or [])
+    if expected_types and not any(_matches_json_type(value, item) for item in expected_types):
+        raise ValueError(
+            f"respuesta LLM invalida en {path}: tipo esperado={expected_types}, "
+            f"recibido={type(value).__name__}"
+        )
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"respuesta LLM invalida en {path}: valor fuera del enum")
+    if isinstance(value, str) and len(value) < int(schema.get("minLength", 0)):
+        raise ValueError(f"respuesta LLM invalida en {path}: texto vacio")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            raise ValueError(f"respuesta LLM invalida en {path}: valor menor que el minimo")
+        if "maximum" in schema and value > schema["maximum"]:
+            raise ValueError(f"respuesta LLM invalida en {path}: valor mayor que el maximo")
+    if isinstance(value, dict):
+        missing = [key for key in schema.get("required", []) if key not in value]
+        if missing:
+            raise ValueError(
+                f"respuesta LLM invalida en {path}: faltan campos requeridos "
+                + ", ".join(sorted(missing))
+            )
+        properties = schema.get("properties", {})
+        for key, item in value.items():
+            child_schema = properties.get(key)
+            if child_schema is None:
+                child_schema = schema.get("additionalProperties")
+            if isinstance(child_schema, dict):
+                _validate_json_schema(item, child_schema, f"{path}.{key}")
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            _validate_json_schema(item, schema["items"], f"{path}[{index}]")
+
+
 class LLMIngestParser:
     def __init__(
         self,
@@ -214,6 +278,8 @@ class LLMIngestParser:
         max_selected_columns: int = 40,
         column_selection_timeout_seconds: float | None = None,
         provider: str | None = None,
+        require_llm_column_selection: bool = False,
+        strict_output_validation: bool = False,
     ):
         provider_name = (provider or os.getenv("LLM_PROVIDER", "ollama")).strip().lower()
         if provider_name == "openrouter":
@@ -251,6 +317,8 @@ class LLMIngestParser:
         self.enable_column_selection = enable_column_selection
         self.column_selection_threshold = column_selection_threshold
         self.max_selected_columns = max_selected_columns
+        self.require_llm_column_selection = require_llm_column_selection
+        self.strict_output_validation = strict_output_validation
         if column_selection_timeout_seconds is None:
             env_timeout = os.getenv("LLM_COLUMN_SELECTION_TIMEOUT_SECONDS")
             column_selection_timeout_seconds = float(env_timeout) if env_timeout else None
@@ -276,6 +344,8 @@ class LLMIngestParser:
             ),
             json_schema=CANONICAL_EVENT_SCHEMA,
         )
+        if self.strict_output_validation:
+            _validate_json_schema(payload, CANONICAL_EVENT_SCHEMA, "canonical_event")
         payload = self._complete_payload(payload, llm_input)
         return CanonicalEvent(**payload)
 
@@ -307,26 +377,37 @@ class LLMIngestParser:
                 payload = await asyncio.wait_for(selection_call, timeout=self.column_selection_timeout_seconds)
             else:
                 payload = await selection_call
+            if self.strict_output_validation:
+                _validate_json_schema(payload, COLUMN_SELECTION_SCHEMA, "column_selection")
             selected = payload.get("selected_columns", [])
-        except Exception:
+        except Exception as exc:
+            if self.require_llm_column_selection:
+                raise RuntimeError("fallo la seleccion de columnas mediante LLM") from exc
             selected = []
 
         columns = self._sanitize_selected_columns(selected, row)
         if not columns:
+            if self.require_llm_column_selection:
+                raise ValueError("el LLM no selecciono ninguna columna tecnica valida")
             columns = self._fallback_relevant_columns(row)
         return self._limit_selected_columns(columns, row)
 
     def _column_selection_input(self, raw_input: dict[str, Any]) -> dict[str, Any]:
         row = raw_input.get("row") or {}
-        columns = [key for key in row.keys() if not self._is_label_like_key(key)] if isinstance(row, dict) else []
+        safe_row = (
+            sanitize_llm_input({"row": row})["row"]
+            if isinstance(row, dict)
+            else {}
+        )
+        columns = list(safe_row)
         return {
             "total_columns": len(row) if isinstance(row, dict) else len(columns),
             "max_selected_columns": self.max_selected_columns,
             "columns": [str(key) for key in columns],
             "value_previews": {
-                str(key): self._value_preview(row.get(key))
+                str(key): self._value_preview(safe_row.get(key))
                 for key in columns
-                if not self._is_empty_or_zero(row.get(key))
+                if not self._is_empty_or_zero(safe_row.get(key))
             },
             "canonical_output_fields": [
                 "origin",
@@ -372,14 +453,19 @@ class LLMIngestParser:
             if key is not None and key not in ordered and not self._is_label_like_key(key):
                 ordered.append(key)
 
-        for key in self._always_keep_columns(row):
-            if key not in ordered:
-                ordered.append(key)
+        if not self.require_llm_column_selection:
+            for key in self._always_keep_columns(row):
+                if key not in ordered:
+                    ordered.append(key)
         return [str(key) for key in ordered]
 
     def _limit_selected_columns(self, columns: list[str], row: dict[str, Any]) -> list[str]:
         if len(columns) <= self.max_selected_columns:
             return columns
+        if self.require_llm_column_selection:
+            # En el flujo final el orden y el conjunto proceden del LLM. Solo
+            # se aplica el limite contractual, sin reordenacion heuristica.
+            return columns[: self.max_selected_columns]
         always_keep = [str(key) for key in self._always_keep_columns(row)]
         limited = []
         for column in always_keep + columns:
@@ -485,15 +571,16 @@ class LLMIngestParser:
         if not isinstance(row, dict):
             return raw_input
 
+        safe_row = sanitize_llm_input({"row": row})["row"]
         meaningful = {
             str(key): value
-            for key, value in row.items()
-            if not self._is_empty_or_zero(value) and not self._is_label_like_key(key)
+            for key, value in safe_row.items()
+            if not self._is_empty_or_zero(value)
         }
-        columns = [key for key in row.keys() if not self._is_label_like_key(key)]
+        columns = list(safe_row)
         compacted = {
             "columns": [str(key) for key in columns],
-            "meaningful_values": scrub_predictive_payload(meaningful),
+            "meaningful_values": meaningful,
             "schema_profiles": [
                 "network_flow",
                 "network_packet",
@@ -524,18 +611,13 @@ class LLMIngestParser:
         payload = self._clean_empty_values(payload)
         for target_field in ("label_raw", "attack_family", "attack_subtype"):
             payload.pop(target_field, None)
-        incoming_provenance = payload.get("provenance")
-        if not isinstance(incoming_provenance, dict):
-            incoming_provenance = {}
-        origin = self._origin_from_raw(raw_input, incoming_provenance=incoming_provenance)
-        dataset = str(origin.get("source_name") or incoming_provenance.get("dataset") or "generic")
-        source_file = raw_input.get("source_file", incoming_provenance.get("source_file", "llm"))
-        row_id = raw_input.get("row_id", incoming_provenance.get("row_id", 0))
-        event_id = payload.get("event_id")
-        if str(event_id or "").strip().lower() in {"", "0", "default_event_id", "event_id"}:
-            payload["event_id"] = f"llm::{dataset}::{source_file}::{row_id}"
-        else:
-            payload["event_id"] = str(event_id)
+        origin = self._origin_from_raw(raw_input)
+        dataset = str(origin.get("source_name") or "generic")
+        source_file = raw_input.get("source_file", "inline")
+        row_id = raw_input.get("row_id", 0)
+        # La identidad del registro no procede del texto generado: se deriva
+        # siempre de metadatos de entrada verificables.
+        payload["event_id"] = f"llm::{dataset}::{source_file}::{row_id}"
         payload["modality"] = self._normalize_modality(payload.get("modality"), raw_input)
         if not payload.get("semantic_text"):
             payload["semantic_text"] = str(raw_input)
@@ -578,25 +660,24 @@ class LLMIngestParser:
         if payload.get("ts") is None and "ts" not in payload["missing_fields"]:
             payload["missing_fields"].append("ts")
         payload["mapping_confidence"] = max(0.0, min(1.0, float(payload["mapping_confidence"])))
-        provenance = payload.get("provenance") or {}
-        if not isinstance(provenance, dict):
-            provenance = {}
-        provenance_dataset = str(provenance.get("dataset") or "").strip().lower()
-        if provenance_dataset in {"", "generic", "unknown", "none", "null"}:
-            provenance["dataset"] = dataset
-        provenance.setdefault("source_file", source_file)
-        provenance.setdefault("row_id", row_id)
-        if provenance.get("split") not in {"train", "val", "test", "stream"}:
-            provenance["split"] = "stream"
-        if not isinstance(provenance.get("parser_version"), str) or not provenance.get("parser_version"):
-            provenance["parser_version"] = "llm-0.1.0"
-        payload["provenance"] = Provenance(**provenance).model_dump(mode="json")
+        raw_split = raw_input.get("split")
+        split = raw_split if raw_split in {"train", "val", "test", "stream"} else "stream"
+        # La procedencia es metadato de confianza: nunca se acepta del texto
+        # generado por el LLM, aunque su respuesta incluya esos campos.
+        payload["provenance"] = Provenance(
+            dataset=dataset,
+            source_file=None if source_file is None else str(source_file),
+            row_id=row_id,
+            split=split,
+            parser_version="llm-0.1.0",
+        ).model_dump(mode="json")
         return payload
 
     def _preserve_unmapped_technical_values(self, payload: dict[str, Any], raw_input: dict[str, Any]) -> None:
         row = raw_input.get("row")
         if not isinstance(row, dict):
             return
+        row = sanitize_llm_input({"row": row})["row"]
         telemetry = payload.get("telemetry")
         host = payload.get("host")
         if not isinstance(telemetry, dict):
@@ -629,9 +710,7 @@ class LLMIngestParser:
     def _origin_from_raw(
         self,
         raw_input: dict[str, Any],
-        incoming_provenance: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        incoming_provenance = incoming_provenance or {}
         raw_origin = raw_input.get("origin")
         origin: dict[str, Any] = dict(raw_origin) if isinstance(raw_origin, dict) else {}
         source_name = origin.get("source_name") or origin.get("dataset")
@@ -642,18 +721,17 @@ class LLMIngestParser:
             or raw_input.get("dataset_family")
             or raw_input.get("source_dataset")
             or raw_input.get("dataset")
-            or incoming_provenance.get("dataset")
             or "generic"
         )
         origin["source_name"] = str(source_name)
-        origin["source_file"] = str(raw_input.get("source_file", incoming_provenance.get("source_file", "inline")))
-        origin["row_id"] = raw_input.get("row_id", incoming_provenance.get("row_id", 0))
+        origin["source_file"] = str(raw_input.get("source_file", "inline"))
+        origin["row_id"] = raw_input.get("row_id", 0)
         return origin
 
     def _normalize_origin(self, value: Any, fallback: dict[str, Any], schema_profile: str | None) -> dict[str, Any]:
-        origin = dict(value) if isinstance(value, dict) else {}
-        for key, item in fallback.items():
-            origin.setdefault(key, item)
+        del value
+        # Ningun metadato de procedencia propuesto por el modelo se conserva.
+        origin = dict(fallback)
         if schema_profile:
             origin["schema_profile"] = schema_profile
         return {
@@ -777,7 +855,7 @@ class LLMIngestParser:
         return "other"
 
     def _is_label_like_key(self, key: Any) -> bool:
-        return is_predictive_target_field(key)
+        return is_predictive_target_field(key) and not is_allowed_raw_technical_field(key)
 
     def _clean_empty_values(self, value: Any) -> Any:
         if isinstance(value, dict):

@@ -115,10 +115,10 @@ recupera (§4).
 
 ## 7. Otras limitaciones a declarar
 
-- **Dependencia de APIs para estandarización en vivo**: la estandarización
-  LLM de eventos nuevos requiere API (Mistral) u Ollama local. Mitigada:
-  cache congelado (13.837 entradas, 0 errores) + adapter determinista de
-  fallback + modo `--offline` para la defensa.
+- **Dependencia de Mistral para estandarización en vivo**: todo evento crudo
+  nuevo requiere la API. No hay caché ni adaptador de respaldo en el flujo
+  final: un fallo produce abstención y revisión humana. Para la defensa, el
+  modo `--offline` utiliza `canonical_event` congelados y ya estandarizados.
 - **Raw vs canónico en Edge**: parte de la mejora frente al baseline crudo
   proviene de usar todas las columnas y de la representación; la réplica
   estricta de Jorge (0.4993) aísla esa comparación honestamente.
@@ -142,8 +142,8 @@ recupera (§4).
 - **Demo reproducible** (`scripts/demo_mcp_multiagent_case.py --offline`):
   4 casos con digest SHA256 estable idéntico entre ejecuciones y entre
   procesos; casos de baja confianza derivados a revisión humana.
-- **Suite**: 347 tests (74 de la línea base preservados; 273 nuevos para
-  MCP, agentes finales, mitigación anclada, auditor y demo).
+- **Suite**: pruebas automatizadas para MCP, agentes finales, mitigación
+  anclada, auditor y demo; el recuento exacto se obtiene con `pytest -q`.
 - **Trazabilidad**: todo caso devuelve `case_id` + `trace[]` completa con
   tiempos, confianzas y errores por agente; persistencia opcional en la
   memoria de casos SQLite.

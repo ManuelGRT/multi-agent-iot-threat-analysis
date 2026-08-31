@@ -123,6 +123,37 @@ def test_properly_flagged_abstention_is_review_not_reject():
     assert report.passed
 
 
+def test_standardizer_abstention_without_detector_is_valid_review():
+    trace = make_trace(["orchestrator", "final_standardizer", "final_judge"])
+    trace[1].status = "abstain"
+    case = CaseResult(
+        raw_input={"dataset": "iot23", "row_id": 7},
+        standardization=StandardizationInfo(
+            model="mistral-small-2603",
+            mapping_confidence=0.0,
+            abstain=True,
+            requires_human_review=True,
+            failure_code="llm_standardization_failed",
+            failure_reason="RuntimeError: Mistral no disponible",
+        ),
+        judge=JudgeInfo(
+            action="human_interrupt",
+            approved=False,
+            requires_human_review=True,
+            issues=["standardizer_abstained", "detection_missing"],
+        ),
+        trace=trace,
+    ).close()
+
+    report = auditor.audit(case)
+
+    assert case.status == "needs_human_review"
+    assert "final_detector" not in [entry.agent for entry in case.trace]
+    assert report.verdict == "review", report.issues
+    assert report.passed
+    assert not any("traza_detector_presente" in issue for issue in report.issues)
+
+
 # ---------------------------------------------------------------------------
 # consistencia
 # ---------------------------------------------------------------------------
@@ -415,6 +446,58 @@ def test_common_target_aliases_are_detected_before_group_aggregation():
 def test_attack_indicators_are_allowlisted_behavioral_signal():
     event = {**CANONICAL_EVENT, "attack_indicators": ["syn_flood_pattern"]}
     assert canonical_leakage_issues(event) == []
+
+
+def test_label_like_context_never_reaches_predictive_features():
+    from src.mcp.features import event_features
+
+    base_event = {
+        **CANONICAL_EVENT,
+        "telemetry": {"temperature": 21.5},
+        "host": {"cpu": 12.0},
+        "service_context": {
+            "protocol_family": "icmp",
+            "service": "telnet",
+            "payload": "username=admin password=test <script>xss</script>",
+        },
+    }
+    event = {
+        **base_event,
+        "telemetry": {**base_event["telemetry"], "risk": "Mirai"},
+        "host": {**base_event["host"], "family_hint": "DDoS"},
+        "behavior_tags": ["Mirai"],
+        "uncertainty": ["DDoS"],
+        "asset_context": "malware",
+        "service_context": {
+            **base_event["service_context"],
+            "threat": "malware",
+            "risk": "DDoS",
+            "family_hint": "Mirai",
+            "classification": "malicious",
+            "role": "botnet",
+        },
+    }
+
+    expected = event_features(base_event)
+    features = event_features(event)
+    serialized = " ".join(f"{key}={value}" for key, value in features.items()).casefold()
+
+    assert features == expected
+    assert "mirai" not in serialized
+    assert "ddos" not in serialized
+    assert "malware" not in serialized
+    assert not any(
+        key.startswith(("behavior.", "uncertainty.", "asset_context."))
+        for key in features
+    )
+    assert "behavior_tag_count" not in features
+    assert "uncertainty_count" not in features
+    assert features["context.service.protocol_family.icmp"] == 1
+    assert features["context.service.service.telnet"] == 1
+    assert any("password" in key and "xss" in key for key in features)
+
+    issues = canonical_leakage_issues(event)
+    assert any("service_context.risk" in issue for issue in issues)
 
 
 def test_completed_case_without_canonical_event_is_rejected():

@@ -8,6 +8,7 @@ previa sigue dependiendo de aquel; este modulo expone ``build_final_graph``
 y el helper ``run_case`` que devuelve un ``CaseResult`` completo con traza.
 
 Rutas de abstencion (revision humana):
+- fallo del LLM de estandarizacion -> judge
 - mapping_confidence < 0.5 en la estandarizacion -> judge
 - probabilidad de deteccion en zona gris (0.4-0.6) -> judge
 - errores de tool en cualquier agente -> judge
@@ -89,7 +90,6 @@ def default_mitigator_llm() -> LLMMitigationAgent:
 
 def default_final_agents(
     client: MCPToolClient | None = None,
-    allow_llm: bool = False,
     gray_low: float = 0.4,
     gray_high: float = 0.6,
     use_llm_mitigator: bool | None = None,
@@ -106,7 +106,7 @@ def default_final_agents(
         if enabled:
             llm = default_mitigator_llm()
     return FinalAgentBundle(
-        standardizer=FinalStandardizer(client=client, allow_llm=allow_llm),
+        standardizer=FinalStandardizer(client=client),
         detector=FinalDetector(client=client, gray_low=gray_low, gray_high=gray_high),
         classifier=FinalClassifier(client=client),
         mitigator=FinalMitigator(client=client, llm=llm),
@@ -167,10 +167,9 @@ def build_final_graph(
     checkpointer: Any = None,
     agents: FinalAgentBundle | None = None,
     client: MCPToolClient | None = None,
-    allow_llm: bool = False,
 ):
     """Compila el grafo final (langgraph si esta disponible, local si no)."""
-    agents = agents or default_final_agents(client=client, allow_llm=allow_llm)
+    agents = agents or default_final_agents(client=client)
     if StateGraph is None:
         return FinalLocalOrchestrator(agents)
 
@@ -256,7 +255,6 @@ def run_case(
     case_id: str | None = None,
     agents: FinalAgentBundle | None = None,
     client: MCPToolClient | None = None,
-    allow_llm: bool = False,
     use_llm_mitigator: bool | None = None,
     persist: bool = False,
     graph: Any = None,
@@ -269,7 +267,7 @@ def run_case(
     operacion falla lanza ``CasePersistenceError`` y no continua escribiendo.
     """
     agents = agents or default_final_agents(
-        client=client, allow_llm=allow_llm, use_llm_mitigator=use_llm_mitigator
+        client=client, use_llm_mitigator=use_llm_mitigator
     )
     graph = graph or build_final_graph(agents=agents)
     case_id = case_id or new_case_id()

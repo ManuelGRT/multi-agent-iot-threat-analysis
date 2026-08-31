@@ -33,16 +33,23 @@ class FinalJudge(FinalAgent):
         errors = list(state.get("errors") or [])
 
         issues: list[str] = []
+        standardizer_abstained = bool(ingest.get("abstain"))
         if errors:
             issues.append("pipeline_errors_present")
-        if float(ingest.get("mapping_confidence", 0.0) or 0.0) < REVIEW_MAPPING_CONFIDENCE:
-            issues.append("mapping_confidence_below_review_threshold")
-        if not detection:
-            issues.append("detection_missing")
-        elif detection.get("is_malicious") is not None:
-            probability = float(detection.get("probability", 0.0) or 0.0)
-            if bool(detection.get("is_malicious")) != (probability >= 0.5):
-                issues.append("detection_label_probability_mismatch")
+        if standardizer_abstained:
+            issues.append("standardizer_abstained")
+        else:
+            if (
+                float(ingest.get("mapping_confidence", 0.0) or 0.0)
+                < REVIEW_MAPPING_CONFIDENCE
+            ):
+                issues.append("mapping_confidence_below_review_threshold")
+            if not detection:
+                issues.append("detection_missing")
+            elif detection.get("is_malicious") is not None:
+                probability = float(detection.get("probability", 0.0) or 0.0)
+                if bool(detection.get("is_malicious")) != (probability >= 0.5):
+                    issues.append("detection_label_probability_mismatch")
         if detection.get("abstain"):
             issues.append("detector_abstained")
         if (

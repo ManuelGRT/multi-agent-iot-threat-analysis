@@ -27,6 +27,9 @@ import unicodedata
 from src.agents.predictive_sanitization import is_predictive_target_field
 from src.contracts.canonical import CanonicalEvent
 from src.mcp import features as canonical_features
+from src.mcp.standardization_guard import (
+    ALLOWED_CANONICAL_TARGET_LIKE_PATHS as _ALLOWED_CANONICAL_TARGET_LIKE_PATHS,
+)
 
 
 Task = Literal["binary", "multiclass", "standardization"]
@@ -37,30 +40,16 @@ ALLOWED_TASKS: frozenset[str] = frozenset({"binary", "multiclass", "standardizat
 ALLOWED_SPLITS: frozenset[str] = frozenset({"train", "val", "test"})
 _TASK_ORDER = {"binary": 0, "multiclass": 1, "standardization": 2}
 _SPLIT_ORDER = {"train": 0, "val": 1, "test": 2}
-_FORBIDDEN_FEATURE_PREFIXES = ("origin.", "attack_indicator.", "semantic_hint.")
-_ALLOWED_CANONICAL_TARGET_LIKE_PATHS = frozenset(
-    {
-        # These names describe protocol/schema concepts, not the authoritative
-        # attack targets from the manifest.  Keep every exception path-specific
-        # so the same target-like suffix anywhere else remains fail-closed.
-        "service_context.protocol_family",
-        "service_context.dns.query_class",
-        "telemetry_context.dns.query_class",
-        "service_context.dns.query.type",
-        "service_context.mqtt.message.type",
-        "telemetry_context.mqtt_message.type",
-        "service_context.icmp.type",
-        "service_context.dns.type",
-        "service_context.dns.qry.type",
-        "telemetry_context.iot_sensor.type",
-        "telemetry_context.dns.query.type",
-        "telemetry_context.sensor_data.type",
-        "host_context.interface.type",
-        "telemetry_context.geolocation.type",
-        "service_context.process.type",
-        "feature_groups.other.execution_class",
-        "host_context.metric_category",
-    }
+_FORBIDDEN_FEATURE_PREFIXES = (
+    "origin.",
+    "attack_indicator.",
+    "semantic_hint.",
+    "behavior.",
+    "uncertainty.",
+    "asset_context.",
+)
+_FORBIDDEN_FEATURE_KEYS = frozenset(
+    {"attack_indicator_count", "behavior_tag_count", "uncertainty_count"}
 )
 
 
@@ -1065,7 +1054,11 @@ def _find_target_keys(value: Any, prefix: str = "") -> list[str]:
 
 def _is_forbidden_feature(key: str) -> bool:
     lowered = key.casefold()
-    return is_predictive_target_field(key) or lowered.startswith(_FORBIDDEN_FEATURE_PREFIXES)
+    return (
+        is_predictive_target_field(key)
+        or lowered in _FORBIDDEN_FEATURE_KEYS
+        or lowered.startswith(_FORBIDDEN_FEATURE_PREFIXES)
+    )
 
 
 def _normalize_provider(provider: str | None) -> str | None:

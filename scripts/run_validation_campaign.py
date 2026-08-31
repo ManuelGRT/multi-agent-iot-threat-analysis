@@ -340,7 +340,7 @@ def standardization_command(config: CampaignConfig) -> tuple[str, ...]:
         "scripts/run_live_standardization.py",
         "--workers",
         str(config.workers),
-        "--retry-fallbacks",
+        "--retry-failures",
     )
 
 

@@ -6,8 +6,8 @@
 > reformularlo explicitamente como resultado preliminar.
 
 **Proyecto:** `tfm_multiagent` · Sistema multiagente de ciberseguridad IoT/IIoT sobre MCP
-**Modo:** en vivo — estandarización y mitigación usan los LLM disponibles (Mistral API por defecto)
-**Duración estimada:** 15–20 minutos (los 5 bloques) · **Plan B:** modo `--offline` (100 % determinista)
+**Modo:** en vivo — toda entrada cruda usa Mistral obligatoriamente; la contextualización LLM del mitigador es opcional
+**Duración estimada:** 15–20 minutos (los 5 bloques) · **Plan B:** modo `--offline` con `canonical_event` congelados (100 % determinista)
 
 ---
 
@@ -33,12 +33,12 @@ cd <ruta>\Proyecto_Sistema_Multiagente
 
 # 2) Configurar los LLM en vivo (misma terminal que usarás en la demo)
 $env:MISTRAL_API_KEY = "<clave>"
-$env:LLM_PROVIDER = "mistral"                    # estandarizacion en vivo
-$env:INGEST_LLM_MODEL = "mistral-small-latest"   # IMPRESCINDIBLE: sin esto el default es gemma3:12b (Ollama) y Mistral devuelve 400
+$env:INGEST_LLM_MODEL = "mistral-small-2603"      # opcional; es el default actual
+$env:INGEST_LLM_TIMEOUT_SECONDS = "60"            # recomendado para acotar cada llamada de la demo
 $env:MITIGATOR_LLM_PROVIDER = "mistral"          # mitigacion contextualizada
 $env:MITIGATOR_LLM_MODEL = "mistral-small-latest"
-$env:MISTRAL_RATE_LIMIT_RETRIES = "5"            # IMPORTANTE: el default es 0 reintentos;
-$env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # sin esto un solo 429 manda el mitigador a fallback
+$env:MISTRAL_RATE_LIMIT_RETRIES = "5"            # opcional: eleva el default de 3 reintentos a 5
+$env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # espera base si la respuesta no aporta Retry-After
 
 # 3) Ensayo general completo (una pasada de los bloques 1-4)
 # 4) Red de seguridad: comprobar que el modo offline funciona
@@ -47,13 +47,16 @@ $env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # sin esto un solo 429 manda el
 
 ### Resultado esperado
 
-- `232 passed` en la suite (unos minutos).
-- El ensayo offline termina con los 4 casos y **digests idénticos** a la
-  referencia (`exit 0`). Si algo falla el día de la demo, este es el plan B.
+- La suite completa termina en verde (el número de pruebas puede crecer).
+- El ensayo offline termina con los 4 `canonical_event` congelados y
+  **digests idénticos** a la referencia (`exit 0`). No llama al estandarizador
+  LLM: solo aplica la validación/sanitización técnica MCP. Si algo falla el
+  día de la demo, este es el plan B.
 
 > **Regla dura del proyecto:** en vivo solo se estandarizan **eventos
-> individuales**; nunca relanzar llamadas masivas a Mistral (el corpus ya está
-> congelado en la caché: 13.837 entradas, 0 errores).
+> individuales**; nunca relanzar llamadas masivas a Mistral. La caché de la
+> campaña (13.837 entradas, 0 errores) es evidencia histórica y no una ruta de
+> inferencia ni un fallback del sistema final.
 
 ---
 
@@ -85,11 +88,13 @@ CAPEC y chequeo de fuga de etiquetas con un caso trampa que debe ser detectado.�
 
 ## 2. Flujo multiagente completo con mitigación LLM (~5 min)
 
-**Qué contar:** «Ahora el flujo completo: estandarización → detección →
-clasificación → mitigación → juez, con auditoría en vivo de cada caso. La
-mitigación combina el catálogo threat intel (base auditable) con el LLM, que
-solo contextualiza: nada fuera del catálogo puede presentarse como conocimiento
-auditado.»
+**Qué contar:** «Ahora el flujo completo sobre cuatro eventos canónicos
+congelados: validación técnica → detección → clasificación → mitigación →
+juez, con auditoría en vivo de cada caso. Al estar ya estandarizados, no se
+repite Mistral; la sanitización es una frontera MCP, no una tarea del agente.
+La mitigación combina el catálogo threat intel (base auditable) con el LLM,
+que solo contextualiza: nada fuera del catálogo puede presentarse como
+conocimiento auditado.»
 
 ### Qué hacer
 
@@ -102,9 +107,9 @@ auditado.»
 | Caso | Salida esperada |
 |---|---|
 | **Edge-IIoTset (DDoS_UDP)** | `detect: malicioso=True p=0.986` · `classify: familia=ddos confianza=0.995` · `judge: accion=approve` · estado `completed`, auditoría `approve` |
-| **TON-IoT host** | `standardize: cache=True` (evento estandarizado por Mistral desde la caché congelada) |
-| **TON-IoT telemetry** | `cache=True`; si la confianza cae bajo los umbrales → `needs_human_review` (**explicarlo como comportamiento previsto**, no como fallo) |
-| **IoT-23 (flujo de red)** | `cache=True`, flujo completo con traza de 6 agentes |
+| **TON-IoT host** | `standardize: modelo=prestandardized_passthrough cache=False`; evento canónico congelado validado por MCP |
+| **TON-IoT telemetry** | `cache=False`; si la confianza cae bajo los umbrales → `needs_human_review` (**explicarlo como comportamiento previsto**, no como fallo) |
+| **IoT-23 (flujo de red)** | `cache=False`, flujo completo con traza de 6 agentes |
 
 - En cada caso: `mitigate: fuente=hybrid` (catálogo + LLM) y referencias
   `T14xx / CAPEC-xxx / M1037`. Los ítems contextualizados por el LLM van
@@ -112,10 +117,10 @@ auditado.»
   como `llm_suggested`.
 - Traza impresa: `orchestrator -> final_standardizer -> final_detector ->
   final_classifier -> final_mitigator -> final_judge`.
-- **Nota:** la verificación de digests idénticos aplica al modo `--offline`;
-  con LLM en vivo la redacción de las mitigaciones puede variar entre
-  ejecuciones (decirlo si alguien pregunta: por eso la evidencia congelada de
-  la memoria se generó en modo determinista).
+- **Nota:** en esta orden la estandarización sigue usando `canonical_event`
+  congelados; `--use-llm-mitigator` solo activa el LLM del mitigador. La
+  verificación de digests idénticos aplica al modo `--offline`; con el
+  mitigador LLM en vivo su redacción puede variar entre ejecuciones.
 
 **Qué señalar en pantalla:** la línea de comparativa con el TFM previo
 (0,9363 vs 0,7479, delta +0,1884) y la cobertura CAPEC 14/14 que el script
@@ -148,10 +153,11 @@ auténtico contra el servidor de threat intel.»
 
 ## 4. Caso nuevo estandarizado EN VIVO por el LLM, en el frontal web (~5 min)
 
-**Qué contar:** «Hasta ahora los eventos venían de datasets conocidos. Ahora un
-evento que el sistema no ha visto nunca: la estandarización la hace Mistral en
-vivo, y el resto del flujo continúa sobre el evento canónico resultante. Lo
-vemos en el visor web del sistema, que pinta el caso agente a agente.»
+**Qué contar:** «Hasta ahora hemos usado eventos canónicos congelados. Ahora
+entra un registro crudo que el sistema no ha visto nunca: Mistral realiza dos
+llamadas obligatorias, primero selecciona las columnas relevantes y después
+extrae el evento canónico. No hay caché ni adaptador de reserva. La frontera
+MCP valida y sanitiza la salida antes de que continúe el resto del flujo.»
 
 ### Qué hacer
 
@@ -166,17 +172,22 @@ Abrir **http://localhost:8000** en el navegador (a pantalla completa para la
 proyección) y:
 
 1. Seleccionar el ejemplo **«Flujo IoT-23 sospechoso (telnet)»**.
-2. Marcar las casillas **«Estandarización LLM en vivo»**, **«Mitigación
-   contextualizada por LLM»** y **«Persistir caso»**.
+2. Marcar, si se quiere mostrar la contextualización, **«Mitigación
+   contextualizada por LLM»** y marcar **«Persistir caso»**. La
+   estandarización viva no tiene casilla: para una entrada cruda Mistral es
+   siempre obligatorio.
 3. Pulsar **Analizar caso** y narrar la animación del pipeline mientras corre.
 
 ### Resultado esperado (y qué señalar en pantalla)
 
 - El pipeline se ilumina agente a agente: Orquestador → Estandarizador →
   Detector → Clasificador → Mitigador → Juez.
-- Tarjeta del Estandarizador: **«Desde caché: no»** y modelo de ingesta LLM —
-  **este es el momento clave del bloque: la estandarización acaba de ocurrir
-  en vivo** (la latencia de unos segundos es el coste declarado de esa llamada).
+- Tarjeta del Estandarizador: modelo, fuente `llm`, proveedor Mistral, perfil
+  de esquema, modalidad y confianza de mapeo. **Este es el momento clave del
+  bloque: han ocurrido dos llamadas en vivo** (selección + extracción); esa
+  latencia es el coste declarado de estandarizar un `row` crudo. La selección
+  de columnas queda registrada en `CaseResult.standardization`, pero el visor
+  actual no la presenta como un campo independiente.
 - Tarjeta del Detector: gauge de probabilidad **con la zona gris [0,4–0,6]
   dibujada** — si cae dentro, la abstención y la derivación al juez SE VEN
   (clasificador y mitigador quedan «omitido»): explicarla como comportamiento
@@ -191,13 +202,15 @@ proyección) y:
 - Banner final con el estado y el `case_id`; tabla de traza con los 6 agentes
   y, plegado, el `CaseResult` JSON completo.
 
-**Remate del bloque:** desmarcar «Estandarización LLM en vivo» y repetir el
-mismo caso → el evento se resuelve con el adaptador determinista y el catálogo
-puro: es la degradación controlada que garantiza que el sistema nunca se rompe.
+**Remate del bloque:** explicar la degradación controlada real: si falla la
+selección, la extracción o la validación de Mistral, el estandarizador se
+abstiene, no inventa un evento mediante caché o adaptador, y el juez cierra el
+caso con `human_interrupt` / `needs_human_review`. La sanitización pertenece a
+la frontera técnica MCP y no constituye razonamiento del agente.
 
 **Alternativa sin navegador** (por si falla la proyección): la misma llamada
 por consola con `Invoke-RestMethod http://127.0.0.1:8000/cases/analyze` y el
-JSON del ejemplo (cuerpo con `"allow_llm": true, "use_llm_mitigator": true`).
+JSON del ejemplo (cuerpo con `"use_llm_mitigator": true`).
 
 ---
 
@@ -214,7 +227,7 @@ JSON del ejemplo (cuerpo con `"allow_llm": true, "use_llm_mitigator": true`).
 
 ### Qué decir (cierre)
 
-> «Todo lo que han visto es reproducible: 347 tests, artefactos congelados,
+> «Todo lo que han visto es reproducible: una suite automatizada en verde, artefactos congelados,
 > digests estables en modo offline y una auditoría que certifica los baselines
 > en cada ejecución. La mejora no viene de un clasificador mejor, sino de
 > reorganizar el análisis en torno a una representación canónica y una
@@ -226,10 +239,10 @@ JSON del ejemplo (cuerpo con `"allow_llm": true, "use_llm_mitigator": true`).
 
 | Riesgo | Señal | Reacción |
 |---|---|---|
-| API de Mistral caída o sin red | Error/timeout en bloque 2 o 4 | Los agentes hacen **fallback automático** (mitigación → catálogo puro, estandarización → adapter). Decirlo en voz alta: *esto es la degradación controlada funcionando*. Continuar la demo |
+| API de Mistral caída o sin red | Abstención/timeout en el bloque 4 | El estandarizador no usa caché ni adaptador: deriva el registro al juez, que responde `human_interrupt`. El mitigador sí conserva su fallback independiente al catálogo. Continuar con los `canonical_event` congelados del modo offline |
 | Rate limit de Mistral | HTTP 429 | Los reintentos están configurados (`MISTRAL_RATE_LIMIT_RETRIES`); esperar unos segundos y repetir la llamada |
-| Sin red total | Nada en vivo funciona | Ejecutar todo con `--offline` (bloques 1, 2 y 3 completos; el bloque 4 se sustituye por la misma llamada API con `allow_llm: false`) |
-| Respuesta LLM lenta en el bloque 4 | > 30 s | Rellenar explicando la traza del caso anterior; el timeout del proveedor está configurado y el fallback salta solo |
+| Sin red total | Nada en vivo funciona | Ejecutar los bloques 1, 2 y 3 con `--offline`, usando los eventos canónicos congelados. El bloque de entrada cruda se sustituye por un `canonical_event` o se omite |
+| Respuesta LLM lenta en el bloque 4 | supera el timeout configurado | Si vence `INGEST_LLM_TIMEOUT_SECONDS`, se registra la abstención y el juez solicita revisión humana |
 | Pregunta incómoda: «¿el LLM se inventa mitigaciones?» | — | Enseñar `MitigationItem.source`: nada sale sin procedencia; lo no respaldado se marca `llm_suggested` (hay test que lo verifica) |
 
 ## Checklist final antes de empezar
@@ -240,4 +253,4 @@ JSON del ejemplo (cuerpo con `"allow_llm": true, "use_llm_mitigator": true`).
 - [ ] Ensayo offline con digests OK (plan B verificado)
 - [ ] `artifacts/` intacto (no borrar informes ni caché — regla dura)
 - [ ] API arrancada y frontal abierto en http://localhost:8000 (bloque 4)
-- [ ] `MISTRAL_RATE_LIMIT_RETRIES=5` exportada (sin ella, un 429 manda el mitigador a fallback)
+- [ ] Política de reintentos revisada: el cliente usa 3 por defecto; para la demo puede elevarse a 5

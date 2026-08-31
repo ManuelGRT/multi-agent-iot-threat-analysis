@@ -25,8 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 def _artifacts_available() -> bool:
     return (
-        resolve_path("standardized_dataset").exists()
-        and resolve_path("mistral_cache").exists()
+        resolve_path("mistral_cache").exists()
         and (PROJECT_ROOT / demo.EDGE_DATASET_PATH).exists()
     )
 
@@ -56,7 +55,7 @@ def build_case(case_id: str, created_shift_seconds: int = 0) -> CaseResult:
     return CaseResult(
         case_id=case_id,
         canonical_event=dict(CANONICAL_EVENT),
-        standardization=StandardizationInfo(mapping_confidence=0.9, from_cache=True),
+        standardization=StandardizationInfo(mapping_confidence=0.9, from_cache=False),
         detection=DetectionInfo(is_malicious=True, probability=0.97),
         classification=ClassificationInfo(attack_family="ddos", confidence=0.95),
         judge=JudgeInfo(action="approve", approved=True, final_label="ddos"),
@@ -98,11 +97,35 @@ def test_build_case_specs_covers_four_datasets():
     assert names == ["edge_iiotset", "ton_iot_host", "ton_iot_telemetry", "iot23"]
     edge = specs[0]
     assert edge["ground_truth"]["is_attack"] is True
-    assert "canonical_event" in edge["raw_input"]
-    for spec in specs[1:]:
-        assert spec["raw_input"]["cache_key"].split("::")[0].startswith(
-            ("TON_IOT", "IOT23")
-        )
+    for spec in specs:
+        assert "canonical_event" in spec["raw_input"]
+        assert "cache_key" not in spec["raw_input"]
+    assert all("evento canonico" in spec["titulo"].lower() for spec in specs)
+
+
+def test_frozen_mistral_entries_are_passed_as_canonical_events(monkeypatch):
+    """La cache historica selecciona artefactos, pero el grafo no la consulta."""
+    frozen_event = dict(CANONICAL_EVENT)
+    monkeypatch.setattr(demo, "pick_edge_attack_row", lambda cap: None)
+    monkeypatch.setattr(
+        demo,
+        "pick_cache_entry",
+        lambda prefix, cap: {
+            "ok": True,
+            "cache_key": f"{prefix}frozen-row",
+            "event": frozen_event,
+        },
+    )
+
+    specs = demo.build_case_specs(scan_cap=1)
+
+    assert [spec["name"] for spec in specs] == [
+        "ton_iot_host",
+        "ton_iot_telemetry",
+        "iot23",
+    ]
+    assert all(spec["raw_input"]["canonical_event"] is frozen_event for spec in specs)
+    assert all("cache_key" not in spec["raw_input"] for spec in specs)
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +201,10 @@ def test_missing_expected_case_fails_run(tmp_path, monkeypatch):
             {
                 "name": "iot23",
                 "titulo": "solo un caso",
-                "raw_input": {"dataset": "iot23", "row": {"proto": "tcp"}},
+                "raw_input": {
+                    "dataset": "iot23",
+                    "canonical_event": dict(CANONICAL_EVENT),
+                },
                 "ground_truth": None,
             }
         ],

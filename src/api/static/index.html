@@ -93,13 +93,12 @@
     <label for="payload">Evento crudo (petición JSON a <code>/cases/analyze</code>)</label>
     <textarea id="payload" spellcheck="false"></textarea>
     <div class="toggles">
-      <label><input type="checkbox" id="allow_llm"> Estandarización LLM en vivo (<code>allow_llm</code>)</label>
       <label><input type="checkbox" id="use_llm_mitigator"> Mitigación contextualizada por LLM</label>
       <label><input type="checkbox" id="persist"> Persistir caso en la memoria</label>
     </div>
     <button class="analizar" id="analizar">Analizar caso</button>
-    <p class="aviso">Sin las casillas LLM el flujo es 100&nbsp;% determinista (caché/adaptador + catálogo).
-    Con LLM en vivo se necesita <code>MISTRAL_API_KEY</code> en el entorno del servidor.</p>
+    <p class="aviso">Toda entrada cruda se estandariza obligatoriamente con Mistral y necesita
+    <code>MISTRAL_API_KEY</code>. Si el servicio no responde, el caso se deriva al juez para revisión humana.</p>
   </div>
 
   <!-- ============ FLUJO ============ -->
@@ -222,12 +221,14 @@ function pintarTarjetas(caso) {
 
   $("#t-std .cuerpo").innerHTML = `
     <div class="kv"><span class="k">Modelo</span><span>${std.model ?? "—"}</span></div>
-    <div class="kv"><span class="k">Desde caché</span><span>${std.from_cache ? "sí" : "no"}</span></div>
+    <div class="kv"><span class="k">Fuente</span><span>${std.source ?? "—"}</span></div>
+    <div class="kv"><span class="k">Proveedor</span><span>${std.provider ?? "—"}</span></div>
     <div class="kv"><span class="k">Perfil de esquema</span><span>${std.schema_profile ?? "—"}</span></div>
     <div class="kv"><span class="k">Modalidad</span><span>${std.modality ?? "—"}</span></div>
     <div class="kv"><span class="k">Confianza de mapeo</span><span>${pct(std.mapping_confidence)}</span></div>
     <div class="barra"><div class="relleno" style="width:${100 * (std.mapping_confidence ?? 0)}%"></div></div>
-    ${(std.mapping_confidence ?? 1) < 0.5 ? '<p><span class="badge warn">mapeo &lt; 0,5 → revisión humana</span></p>' : ""}`;
+    ${std.abstain ? `<p><span class="badge warn">ABSTENCIÓN → revisión humana</span><br><small>${std.failure_code ?? "standardization_failed"}</small></p>`
+      : (std.mapping_confidence ?? 1) < 0.5 ? '<p><span class="badge warn">mapeo &lt; 0,5 → revisión humana</span></p>' : ""}`;
 
   const verd = det.is_malicious == null ? '<span class="badge gris">sin veredicto</span>'
     : det.is_malicious ? '<span class="badge err">MALICIOSO</span>' : '<span class="badge ok">benigno</span>';
@@ -291,7 +292,6 @@ async function analizar() {
   let payload;
   try { payload = JSON.parse($("#payload").value); }
   catch { alert("El JSON de entrada no es válido"); return; }
-  payload.allow_llm = $("#allow_llm").checked;
   payload.use_llm_mitigator = $("#use_llm_mitigator").checked;
   payload.persist = $("#persist").checked;
 

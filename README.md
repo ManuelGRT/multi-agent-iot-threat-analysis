@@ -20,7 +20,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 
 | Agente | Qué hace | Qué decide |
 |---|---|---|
-| **Estandarizador** | Convierte el registro crudo (de cualquier dataset) en un evento canónico, con ayuda de un LLM (Mistral) o de un adaptador determinista | Confianza del mapeo; si es baja (< 0,5), el caso va a revisión |
+| **Estandarizador** | Convierte cada registro crudo (de cualquier dataset) en un evento canónico mediante Mistral en vivo. Para filas tabulares, Mistral selecciona primero las columnas y después genera el evento. Un `canonical_event` ya estandarizado solo atraviesa la validación y sanitización técnica del límite MCP | Confianza del mapeo; si Mistral no está disponible, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana. No usa caché ni adaptadores como *fallback* |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase: ¿qué familia de ataque? | Familia y confianza; si < 0,65, el caso va a revisión |
 | **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC); un LLM opcional las contextualiza al caso concreto | Todo lo que el LLM añada sin respaldo del catálogo queda marcado `llm_suggested` |
@@ -29,12 +29,19 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 
 Ideas clave del diseño:
 
-- **El sistema nunca ve las etiquetas.** La verdad terreno se separa de los
-  datos antes de entrar al flujo (como ocurriría en producción, donde los
-  eventos llegan sin etiquetar) y solo la usa la evaluación, fuera del grafo.
-- **Nada se acepta sin auditar**: también los casos benignos pasan por el juez,
-  y todo caso produce un `CaseResult` con su traza paso a paso.
-- **El LLM está anclado**: puede redactar y contextualizar, pero no puede
+- **Las columnas target reconocidas no llegan a Mistral ni a los modelos.** La
+  frontera MCP las retira antes del prompt y de la extracción de features. La
+  entrada cruda puede conservarse en `CaseResult` únicamente como trazabilidad;
+  en la evaluación, la verdad terreno se mantiene separada y fuera del grafo.
+- **Toda entrada cruda se estandariza con Mistral en vivo.** Si esa llamada no
+  puede completarse de forma válida, el sistema no fabrica un mapeo
+  determinista: registra una abstención controlada y entrega el caso al juez
+  para revisión humana. Los eventos canónicos congelados pueden reutilizarse
+  sin repetir el LLM, pero siempre pasan por validación y sanitización técnica.
+- **Todo caso pasa por el juez y queda auditable**: también los benignos se
+  revisan operacionalmente y todos producen un `CaseResult` con su traza. El
+  `CaseAuditor` es una comprobación posterior e independiente.
+- **El LLM del mitigador está anclado**: puede redactar y contextualizar, pero no puede
   inventar referencias — lo no respaldado por el catálogo se marca y el caso
   se supervisa.
 
@@ -63,21 +70,24 @@ columnas reproduce su baseline).
 ## Empezar en tres pasos
 
 ```powershell
-# 1. Instalar (Python 3.10+)
+# 1. Instalar (Python 3.12+)
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[mcp,inference]"
 
-# 2. Comprobar que todo está en verde (237 tests)
+# 2. Comprobar que todo está en verde
 python -m pytest -q
 
 # 3. Ver el sistema funcionando: demo reproducible de 4 casos (sin APIs externas)
 python scripts\demo_mcp_multiagent_case.py --offline
 ```
 
-La demo es determinista: cada caso se audita en vivo y su resultado se firma
-con un resumen SHA-256; repetirla otro día debe producir firmas idénticas.
+La demo es determinista porque utiliza cuatro eventos canónicos congelados:
+no envía registros crudos al estandarizador ni realiza llamadas externas. Cada
+caso sí atraviesa la validación/sanitización técnica, se audita en vivo y su
+resultado se firma con un resumen SHA-256; repetirla otro día debe producir
+firmas idénticas.
 
 ## Probar el sistema con el visor web
 
@@ -87,9 +97,15 @@ uvicorn src.api.app:app --port 8000
 
 Abre `http://localhost:8000`: un visor con ejemplos precargados muestra el
 flujo completo (pipeline por agente, decisiones, mitigaciones con referencias
-y la traza del caso). Sin las casillas de LLM, el flujo es 100 % determinista;
-para la contextualización por LLM define `MISTRAL_API_KEY` en el entorno del
-servidor.
+y la traza del caso). Para analizar un registro crudo debes definir
+`MISTRAL_API_KEY`: el estandarizador llama siempre a Mistral en vivo y nunca
+recurre a caché ni a adaptadores. Si el proveedor no responde o devuelve una
+salida inválida, el caso termina en el juez como abstención y revisión humana.
+`INGEST_LLM_TIMEOUT_SECONDS` permite acotar cada llamada (por ejemplo, `60`
+en una demo; una fila tabular realiza selección y extracción por separado).
+La contextualización LLM del mitigador sigue siendo opcional. Para una
+ejecución sin APIs externas utiliza la demo `--offline`, que carga eventos
+canónicos congelados.
 
 También puedes llamar a la API directamente:
 
@@ -102,6 +118,11 @@ Invoke-RestMethod http://127.0.0.1:8000/cases/analyze -Method Post `
 Devuelve el `CaseResult` completo. Con `"use_llm_mitigator": true` se activa la
 contextualización LLM anclada (proveedor y modelo vía `MITIGATOR_LLM_PROVIDER`
 y `MITIGATOR_LLM_MODEL`; si el LLM falla, hay *fallback* total al catálogo).
+Los endpoints antiguos `/events/analyze`, `/datasets/adapt` y
+`/datasets/analyze-file` responden `410 Gone`: se han cerrado para que ninguna
+ruta pública pueda reactivar adaptadores ni omitir la revisión del juez.
+`/datasets/supported` conserva únicamente metadatos de formatos históricos;
+no habilita su adaptación en el flujo final.
 
 ## Auditoría del sistema
 
@@ -130,11 +151,14 @@ verde.
 | `artifacts/` | Artefactos congelados: modelos desplegados, baselines, métricas de la campaña (`validation_2026/evaluation/`), demo |
 | `validacion_fase_c/` | Scripts y resultados de las validaciones por agente del capítulo 5 de la memoria |
 | `docs/` | Arquitectura, planes de trabajo y material para la memoria |
-| `tests/` | Suite completa (237 tests) |
+| `tests/` | Suite automatizada completa |
 
-Los datos crudos (`data/`), la caché de estandarización y los resultados
-masivos de la campaña quedan fuera de git por tamaño, pero **no deben borrarse
-del disco**: son la procedencia de los resultados congelados.
+Los datos crudos (`data/`), la caché histórica de estandarización y los
+resultados masivos de la campaña quedan fuera de git por tamaño, pero **no
+deben borrarse del disco**: son la procedencia de los resultados congelados.
+La caché histórica no se consulta como *fallback* al procesar nuevas entradas
+crudas; la demo offline solo reutiliza los eventos canónicos ya conservados en
+esos artefactos.
 
 ## Reglas del proyecto
 

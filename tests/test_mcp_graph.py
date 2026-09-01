@@ -39,6 +39,12 @@ FINAL_AGENT_NAMES = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def isolate_case_memory(tmp_path, monkeypatch):
+    """Evita que los tests del endpoint obligatorio ensucien la memoria real."""
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+
+
 def _models_loadable() -> bool:
     try:
         import xgboost  # noqa: F401
@@ -149,8 +155,13 @@ def test_gray_zone_case_abstains_to_human_review():
 
     assert case.status == "needs_human_review"
     assert case.detection.abstain is True
+    assert case.detection.is_malicious is None
     assert case.judge.action == "human_interrupt"
     assert "detector_abstained" in case.judge.issues
+    assert "malicious_without_classification" not in case.judge.issues
+    assert "malicious_without_mitigation" not in case.judge.issues
+    assert case.judge.final_label is None
+    assert case.judge.final_confidence == 0.0
 
 
 def test_low_mapping_confidence_goes_straight_to_judge():
@@ -412,6 +423,14 @@ def test_cases_analyze_endpoint_returns_case_result():
     assert payload["trace"], "el caso debe llevar traza"
     assert payload["trace"][0]["agent"] == "orchestrator"
     assert any(entry["agent"] == "final_judge" for entry in payload["trace"])
+
+    stored = MCPToolClient(mode="inprocess").call(
+        "case_memory", "get_case", case_id=payload["case_id"]
+    )
+    assert stored["ok"] is True
+    assert stored["status"] == payload["status"]
+    assert stored["case"] == payload
+    assert len(stored["trace"]) == len(payload["trace"])
 
 
 @pytest.mark.skipif(not _models_loadable(), reason="modelos .joblib no disponibles")

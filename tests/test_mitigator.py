@@ -670,7 +670,6 @@ def test_default_final_agents_env_flag_enables_llm(monkeypatch):
     assert default_final_agents().mitigator.llm is None
 
     monkeypatch.setenv("LLM_MITIGATOR_ENABLED", "true")
-    monkeypatch.setenv("MITIGATOR_LLM_PROVIDER", "mistral")
     bundle = default_final_agents()
     assert bundle.mitigator.llm is not None
     assert bundle.mitigator.llm.model_name == "llm_mitigator::mistral::mistral-small-2603"
@@ -698,6 +697,18 @@ def test_explicit_llm_mitigation_defaults_to_mistral(monkeypatch):
         bundle.mitigator.llm.model_name
         == "llm_mitigator::mistral::mistral-small-2603"
     )
+
+
+def test_online_mitigator_provider_cannot_override_mistral(monkeypatch):
+    from src.orchestration.mcp_graph import default_final_agents
+
+    monkeypatch.setenv("MITIGATOR_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("LLM_PROVIDER", "groq")
+
+    bundle = default_final_agents(use_llm_mitigator=True)
+
+    assert bundle.mitigator.llm is not None
+    assert bundle.mitigator.llm.model_name.startswith("llm_mitigator::mistral::")
 
 
 def test_event_context_drops_empty_and_forbidden_fields():

@@ -23,7 +23,7 @@ from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
 from src.eval.predictive_sanitization import is_predictive_target_field
-from src.agents.supervised_general import GeneralizedFeatureStandardizer
+from src.mcp.feature_standardizer import GeneralizedFeatureStandardizer
 from src.contracts.canonical import CanonicalEvent
 from src.eval.data_sanitization import sanitize_canonical_event
 

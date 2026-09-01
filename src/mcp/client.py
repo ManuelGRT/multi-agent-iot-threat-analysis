@@ -4,8 +4,7 @@
 Dos modos con el mismo contrato de llamada:
 
 - ``inprocess`` (por defecto): invoca directamente las tools registradas en
-  cada modulo servidor. Determinista, sin subprocesos: ideal para tests y
-  para el modo --offline de la demo.
+  cada modulo servidor. Es el modo usado por la API y los tests.
 - ``stdio``: arranca cada servidor como proceso MCP real
   (``python -m src.mcp.<server>``) y llama a las tools via el protocolo MCP
   con el SDK oficial. Es el modo que demuestra la capa MCP autentica.
@@ -26,11 +25,9 @@ from datetime import timedelta
 from typing import Any
 
 SERVER_MODULES: dict[str, str] = {
-    "datasets": "src.mcp.datasets_server",
     "inference": "src.mcp.inference_server",
     "case_memory": "src.mcp.case_memory_server",
     "threat_intel": "src.mcp.threat_intel_server",
-    "evaluation": "src.mcp.evaluation_server",
 }
 
 DEFAULT_STDIO_TIMEOUT_SECONDS = 120.0

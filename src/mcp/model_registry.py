@@ -1,54 +1,11 @@
 # src/mcp/model_registry.py
-"""Carga perezosa (lazy) y cacheada de los modelos .joblib preparados.
-
-Incluye el shim ``EncodedClassifier``: el clasificador de familia se serializo
-desde el script de entrenamiento (``__main__.EncodedClassifier``), por lo que
-al deserializar desde otro proceso hay que ofrecer una clase compatible en las
-rutas de modulo que pickle pueda buscar.
-"""
+"""Carga perezosa (lazy) y cacheada de los modelos .joblib preparados."""
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from src.mcp.common import resolve_path
 from src.mcp.features import event_features
-
-
-class EncodedClassifier:
-    """Shim compatible con la clase del script de entrenamiento.
-
-    Solo necesita los atributos que pickle restaura (``pipeline`` y
-    ``encoder``) y los metodos usados en inferencia.
-    """
-
-    def __init__(self, pipeline: Any = None):
-        self.pipeline = pipeline
-        self.encoder = None
-
-    def predict(self, x: list[dict[str, Any]]) -> list[str]:
-        encoded = self.pipeline.predict(x)
-        return [str(item) for item in self.encoder.inverse_transform(encoded)]
-
-    def predict_proba(self, x: list[dict[str, Any]]):
-        return self.pipeline.predict_proba(x)
-
-    @property
-    def classes(self) -> list[str]:
-        return [str(item) for item in self.encoder.classes_]
-
-
-def _register_shims() -> None:
-    """Expone EncodedClassifier alli donde el pickle pueda buscarlo."""
-    for module_name in ("__main__", "train_xgboost_attack_family_balanced_standardized"):
-        module = sys.modules.get(module_name)
-        if module is None:
-            import types
-
-            module = types.ModuleType(module_name)
-            sys.modules[module_name] = module
-        if not hasattr(module, "EncodedClassifier"):
-            module.EncodedClassifier = EncodedClassifier
 
 
 _CACHE: dict[str, Any] = {}
@@ -59,7 +16,6 @@ def load_model(key: str) -> Any:
     if key not in _CACHE:
         import joblib
 
-        _register_shims()
         path = resolve_path(key)
         if not path.exists():
             raise FileNotFoundError(f"Modelo no encontrado: {path}")

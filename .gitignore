@@ -20,18 +20,9 @@ htmlcov/
 /build/
 /dist/
 
-# Artefactos históricos y salidas de ejecución. Se conservan en disco, pero la
-# versión publicable solo incluye los dos modelos desplegados y el baseline.
-/artifacts/*
-!/artifacts/models/
-/artifacts/models/*
-!/artifacts/models/xgboost_detection_standardized_with_edge_20260705.joblib
-!/artifacts/models/xgboost_attack_family_balanced_group_20260705.joblib
-!/artifacts/models/xgboost_detection_validation_2026_20260822.joblib
-!/artifacts/models/xgboost_attack_family_validation_2026_20260822.joblib
-!/artifacts/baselines/
-/artifacts/baselines/*
-!/artifacts/baselines/jorge_and_current_baselines.json
+# Estado local, artefactos de evaluación y modelos históricos. Los dos modelos
+# del runtime se versionan como recursos bajo src/mcp/data/models/.
+/artifacts/
 
 # Transferencias temporales
 _tmp_transfer/

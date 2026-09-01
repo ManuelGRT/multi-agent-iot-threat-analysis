@@ -1,4 +1,4 @@
-from src.agents.supervised_general import GeneralizedFeatureStandardizer
+from src.mcp.feature_standardizer import GeneralizedFeatureStandardizer
 from src.contracts.canonical import CanonicalEvent, Provenance
 
 

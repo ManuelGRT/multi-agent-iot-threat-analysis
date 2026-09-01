@@ -1,11 +1,8 @@
 # src/orchestration/mcp_graph.py
-"""Orquestador final sobre la capa MCP (Fase 3 del plan de cierre).
+"""Orquestador del sistema multiagente online sobre la capa MCP.
 
-Reutiliza la topologia del grafo original (standardize -> detect -> classify
--> explain -> judge -> end) pero con los agentes finales que encapsulan los
-modelos .joblib preparados via tools MCP. NO modifica ``graph.py``: la suite
-previa sigue dependiendo de aquel; este modulo expone ``build_final_graph``
-y el helper ``run_case`` que devuelve un ``CaseResult`` completo con traza.
+Expone ``build_final_graph`` y el helper ``run_case``. Los agentes finales
+encapsulan las tools MCP y producen un ``CaseResult`` completo con traza.
 
 Rutas de abstencion (revision humana):
 - fallo del LLM de estandarizacion -> judge
@@ -66,37 +63,21 @@ def _optional_float_env(name: str) -> float | None:
 
 
 def default_mitigator_llm() -> LLMMitigationAgent:
-    """Construye el backend LLM del mitigador desde variables de entorno.
+    """Construye la contextualización Mistral del mitigador.
 
-    Patron identico al resto de agentes LLM: MITIGATOR_LLM_MODEL /
-    MITIGATOR_LLM_PROVIDER / MITIGATOR_LLM_TIMEOUT_SECONDS, con LLM_PROVIDER
-    como provider global. El proveedor final por defecto es Mistral: si no
-    esta disponible, ``FinalMitigator`` conserva automaticamente el catalogo.
+    El proveedor del runtime online es deliberadamente fijo. Si Mistral no
+    está disponible, ``FinalMitigator`` conserva la respuesta del catálogo.
     """
-    provider = (
-        os.getenv("MITIGATOR_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "mistral"
-    ).strip().lower()
-    # El modelo por defecto se resuelve segun el proveedor EFECTIVO del
-    # mitigador (no segun LLM_PROVIDER global, que puede ser otro).
-    model = os.getenv("MITIGATOR_LLM_MODEL")
-    if not model:
-        if provider == "mistral":
-            model = (
-                os.getenv("MISTRAL_AGENT_MODEL")
-                or os.getenv("INGEST_LLM_MODEL")
-                or "mistral-small-2603"
-            )
-        elif provider == "openrouter":
-            model = os.getenv("OPENROUTER_AGENT_MODEL", "openai/gpt-oss-120b:free")
-        elif provider == "transformers":
-            model = os.getenv("TRANSFORMERS_AGENT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
-        else:
-            model = os.getenv("OLLAMA_AGENT_MODEL") or "gemma3:12b"
+    model = (
+        os.getenv("MITIGATOR_LLM_MODEL")
+        or os.getenv("MISTRAL_AGENT_MODEL")
+        or os.getenv("INGEST_LLM_MODEL")
+        or "mistral-small-2603"
+    )
     return LLMMitigationAgent(
         model=model,
-        base_url=os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434"),
         timeout_seconds=_optional_float_env("MITIGATOR_LLM_TIMEOUT_SECONDS"),
-        provider=provider,
+        provider="mistral",
     )
 
 

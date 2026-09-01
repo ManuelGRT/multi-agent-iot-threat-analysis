@@ -1,264 +1,172 @@
-# Guión de la demo completa del sistema (en vivo, con LLMs)
+# Guion de demostración online
 
-> **AVISO PARA LA DEFENSA:** 0.9363 es una comparativa historica, no una metrica
-> final con split limpio. No usar el mensaje central de este guion hasta
-> completar las fases C-F de `plan_validacion_metricas_por_dataset.md` o
-> reformularlo explicitamente como resultado preliminar.
+**Objetivo:** enseñar el flujo completo con una entrada cruda, Mistral,
+modelos empaquetados, mitigación anclada, persistencia y auditoría posterior.
 
-**Proyecto:** `tfm_multiagent` · Sistema multiagente de ciberseguridad IoT/IIoT sobre MCP
-**Modo:** en vivo — la entrada llega limpia; un duplicado exacto puede reutilizar un éxito Mistral y todo *cache miss* exige Mistral; el mitigador intenta siempre la contextualización LLM y todo caso se persiste
-**Duración estimada:** 15–20 minutos (los 5 bloques) · **Plan B:** modo `--offline` con `canonical_event` congelados (100 % determinista)
+**Duración estimada:** 12–15 minutos.
 
----
+## 0. Preparación
 
-## Mensaje central (repetirlo en apertura y cierre)
-
-> La aportación no es «otro clasificador que gana»: la arquitectura produce una
-> **representación canónica más rica y desacoplada** que habilita mejores modelos
-> posteriores (F1 multiclase **0,9363** frente a **0,7479** del mejor LLM
-> fine-tuned del TFM previo), con **trazabilidad completa por caso** y
-> **mitigación anclada a conocimiento verificable** (ATT&CK/CAPEC).
-
----
-
-## 0. Preparación previa (el día antes — no en directo)
-
-### Qué hacer
+La entrada de la demo debe estar libre de targets. La sanitización se realiza
+al preparar datasets de entrenamiento o evaluación, nunca durante la petición.
 
 ```powershell
-cd <ruta>\Proyecto_Sistema_Multiagente
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install ".[test]"
 
-# 1) Entorno y suite completa (usar SIEMPRE el venv del proyecto)
-.\.venv\Scripts\python.exe -m pytest -q
-
-# 2) Configurar los LLM en vivo (misma terminal que usarás en la demo)
-$env:MISTRAL_API_KEY = "<clave>"
-$env:INGEST_LLM_MODEL = "mistral-small-2603"      # opcional; es el default actual
-$env:INGEST_LLM_TIMEOUT_SECONDS = "60"            # recomendado para acotar cada llamada de la demo
-$env:MITIGATOR_LLM_PROVIDER = "mistral"          # mitigacion contextualizada
-$env:MITIGATOR_LLM_MODEL = "mistral-small-2603"
-$env:MISTRAL_RATE_LIMIT_RETRIES = "5"            # opcional: eleva el default de 3 reintentos a 5
-$env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # espera base si la respuesta no aporta Retry-After
-
-# 3) Ensayo general completo (una pasada de los bloques 1-4)
-# 4) Red de seguridad: comprobar que el modo offline funciona
-.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --offline
+$env:MISTRAL_API_KEY="..."
+$env:INGEST_LLM_TIMEOUT_SECONDS="60"
+$env:TFM_STATE_DIR=".runtime-state"
 ```
 
-### Resultado esperado
-
-- La suite completa termina en verde (el número de pruebas puede crecer).
-- El ensayo offline termina con los 4 `canonical_event` congelados y
-  **digests idénticos** a la referencia (`exit 0`). No llama al estandarizador
-  LLM: solo aplica la validación contractual MCP. Si algo falla el
-  día de la demo, este es el plan B.
-
-> **Regla dura del proyecto:** el grafo recibe entradas limpias; la sanitización
-> anti-leakage se realiza antes, al preparar entrenamiento, validación y
-> evaluación. En operación, la caché SQLite por hash exacto solo reutiliza
-> éxitos Mistral para duplicados; un *miss* siempre requiere Mistral.
-
----
-
-## 1. Apertura — Auditoría E2E del sistema (~2 min)
-
-**Qué contar mientras corre:** «Antes de enseñar nada, el propio sistema se
-audita: humo de extremo a extremo en 4 datasets, métricas de los modelos
-desplegados reproduciendo su split de test exacto, certificación de los
-baselines congelados de la comparativa con el TFM previo, cobertura del mapeo
-CAPEC y chequeo de fuga de etiquetas con un caso trampa que debe ser detectado.»
-
-### Qué hacer
+No mostrar ni guardar la clave en capturas, terminales compartidos o archivos
+versionados. Antes de la defensa, comprobar:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\run_system_audit.py
+python -m pytest -q
 ```
 
-### Resultado esperado
+## 1. Presentar la arquitectura
 
-- **7 semáforos en VERDE**, ejecución determinista en **menos de 10 segundos**, `exit 0`.
-- Smoke E2E: **20/20 casos válidos** (Edge-IIoTset, TON-IoT host y telemetry, IoT-23).
-- Batch de modelos desplegados: **delta 0,0** frente a las métricas congeladas.
-- Baselines certificados: 0,9363 ≥ 0,93 y > 0,7479 (sin re-experimentar).
-- Cobertura CAPEC del TFM previo: **14/14**.
-- Leakage: **0/200** y el caso trampa **sí detectado** (valida el detector de fugas).
-- Se genera `artifacts/informe_auditoria_sistema_<fecha>.md` (mostrarlo un segundo).
+Explicación breve:
 
----
+> «La API admite un registro o texto crudo limpio. El estandarizador busca un
+> éxito Mistral para ese contenido y, si no existe, Mistral selecciona las
+> columnas y construye el evento canónico. Después actúan detector,
+> clasificador, mitigador y juez. El caso se persiste y un auditor independiente
+> puede comprobarlo posteriormente.»
 
-## 2. Flujo multiagente completo con mitigación LLM (~5 min)
+Señalar que el runtime contiene tres servidores MCP:
 
-**Qué contar:** «Ahora el flujo completo sobre cuatro eventos canónicos
-congelados: validación técnica → detección → clasificación → mitigación →
-juez, con auditoría en vivo de cada caso. Al estar ya estandarizados, no se
-repite Mistral; el runtime solo valida el contrato y no sanitiza.
-La mitigación combina el catálogo threat intel (base auditable) con el LLM,
-que solo contextualiza: nada fuera del catálogo puede presentarse como
-conocimiento auditado.»
+- `inference`: estandarización y modelos XGBoost;
+- `case_memory`: casos y trazas SQLite;
+- `threat_intel`: catálogo ATT&CK/CAPEC y mitigaciones.
 
-### Qué hacer
+No hay adaptadores, agentes alternativos ni un endpoint para introducir
+`canonical_event`.
+
+## 2. Arrancar API y frontend
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --use-llm-mitigator
+uvicorn src.api.app:app --host 0.0.0.0 --port 8000
 ```
 
-### Resultado esperado (4 casos por consola)
-
-| Caso | Salida esperada |
-|---|---|
-| **Edge-IIoTset (DDoS_UDP)** | `detect: malicioso=True p=0.986` · `classify: familia=ddos confianza=0.995` · `judge: accion=approve` · estado `completed`, auditoría `approve` |
-| **TON-IoT host** | `standardize: modelo=prestandardized_passthrough cache=False`; evento canónico congelado validado por MCP |
-| **TON-IoT telemetry** | `cache=False`; si la confianza cae bajo los umbrales → `needs_human_review` (**explicarlo como comportamiento previsto**, no como fallo) |
-| **IoT-23 (flujo de red)** | `cache=False`, flujo completo con traza de 6 agentes |
-
-- En cada caso: `mitigate: fuente=hybrid` (catálogo + LLM) y referencias
-  `T14xx / CAPEC-xxx / M1037`. Los ítems contextualizados por el LLM van
-  marcados con su procedencia (`llm`); cualquier aportación sin respaldo saldría
-  como `llm_suggested`.
-- Traza impresa: `orchestrator -> final_standardizer -> final_detector ->
-  final_classifier -> final_mitigator -> final_judge`.
-- **Nota:** en esta orden la estandarización sigue usando `canonical_event`
-  congelados; `--use-llm-mitigator` solo activa el LLM del mitigador. La
-  verificación de digests idénticos aplica al modo `--offline`; con el
-  mitigador LLM en vivo su redacción puede variar entre ejecuciones.
-
-**Qué señalar en pantalla:** la línea de comparativa con el TFM previo
-(0,9363 vs 0,7479, delta +0,1884) y la cobertura CAPEC 14/14 que el script
-imprime al final vía tools MCP.
-
----
-
-## 3. Protocolo MCP real (~1 min)
-
-**Qué contar:** «La capa de herramientas no es una abstracción de papel: cada
-servidor habla el protocolo MCP real por stdio. Lo demostramos con un handshake
-auténtico contra el servidor de threat intel.»
-
-### Qué hacer
+Abrir `http://localhost:8000` a pantalla completa. Como alternativa de
+despliegue, puede mostrarse la misma aplicación con:
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\demo_mcp_multiagent_case.py --offline --stdio-smoke
+docker compose up --build
 ```
 
-### Resultado esperado
+La imagen ya incluye el frontend, el catálogo y los dos modelos activos. El
+volumen de estado conserva caché y casos; `MISTRAL_API_KEY` se inyecta por
+entorno o mediante un `.env` local no versionado.
 
-- Handshake MCP correcto: el servidor `threat_intel` arranca como proceso,
-  lista sus tools (`map_family_to_attack`, `suggest_mitigations`,
-  `get_jorge_capec_coverage`…) y responde a una llamada real.
-- **Si preguntan por qué no toda la demo va por stdio:** funciona (hay tests),
-  pero arrancar un servidor por llamada recarga los modelos y es inviable en
-  vivo; la operación real usaría servidores persistentes. Honestidad técnica.
+## 3. Analizar un registro crudo
 
----
+1. Seleccionar un ejemplo del visor, preferiblemente **IoT-23 · botnet C&C**.
+2. Mostrar que el JSON contiene `row` y no contiene targets ni
+   `canonical_event`.
+3. Pulsar **Analizar caso**.
+4. Narrar la secuencia:
+   Estandarizador → Detector → Clasificador → Mitigador → Juez.
 
-## 4. Caso nuevo estandarizado EN VIVO por el LLM, en el frontal web (~5 min)
+Qué señalar:
 
-**Qué contar:** «Hasta ahora hemos usado eventos canónicos congelados. Ahora
-entra un registro crudo ya limpio. El runtime calcula su hash exacto: si no hay
-un éxito Mistral previo, Mistral realiza dos llamadas obligatorias, primero
-selecciona las columnas relevantes y después extrae el evento canónico. La
-salida se valida —no se limpia— antes de continuar. Nunca hay adaptador.»
+- El estandarizador informa fuente, modelo, perfil y confianza. En un primer
+  *cache miss*, Mistral realiza la selección de columnas y la extracción. Si el
+  contenido ya tuvo un éxito, la caché evita repetir esas llamadas y reconstruye
+  la identidad del caso actual.
+- El detector muestra probabilidad y la zona gris `[0.4, 0.6]`; dentro de ella
+  se abstiene y el juez solicita revisión humana.
+- El clasificador muestra familia, confianza y puntuaciones principales. Una
+  confianza inferior a `0.65` también deriva el caso.
+- El mitigador muestra primero la contextualización de Mistral y mantiene
+  visibles las recomendaciones y referencias del catálogo. Los elementos
+  `llm_suggested` aparecen marcados como no respaldados.
+- El juez aprueba el caso o produce `human_interrupt`; esta última salida es
+  una degradación controlada, no una clasificación maliciosa forzada.
 
-### Qué hacer
+## 4. Distinguir Mistral y catálogo en mitigación
 
-Arrancar la API (hereda las variables de entorno de esta terminal) y abrir el
-frontal:
+Usar una recomendación mostrada en pantalla para explicar:
+
+- **Catálogo:** aporta el identificador ATT&CK/CAPEC, la medida verificable y
+  su URL.
+- **Mistral:** redacta el contexto específico del evento y puede reformular la
+  acción sin convertirse en fuente de autoridad.
+
+Si Mistral falla en esta etapa, se conserva el catálogo y el juez todavía puede
+cerrar el caso. Este *fallback* pertenece solo al mitigador. Si falla Mistral
+durante un *cache miss* de estandarización, no existe un sustituto: el
+estandarizador se abstiene y el juez solicita revisión humana.
+
+## 5. Mostrar persistencia y auditoría
+
+Al final del visor:
+
+- mostrar el `case_id`, el estado y la traza completa;
+- desplegar el `CaseResult` si se necesita justificar una decisión;
+- abrir **Auditoría posterior independiente**;
+- señalar el veredicto `approve`, `review` o `reject` y la descripción breve de
+  cada comprobación.
+
+La misma auditoría puede consultarse por API:
 
 ```powershell
-.\.venv\Scripts\uvicorn.exe src.api.app:app --port 8000
+Invoke-RestMethod http://127.0.0.1:8000/cases/<case_id>/audit
 ```
 
-Abrir **http://localhost:8000** en el navegador (a pantalla completa para la
-proyección) y:
+## 6. Repetir para demostrar la caché
 
-1. Seleccionar el ejemplo **«[IoT-23] Ataque real · botnet C&C»**.
-2. Comprobar que el frontal no presenta controles para desactivar la
-   contextualización ni la persistencia: ambas son políticas del endpoint.
-3. Pulsar **Analizar caso** y narrar la animación del pipeline mientras corre.
+Enviar exactamente el mismo contenido una segunda vez. La traza del
+estandarizador debe indicar un *cache hit*. Aclarar que:
 
-### Resultado esperado (y qué señalar en pantalla)
+- solo se reutilizan éxitos Mistral validados;
+- la identidad y procedencia se reconstruyen para el caso nuevo;
+- la caché no selecciona columnas mediante reglas deterministas;
+- los fallos nunca quedan cacheados como estandarizaciones válidas.
 
-- El pipeline se ilumina agente a agente: Orquestador → Estandarizador →
-  Detector → Clasificador → Mitigador → Juez.
-- Tarjeta del Estandarizador: modelo, fuente `llm`, proveedor Mistral, perfil
-  de esquema, modalidad y confianza de mapeo. **Este es el momento clave del
-  bloque: han ocurrido dos llamadas en vivo** (selección + extracción); esa
-  latencia es el coste declarado de estandarizar un `row` crudo. La selección
-  de columnas queda registrada en `CaseResult.standardization`, pero el visor
-  actual no la presenta como un campo independiente.
-- Tarjeta del Detector: gauge de probabilidad **con la zona gris [0,4–0,6]
-  dibujada** — si cae dentro, la abstención y la derivación al juez SE VEN
-  (clasificador y mitigador quedan «omitido»): explicarla como comportamiento
-  previsto, no como fallo.
-- Tarjeta del Clasificador: familia con su top-5 de puntuaciones en barras (no
-  prometer una familia concreta en un evento inventado; el valor está en las
-  confianzas visibles).
-- Tarjeta del Mitigador: fuente visible `Mistral + catálogo` cuando existe
-  contextualización y `catálogo` cuando se aplica el fallback. Para una base
-  contextualizada muestra primero el texto de Mistral y debajo su literal
-  catalogado; si Mistral no respondió, muestra el
-  catálogo. Las `llm_suggested` se enseñan completas y marcadas como no
-  respaldadas. Las referencias aparecen como chips clicables a
-  attack.mitre.org — clicar una en vivo (T1584.005) para mostrar que son reales.
-- Banner final con el estado y el `case_id`; tabla de traza con los 6 agentes
-  y, plegado, el `CaseResult` JSON completo.
-- Debajo de la traza aparece **Auditoría posterior independiente**: el auditor
-  lee el `CaseResult` ya persistido, muestra `approve`/`review`/`reject` y el
-  número de comprobaciones superadas. El desplegable incluye una descripción
-  breve de cada comprobación. Señalar que no forma parte de la ruta operacional.
+## 7. Superficie pública
 
-**Remate del bloque:** explicar la degradación controlada real: si falla la
-selección, la extracción o la validación de Mistral después de un *cache miss*,
-el estandarizador se abstiene y el juez cierra el caso con `human_interrupt` /
-`needs_human_review`. Un *hit* solo puede reutilizar un éxito Mistral para el
-mismo contenido limpio y reconstruye identidad/procedencia; nunca se ejecuta
-un adaptador. La sanitización no forma parte del runtime ni del grafo.
+Mostrar, si surge la pregunta, que la API solo publica:
 
-**Alternativa sin navegador** (por si falla la proyección): la misma llamada
-por consola con `Invoke-RestMethod http://127.0.0.1:8000/cases/analyze` y el
-JSON del ejemplo; no hay que añadir flags operativos al cuerpo. Con el
-`case_id` devuelto, consultar el mismo informe mostrado por el panel mediante
-`Invoke-RestMethod http://127.0.0.1:8000/cases/<case_id>/audit`.
+- `POST /cases/analyze` con `row` o `text`;
+- `GET /cases/{case_id}/audit`;
+- `GET /health`.
 
----
+Las rutas antiguas de eventos, datasets y adaptadores no están registradas y
+responden `404`. El endpoint vigente rechaza `canonical_event` con `422`, de
+modo que tampoco se puede omitir Mistral enviando un evento canónico.
 
-## 5. Cierre — Trazabilidad y evidencia (~3 min)
+## 8. Riesgos durante la demostración
 
-### Qué hacer
-
-1. Abrir el JSON del caso persistido (o `artifacts/demo/demo_case_edge_iiotset_*.json`)
-   y recorrer en 30 segundos: `case_id` → salidas por etapa → `trace[]` →
-   referencias con URL de MITRE.
-2. Mostrar el informe de auditoría generado en el bloque 1.
-3. Cerrar con la tabla de la memoria (capítulo 5): 0,4993 (crudo) → 0,9363
-   (canónico) vs 0,7479 (LLM FT previo).
-
-### Qué decir (cierre)
-
-> «Todo lo que han visto es reproducible: una suite automatizada en verde, artefactos congelados,
-> digests estables en modo offline y una auditoría que certifica los baselines
-> en cada ejecución. La mejora no viene de un clasificador mejor, sino de
-> reorganizar el análisis en torno a una representación canónica y una
-> arquitectura auditable de extremo a extremo.»
-
----
-
-## Riesgos y plan B
-
-| Riesgo | Señal | Reacción |
+| Riesgo | Comportamiento esperado | Explicación |
 |---|---|---|
-| API de Mistral caída o sin red | Abstención/timeout en el bloque 4 | Un duplicado exacto con éxito Mistral previo puede resolverse desde SQLite; ante *cache miss*, el estandarizador se abstiene y el juez responde `human_interrupt`. Nunca usa adaptadores. El mitigador sí conserva su fallback independiente al catálogo |
-| Rate limit de Mistral | HTTP 429 | Los reintentos están configurados (`MISTRAL_RATE_LIMIT_RETRIES`); esperar unos segundos y repetir la llamada |
-| Sin red total | Nada en vivo funciona | Ejecutar los bloques 1, 2 y 3 con `--offline`, usando los eventos canónicos congelados. El bloque de entrada cruda se sustituye por un `canonical_event` o se omite |
-| Respuesta LLM lenta en el bloque 4 | supera el timeout configurado | Si vence `INGEST_LLM_TIMEOUT_SECONDS`, se registra la abstención y el juez solicita revisión humana |
-| Pregunta incómoda: «¿el LLM se inventa mitigaciones?» | — | Enseñar `MitigationItem.source`: nada sale sin procedencia; lo no respaldado se marca `llm_suggested` (hay test que lo verifica) |
+| Mistral no responde en un *cache miss* | Abstención y `human_interrupt` | El sistema falla de forma cerrada; no usa un adaptador ni inventa un evento |
+| El contenido ya está cacheado | El flujo continúa sin nueva llamada | Se reutiliza un éxito Mistral para el mismo hash exacto |
+| Mistral falla solo en mitigación | Se muestran medidas del catálogo | Es el único fallback operacional |
+| Rate limit | Error controlado o reintento configurado | Esperar y repetir; no cambiar la entrada para ocultarlo |
+| Confianza del detector o clasificador baja | Revisión humana | Es una decisión prevista por los umbrales |
 
-## Checklist final antes de empezar
+No se presenta una supuesta demo offline autocontenida: la funcionalidad
+online requiere Mistral en todo *cache miss*. Si no hay red, puede demostrarse
+la degradación controlada o utilizar contenido cuyo éxito ya exista en la caché
+persistente, explicándolo explícitamente.
 
-- [ ] Terminal en la raíz del proyecto, venv activo (`.venv\Scripts\...`)
-- [ ] Variables de entorno de los LLM exportadas (bloque 0)
-- [ ] `pytest -q` verde ese mismo día
-- [ ] Ensayo offline con digests OK (plan B verificado)
-- [ ] `artifacts/` intacto (no borrar informes ni caché — regla dura)
-- [ ] API arrancada y frontal abierto en http://localhost:8000 (bloque 4)
-- [ ] Política de reintentos revisada: el cliente usa 3 por defecto; para la demo puede elevarse a 5
+## 9. Cierre
+
+> «El valor del sistema no es solo la predicción. Cada entrada queda
+> estandarizada bajo un contrato, pasa por agentes especializados, recibe
+> mitigaciones con procedencia y termina en una decisión trazable, persistida y
+> auditable. Los componentes experimentales permanecen fuera del runtime.»
+
+Checklist final:
+
+- [ ] `MISTRAL_API_KEY` disponible solo en el entorno;
+- [ ] suite en verde;
+- [ ] API o contenedor arrancado en `http://localhost:8000`;
+- [ ] directorio de estado escribible y persistente;
+- [ ] ejemplos revisados para confirmar que no contienen targets;
+- [ ] al menos un caso cacheado para demostrar la reutilización de duplicados.

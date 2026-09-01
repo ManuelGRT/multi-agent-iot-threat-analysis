@@ -406,13 +406,26 @@ def test_cases_analyze_endpoint_requires_input():
     assert response.status_code == 400
 
 
-def test_cases_analyze_endpoint_returns_case_result():
+def test_cases_analyze_endpoint_returns_and_persists_case_result(monkeypatch):
+    from src.api import routers
+
+    def execute_without_external_llm(raw_input, **kwargs):
+        assert raw_input["row"] == {"proto": "tcp"}
+        assert kwargs == {"use_llm_mitigator": True, "persist": True}
+        case = run_case(
+            {"dataset": raw_input["dataset"], "canonical_event": dict(CANONICAL_EVENT)},
+            use_llm_mitigator=False,
+            persist=True,
+        )
+        return case.model_dump(mode="json")
+
+    monkeypatch.setattr(routers, "_run_final_case", execute_without_external_llm)
     client = TestClient(app)
     response = client.post(
         "/cases/analyze",
         json={
             "dataset": "iot23",
-            "canonical_event": dict(CANONICAL_EVENT),
+            "row": {"proto": "tcp"},
             "row_id": 42,
         },
     )
@@ -433,20 +446,16 @@ def test_cases_analyze_endpoint_returns_case_result():
     assert len(stored["trace"]) == len(payload["trace"])
 
 
-@pytest.mark.skipif(not _models_loadable(), reason="modelos .joblib no disponibles")
-def test_cases_analyze_endpoint_with_canonical_event():
+def test_cases_analyze_endpoint_rejects_canonical_event():
     client = TestClient(app)
     response = client.post(
         "/cases/analyze",
         json={"dataset": "edge_iiotset", "canonical_event": dict(CANONICAL_EVENT)},
     )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["detection"]["model_name"].startswith("xgboost_detection")
-    assert payload["judge"]["action"] in {"approve", "human_interrupt"}
+    assert response.status_code == 422
 
 
-def test_cases_analyze_ambiguous_input_reaches_judge_without_detector():
+def test_cases_analyze_rejects_raw_and_canonical_input_combination():
     response = TestClient(app).post(
         "/cases/analyze",
         json={
@@ -456,21 +465,7 @@ def test_cases_analyze_ambiguous_input_reaches_judge_without_detector():
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["status"] == "needs_human_review"
-    assert payload["standardization"]["abstain"] is True
-    assert (
-        payload["standardization"]["failure_code"]
-        == "standardization_input_ambiguous"
-    )
-    assert payload["detection"]["is_malicious"] is None
-    assert payload["judge"]["action"] == "human_interrupt"
-    assert [entry["agent"] for entry in payload["trace"]] == [
-        "orchestrator",
-        "final_standardizer",
-        "final_judge",
-    ]
+    assert response.status_code == 422
 
 
 def test_cases_analyze_raw_llm_failure_returns_reviewable_case(monkeypatch):

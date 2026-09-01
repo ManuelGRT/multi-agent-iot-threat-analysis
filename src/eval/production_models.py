@@ -23,18 +23,22 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Any, Callable, Iterable, Literal, Mapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 import unicodedata
 
 import numpy as np
 from sklearn.feature_extraction import DictVectorizer
 
-from src.agents.supervised_edge import EDGE_TO_FAMILY
+from src.contracts.inference import (
+    ProductionModelError,
+    ProductionTask,
+    ProductionXGBoostModel,
+    _validated_encoded_predictions,
+)
 from src.eval.jorge_models import compute_classification_metrics
 from src.eval.validation_campaign import PreparedRecord
 
 
-ProductionTask = Literal["binary_detection", "attack_family"]
 EstimatorFactory = Callable[..., Any]
 
 FAMILY_MAPPING_VERSION = "broad_attack_family_v1_2026-08-06"
@@ -53,10 +57,6 @@ BASE_XGBOOST_PARAMETERS: Mapping[str, Any] = {
 }
 
 
-class ProductionModelError(ValueError):
-    """The candidate dataset or estimator violates the production contract."""
-
-
 class UnmappedAttackLabelError(ProductionModelError):
     """An attack label is not covered by the explicit family mapping."""
 
@@ -69,61 +69,6 @@ class EstimatorFactoryProtocol(Protocol):
         n_classes: int,
         parameters: Mapping[str, Any],
     ) -> Any: ...
-
-
-@dataclass(slots=True)
-class ProductionXGBoostModel:
-    """Stable joblib-serialisable adapter consumed by ``model_registry``.
-
-    The wrapped estimator operates on integer-encoded targets.  The public
-    methods accept the same feature dictionaries as the deployed registry and
-    expose decoded predictions plus a ``classes`` property aligned with the
-    columns returned by ``predict_proba``.
-    """
-
-    vectorizer: DictVectorizer
-    estimator: Any
-    encoded_classes: tuple[bool | str, ...]
-    task: ProductionTask
-    feature_schema_sha256: str
-    family_mapping_version: str | None = None
-
-    @property
-    def classes(self) -> list[bool | str]:
-        return list(self.encoded_classes)
-
-    @property
-    def classes_(self) -> np.ndarray:
-        """Sklearn-compatible alias; ``model_registry`` uses ``classes``."""
-
-        return np.asarray(self.encoded_classes, dtype=object)
-
-    def predict(self, rows: Sequence[Mapping[str, Any]]) -> list[bool | str]:
-        materialised = _materialise_inference_rows(rows)
-        encoded = _validated_encoded_predictions(
-            self.estimator.predict(self.vectorizer.transform(materialised)),
-            expected_size=len(materialised),
-            n_classes=len(self.encoded_classes),
-            context="inference",
-        )
-        return [self.encoded_classes[index] for index in encoded]
-
-    def predict_proba(self, rows: Sequence[Mapping[str, Any]]) -> np.ndarray:
-        materialised = _materialise_inference_rows(rows)
-        method = getattr(self.estimator, "predict_proba", None)
-        if not callable(method):
-            raise TypeError("El estimador serializado no implementa predict_proba")
-        probabilities = np.asarray(
-            method(self.vectorizer.transform(materialised)), dtype=float
-        )
-        expected = (len(materialised), len(self.encoded_classes))
-        if probabilities.shape != expected:
-            raise ProductionModelError(
-                f"predict_proba devolvio shape={probabilities.shape}; esperado={expected}"
-            )
-        if not np.all(np.isfinite(probabilities)):
-            raise ProductionModelError("predict_proba devolvio NaN/Inf")
-        return probabilities
 
 
 @dataclass(slots=True)
@@ -660,39 +605,6 @@ def _atomic_joblib_dump(model: ProductionXGBoostModel, target: Path) -> None:
             temporary.unlink()
 
 
-def _materialise_inference_rows(
-    rows: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    materialised = [dict(row) for row in rows]
-    if not materialised:
-        raise ValueError("La inferencia requiere al menos una fila")
-    return materialised
-
-
-def _validated_encoded_predictions(
-    values: Any,
-    *,
-    expected_size: int,
-    n_classes: int,
-    context: str,
-) -> np.ndarray:
-    predictions = np.asarray(values)
-    if predictions.ndim != 1 or len(predictions) != expected_size:
-        raise ProductionModelError(
-            f"{context}: predict devolvio shape={predictions.shape}; "
-            f"esperado=({expected_size},)"
-        )
-    try:
-        numeric = predictions.astype(np.int64)
-    except (TypeError, ValueError) as exc:
-        raise ProductionModelError(f"{context}: predict no devolvio indices enteros") from exc
-    if not np.all(predictions == numeric):
-        raise ProductionModelError(f"{context}: predict no devolvio indices enteros")
-    if np.any(numeric < 0) or np.any(numeric >= n_classes):
-        raise ProductionModelError(f"{context}: predict devolvio una clase fuera de rango")
-    return numeric
-
-
 def _labelled_records_sha256(
     values: Sequence[tuple[PreparedRecord, bool | str]],
 ) -> str:
@@ -766,7 +678,20 @@ def _normalise_label(value: str) -> str:
 
 _NATIVE_FAMILY_MAPPINGS: Mapping[str, Mapping[str, str]] = {
     "edge_iiotset": {
-        label: family for label, family in EDGE_TO_FAMILY.items() if family is not None
+        "DDoS_UDP": "ddos",
+        "DDoS_ICMP": "ddos",
+        "DDoS_TCP": "ddos",
+        "DDoS_HTTP": "ddos",
+        "SQL_injection": "injection",
+        "XSS": "injection",
+        "Uploading": "injection",
+        "Password": "bruteforce",
+        "Vulnerability_scanner": "scanning",
+        "Port_Scanning": "scanning",
+        "Fingerprinting": "scanning",
+        "Backdoor": "malware",
+        "Ransomware": "malware",
+        "MITM": "mitm",
     },
     "ton_iot": {
         "dos": "ddos",

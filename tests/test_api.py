@@ -44,20 +44,28 @@ def test_health_endpoint():
         ),
     ],
 )
-def test_legacy_analysis_endpoints_are_closed_without_adapter_bypass(path, payload):
+def test_legacy_analysis_endpoints_do_not_exist(path, payload):
     response = TestClient(app).post(path, json=payload)
 
-    assert response.status_code == 410
-    assert "/cases/analyze" in response.json()["detail"]
+    assert response.status_code == 404
 
 
-def test_supported_datasets_is_metadata_only():
+def test_legacy_dataset_metadata_endpoint_does_not_exist():
     response = TestClient(app).get("/datasets/supported")
 
-    assert response.status_code == 200
-    assert "iot23" in response.json()["datasets"]
-    assert response.json()["scope"] == "legacy_adapter_metadata_only"
-    assert response.json()["analysis_endpoint"] == "/cases/analyze"
+    assert response.status_code == 404
+
+
+def test_final_case_rejects_prestandardized_event_bypass():
+    response = TestClient(app).post(
+        "/cases/analyze",
+        json={
+            "dataset": "iot23",
+            "canonical_event": {"event_id": "prestandardized"},
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_final_case_rejects_unknown_top_level_field_instead_of_dropping_it():

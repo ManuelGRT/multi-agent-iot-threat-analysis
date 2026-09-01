@@ -5,10 +5,10 @@
 > y una inconsistencia en la procedencia de 0.9363. Estas tablas solo conservan
 > trazabilidad; deben sustituirse con los resultados limpios de las fases C-F.
 
-**Fecha:** 2026-08-03. Todos los números provienen de artefactos congelados
-del repositorio (se indica la procedencia de cada tabla). Regla del
-proyecto: los resultados congelados no se re-experimentan; el agente de
-auditoría verifica su integridad y los umbrales en cada ejecución.
+**Fecha:** 2026-08-03. Los números proceden de campañas científicas congeladas;
+este documento conserva su trazabilidad, pero el paquete online solo incluye
+los dos modelos activos y el catálogo necesarios para inferencia. Los informes
+experimentales completos no son una dependencia del servicio.
 
 ---
 
@@ -23,9 +23,9 @@ auditoría verifica su integridad y los umbrales en cada ejecución.
 
 ## 2. Tabla final — multiclase Edge-IIoTset (comparativa con el TFM previo)
 
-Procedencia: `artifacts/baselines/jorge_and_current_baselines.json`
-(congelado en Fase 0 desde
-`artifacts/informe_edgeiiot_estandarizado_ml_vs_tfm_jorge_balanced450_20260622.md`).
+Procedencia versionada:
+`artifacts/baselines/jorge_and_current_baselines.json`. El informe fuente
+completo pertenece al archivo científico de la campaña, no al runtime.
 
 | Sistema | Accuracy | Precision | Recall | F1 |
 |---|---:|---:|---:|---:|
@@ -53,20 +53,19 @@ diferencial del TFM está en multiclase y en la arquitectura.
 ## 4. Modelos generalistas desplegados en la capa MCP
 
 Los modelos que sirven la arquitectura final son **generalistas
-multi-dataset** (no específicos de Edge). Procedencia: artefactos de
-entrenamiento `artifacts/xgboost_*_20260705_*.json`; el auditor reproduce
-el split de test (seed 42) y verifica no-regresión con **delta 0.0**.
+multi-dataset** (no específicos de Edge). Los dos artefactos activos se
+distribuyen dentro del paquete y usan un contrato ligero de inferencia que no
+importa módulos de evaluación. Sus métricas proceden de la campaña final
+`validation_2026`, con particiones congeladas y deduplicadas.
 
 | Modelo desplegado | Test (multi-dataset) | Métrica |
 |---|---:|---|
-| Detección binaria (`xgboost_detection_standardized_with_edge`) | n=481 | F1 0.7564 · ROC-AUC 0.8667 |
-| Familia (`xgboost_attack_family_balanced_group`) | n=480 | weighted-F1 0.7438 |
-| — slice Edge-IIoTset del mismo test | n=90 | weighted-F1 **0.7593 > 0.7479 (Jorge)** |
+| Detección binaria (`xgboost_detection_validation_2026_20260822`) | n=5.064 | F1 0.9676; F1 0.977 sobre casos decididos |
+| Familia (`xgboost_attack_family_validation_2026_20260822`) | n=2.088 | weighted-F1 0.9107; 0.953 sobre casos decididos |
 
-Punto para la memoria: incluso el clasificador **generalista** (entrenado
-para 7+ orígenes heterogéneos a la vez) supera en el slice Edge al mejor
-LLM fine-tuned específico del TFM previo; el especializado canónico llega
-a 0.9363.
+Punto para la memoria: ambos modelos operacionales comparten una representación
+canónica multi-dataset y aplican abstención o revisión humana en las regiones
+de menor confianza; no deben confundirse con los modelos históricos de julio.
 
 ## 5. Comparativa de mitigación (documentación y auditabilidad)
 
@@ -82,12 +81,12 @@ y su versión artículo (arXiv:2507.02390, Tabla 3); catálogo
 | Priorización | No | Fases contención / erradicación / prevención + acciones por `schema_profile` |
 | Trazabilidad | No (texto plano) | Procedencia por ítem (`MitigationItem.source`) y referencias con URL |
 | Evaluación | Circular: ROUGE-L/coseno contra salidas del propio DeepSeek | Auditoría estructural: cobertura verificable + regla dura testeada (referencias inventadas no escapan sin marca) |
-| Robustez | Depende del LLM | Fallback total al catálogo: la demo nunca se rompe |
+| Robustez | Depende del LLM | Fallback al catálogo solo en mitigación; un fallo de estandarización en *cache miss* produce abstención |
 
 ## 6. Limitación honesta: LODO (leave-one-dataset-out)
 
-Procedencia: `artifacts/xgboost_detection_group_lodo_20260705_*.json` y
-`artifacts/xgboost_attack_family_group_lodo_20260705_*.json`.
+Procedencia: informes congelados de la campaña LODO de julio de 2026,
+conservados en el archivo científico externo al paquete online.
 
 Detección binaria LODO (F1 al excluir el grupo del entrenamiento):
 
@@ -121,17 +120,18 @@ recupera (§4).
   y procedencia actuales. En un *cache miss* se requiere la API; un fallo
   produce abstención y revisión humana, sin adaptadores. La sanitización
   anti-leakage pertenece exclusivamente a la preparación de entrenamiento,
-  validación y evaluación, fuera del grafo. Para la defensa, el modo
-  `--offline` utiliza `canonical_event` congelados y ya estandarizados.
+  validación y evaluación, fuera del grafo. La API pública solo acepta `row` o
+  `text`: no ofrece un modo offline ni una entrada `canonical_event` para
+  evitar Mistral.
 - **Raw vs canónico en Edge**: parte de la mejora frente al baseline crudo
   proviene de usar todas las columnas y de la representación; la réplica
   estricta de Jorge (0.4993) aísla esa comparación honestamente.
 - **Juez por reglas**: el juez final es determinista por umbrales (no LLM);
   la revisión humana es la salida prevista para los casos dudosos (así lo
   muestran la demo y la auditoría, no es un fallo).
-- **MCP por stdio**: el protocolo real funciona (tests + handshake en la
-  demo), pero arrancar un servidor por llamada recarga los modelos y es
-  inviable operativamente; el modo in-process comparte contrato de tools.
+- **MCP por stdio**: los tres servidores del runtime comparten el mismo
+  contrato que el modo in-process. Para operación, la API mantiene cargados los
+  modelos y evita arrancar un proceso por llamada.
 - **Evaluación de mitigaciones**: se audita estructura, cobertura y
   anclaje; no hay validación con expertos humanos (igual que en el TFM
   previo, que además tenía evaluación circular — declararlo).
@@ -143,9 +143,10 @@ recupera (§4).
   con delta 0.0 vs métricas congeladas, baselines certificados sin
   re-experimentar, cobertura CAPEC 14/14, leakage 0/200 con caso trampa
   detectado. Informe: `artifacts/informe_auditoria_sistema_<fecha>.md`.
-- **Demo reproducible** (`scripts/demo_mcp_multiagent_case.py --offline`):
-  4 casos con digest SHA256 estable idéntico entre ejecuciones y entre
-  procesos; casos de baja confianza derivados a revisión humana.
+- **Demo online**: el frontend envía entradas crudas a `/cases/analyze`, muestra
+  las decisiones por agente y recupera la auditoría del caso persistido. Un
+  duplicado exacto permite comprobar la reutilización de un éxito Mistral desde
+  la caché; un *cache miss* necesita acceso al proveedor.
 - **Suite**: pruebas automatizadas para MCP, agentes finales, mitigación
   anclada, auditor y demo; el recuento exacto se obtiene con `pytest -q`.
 - **Trazabilidad**: todo caso devuelve `case_id` + `trace[]` completa con

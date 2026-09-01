@@ -70,18 +70,22 @@ def default_mitigator_llm() -> LLMMitigationAgent:
 
     Patron identico al resto de agentes LLM: MITIGATOR_LLM_MODEL /
     MITIGATOR_LLM_PROVIDER / MITIGATOR_LLM_TIMEOUT_SECONDS, con LLM_PROVIDER
-    como provider global. Por defecto: mistral-small-latest si el proveedor
-    es mistral (plan F4), o el modelo Ollama del resto de agentes.
+    como provider global. El proveedor final por defecto es Mistral: si no
+    esta disponible, ``FinalMitigator`` conserva automaticamente el catalogo.
     """
     provider = (
-        os.getenv("MITIGATOR_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "ollama"
+        os.getenv("MITIGATOR_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "mistral"
     ).strip().lower()
     # El modelo por defecto se resuelve segun el proveedor EFECTIVO del
     # mitigador (no segun LLM_PROVIDER global, que puede ser otro).
     model = os.getenv("MITIGATOR_LLM_MODEL")
     if not model:
         if provider == "mistral":
-            model = os.getenv("MISTRAL_AGENT_MODEL", "mistral-small-latest")
+            model = (
+                os.getenv("MISTRAL_AGENT_MODEL")
+                or os.getenv("INGEST_LLM_MODEL")
+                or "mistral-small-2603"
+            )
         elif provider == "openrouter":
             model = os.getenv("OPENROUTER_AGENT_MODEL", "openai/gpt-oss-120b:free")
         elif provider == "transformers":

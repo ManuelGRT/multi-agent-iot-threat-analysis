@@ -660,17 +660,44 @@ def test_run_case_with_llm_mitigator_produces_hybrid_case():
 def test_default_final_agents_env_flag_enables_llm(monkeypatch):
     from src.orchestration.mcp_graph import default_final_agents
 
-    monkeypatch.delenv("LLM_MITIGATOR_ENABLED", raising=False)
+    for name in (
+        "LLM_MITIGATOR_ENABLED",
+        "MITIGATOR_LLM_MODEL",
+        "MISTRAL_AGENT_MODEL",
+        "INGEST_LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
     assert default_final_agents().mitigator.llm is None
 
     monkeypatch.setenv("LLM_MITIGATOR_ENABLED", "true")
     monkeypatch.setenv("MITIGATOR_LLM_PROVIDER", "mistral")
     bundle = default_final_agents()
     assert bundle.mitigator.llm is not None
-    assert bundle.mitigator.llm.model_name == "llm_mitigator::mistral::mistral-small-latest"
+    assert bundle.mitigator.llm.model_name == "llm_mitigator::mistral::mistral-small-2603"
 
     # el parametro explicito manda sobre el entorno
     assert default_final_agents(use_llm_mitigator=False).mitigator.llm is None
+
+
+def test_explicit_llm_mitigation_defaults_to_mistral(monkeypatch):
+    from src.orchestration.mcp_graph import default_final_agents
+
+    for name in (
+        "MITIGATOR_LLM_PROVIDER",
+        "LLM_PROVIDER",
+        "MITIGATOR_LLM_MODEL",
+        "MISTRAL_AGENT_MODEL",
+        "INGEST_LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    bundle = default_final_agents(use_llm_mitigator=True)
+
+    assert bundle.mitigator.llm is not None
+    assert (
+        bundle.mitigator.llm.model_name
+        == "llm_mitigator::mistral::mistral-small-2603"
+    )
 
 
 def test_event_context_drops_empty_and_forbidden_fields():

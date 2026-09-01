@@ -11,24 +11,29 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110",
     "httpx>=0.27",
-    "langchain-core>=1.0",
-    "langchain-ollama>=1.1",
     "langgraph>=0.2",
     "joblib==1.5.3",
     "numpy==2.5.1",
     "pydantic>=2.7",
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
-    "pyyaml>=6.0",
-    "river>=0.21",
-    # Los modelos joblib desplegados fueron serializados con esta version.
     "scikit-learn==1.8.0",
     "uvicorn>=0.29",
+    # Los joblib desplegados fueron serializados con XGBoost 3.3.0. En Linux,
+    # la distribucion CPU evita instalar dependencias CUDA innecesarias.
+    "xgboost-cpu==3.3.0; platform_system == 'Linux'",
+    "xgboost==3.3.0; platform_system != 'Linux'",
 ]
 
 [project.optional-dependencies]
-drift-advanced = ["alibi-detect>=0.12"]
-training = ["torch>=2.2", "pytorch-metric-learning>=2.5"]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+mcp = ["mcp[cli]>=1.2,<2"]
+ollama = [
+    "langchain-core>=1.0",
+    "langchain-ollama>=1.1",
+]
+training = ["torch>=2.2"]
 llm-training = [
     "torch>=2.2",
     "transformers>=4.45",
@@ -36,22 +41,25 @@ llm-training = [
     "accelerate>=0.34",
     "peft>=0.12",
 ]
-postgres = ["psycopg[binary]>=3.1"]
-reports = ["reportlab>=4.5"]
-mcp = ["mcp[cli]>=1.2,<2"]
-# Mantener sincronizado con los modelos versionados de artifacts/models/.
-inference = ["xgboost==3.3.0"]
 evaluation = [
-    "xgboost==3.3.0",
     "lightgbm==4.7.0",
     "torch>=2.2",
 ]
 
+[tool.setuptools]
+include-package-data = false
+
 [tool.setuptools.packages.find]
 include = ["src*"]
+exclude = ["src.eval*"]
 
 [tool.setuptools.package-data]
-"src.mcp" = ["data/*.json"]
+"src.api" = ["static/index.html"]
+"src.mcp" = [
+    "data/threat_intel_catalog.json",
+    "data/models/xgboost_detection_validation_2026_20260822.joblib",
+    "data/models/xgboost_attack_family_validation_2026_20260822.joblib",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

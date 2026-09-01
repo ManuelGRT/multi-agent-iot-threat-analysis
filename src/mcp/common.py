@@ -31,6 +31,16 @@ def artifacts_dir() -> Path:
     return Path(os.getenv("TFM_ARTIFACTS_DIR") or repo_root() / "artifacts")
 
 
+def package_data_dir() -> Path:
+    """Recursos de solo lectura distribuidos dentro del paquete."""
+    return Path(__file__).resolve().parent / "data"
+
+
+def state_dir() -> Path:
+    """Directorio escribible para el estado operativo del servicio."""
+    return Path(os.getenv("TFM_STATE_DIR") or artifacts_dir())
+
+
 def data_dir() -> Path:
     return Path(os.getenv("TFM_DATA_DIR") or repo_root() / "data")
 
@@ -70,7 +80,7 @@ def resolve_confined_path(
 DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
     "standardization_cache_db": lambda: Path(
         os.getenv("TFM_STANDARDIZATION_CACHE_DB")
-        or artifacts_dir() / "cache" / "mistral_standardization_v2.sqlite3"
+        or state_dir() / "cache" / "mistral_standardization_v2.sqlite3"
     ),
     "mistral_cache": lambda: Path(
         os.getenv("TFM_MISTRAL_CACHE")
@@ -80,22 +90,25 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         os.getenv("TFM_STANDARDIZED_DATASET")
         or artifacts_dir() / "datasets" / "mistral_prebalanced_no_simulated_logs_standardized_20260704_all.jsonl"
     ),
-    # Modelos desplegados tras la campana de validacion final. Los modelos de
-    # julio permanecen versionados como referencia historica.
+    # Modelos de solo lectura incluidos en el paquete instalable.
     "detection_model": lambda: Path(
         os.getenv("TFM_DETECTION_MODEL")
-        or artifacts_dir() / "models" / "xgboost_detection_validation_2026_20260822.joblib"
+        or package_data_dir()
+        / "models"
+        / "xgboost_detection_validation_2026_20260822.joblib"
     ),
     "family_model": lambda: Path(
         os.getenv("TFM_FAMILY_MODEL")
-        or artifacts_dir() / "models" / "xgboost_attack_family_validation_2026_20260822.joblib"
+        or package_data_dir()
+        / "models"
+        / "xgboost_attack_family_validation_2026_20260822.joblib"
     ),
     "baselines": lambda: Path(
         os.getenv("TFM_BASELINES")
         or artifacts_dir() / "baselines" / "jorge_and_current_baselines.json"
     ),
     "case_memory_db": lambda: Path(
-        os.getenv("TFM_CASE_MEMORY_DB") or artifacts_dir() / "case_memory.db"
+        os.getenv("TFM_CASE_MEMORY_DB") or state_dir() / "case_memory.db"
     ),
 }
 

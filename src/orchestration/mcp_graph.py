@@ -8,6 +8,7 @@ previa sigue dependiendo de aquel; este modulo expone ``build_final_graph``
 y el helper ``run_case`` que devuelve un ``CaseResult`` completo con traza.
 
 Rutas de abstencion (revision humana):
+- fallo del LLM de estandarizacion -> judge
 - mapping_confidence < 0.5 en la estandarizacion -> judge
 - probabilidad de deteccion en zona gris (0.4-0.6) -> judge
 - errores de tool en cualquier agente -> judge
@@ -54,25 +55,37 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _optional_float_env(name: str) -> float | None:
+    value = os.getenv(name)
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 def default_mitigator_llm() -> LLMMitigationAgent:
     """Construye el backend LLM del mitigador desde variables de entorno.
 
     Patron identico al resto de agentes LLM: MITIGATOR_LLM_MODEL /
     MITIGATOR_LLM_PROVIDER / MITIGATOR_LLM_TIMEOUT_SECONDS, con LLM_PROVIDER
-    como provider global. Por defecto: mistral-small-latest si el proveedor
-    es mistral (plan F4), o el modelo Ollama del resto de agentes.
+    como provider global. El proveedor final por defecto es Mistral: si no
+    esta disponible, ``FinalMitigator`` conserva automaticamente el catalogo.
     """
-    from src.orchestration.graph import _optional_float_env
-
     provider = (
-        os.getenv("MITIGATOR_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "ollama"
+        os.getenv("MITIGATOR_LLM_PROVIDER") or os.getenv("LLM_PROVIDER") or "mistral"
     ).strip().lower()
     # El modelo por defecto se resuelve segun el proveedor EFECTIVO del
     # mitigador (no segun LLM_PROVIDER global, que puede ser otro).
     model = os.getenv("MITIGATOR_LLM_MODEL")
     if not model:
         if provider == "mistral":
-            model = os.getenv("MISTRAL_AGENT_MODEL", "mistral-small-latest")
+            model = (
+                os.getenv("MISTRAL_AGENT_MODEL")
+                or os.getenv("INGEST_LLM_MODEL")
+                or "mistral-small-2603"
+            )
         elif provider == "openrouter":
             model = os.getenv("OPENROUTER_AGENT_MODEL", "openai/gpt-oss-120b:free")
         elif provider == "transformers":
@@ -89,7 +102,6 @@ def default_mitigator_llm() -> LLMMitigationAgent:
 
 def default_final_agents(
     client: MCPToolClient | None = None,
-    allow_llm: bool = False,
     gray_low: float = 0.4,
     gray_high: float = 0.6,
     use_llm_mitigator: bool | None = None,
@@ -106,7 +118,7 @@ def default_final_agents(
         if enabled:
             llm = default_mitigator_llm()
     return FinalAgentBundle(
-        standardizer=FinalStandardizer(client=client, allow_llm=allow_llm),
+        standardizer=FinalStandardizer(client=client),
         detector=FinalDetector(client=client, gray_low=gray_low, gray_high=gray_high),
         classifier=FinalClassifier(client=client),
         mitigator=FinalMitigator(client=client, llm=llm),
@@ -167,10 +179,9 @@ def build_final_graph(
     checkpointer: Any = None,
     agents: FinalAgentBundle | None = None,
     client: MCPToolClient | None = None,
-    allow_llm: bool = False,
 ):
     """Compila el grafo final (langgraph si esta disponible, local si no)."""
-    agents = agents or default_final_agents(client=client, allow_llm=allow_llm)
+    agents = agents or default_final_agents(client=client)
     if StateGraph is None:
         return FinalLocalOrchestrator(agents)
 
@@ -256,7 +267,6 @@ def run_case(
     case_id: str | None = None,
     agents: FinalAgentBundle | None = None,
     client: MCPToolClient | None = None,
-    allow_llm: bool = False,
     use_llm_mitigator: bool | None = None,
     persist: bool = False,
     graph: Any = None,
@@ -269,7 +279,7 @@ def run_case(
     operacion falla lanza ``CasePersistenceError`` y no continua escribiendo.
     """
     agents = agents or default_final_agents(
-        client=client, allow_llm=allow_llm, use_llm_mitigator=use_llm_mitigator
+        client=client, use_llm_mitigator=use_llm_mitigator
     )
     graph = graph or build_final_graph(agents=agents)
     case_id = case_id or new_case_id()

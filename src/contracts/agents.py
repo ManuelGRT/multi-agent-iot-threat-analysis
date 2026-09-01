@@ -11,6 +11,10 @@ class IngestOutput(BaseModel):
     schema_version: str
     modality: str
     notes: list[str] = Field(default_factory=list)
+    abstain: bool = False
+    requires_human_review: bool = False
+    failure_code: str | None = None
+    failure_reason: str | None = None
 
 class DetectionOutput(BaseModel):
     event_id: str

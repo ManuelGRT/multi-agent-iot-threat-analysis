@@ -21,7 +21,16 @@ def llm_payload(**overrides):
         "duration_ms": None,
         "telemetry": {"empty": "", "temperature": "31.5"},
         "host": {"process": ""},
-        "severity": "",
+        "severity": None,
+        "schema_profile": None,
+        "origin": {},
+        "feature_groups": {},
+        "evidence_fields": [],
+        "traffic_direction": None,
+        "service_context": {},
+        "host_context": {},
+        "telemetry_context": {},
+        "anomaly_summary": None,
         "semantic_text": "Mirai telnet traffic",
         "provenance": {"dataset": "generic"},
         "mapping_confidence": 0.95,
@@ -79,7 +88,7 @@ def test_llm_payload_uses_edge_source_frame_time_when_raw_llm_ts_is_bad():
     assert event.ts.isoformat() == "2021-01-01T22:14:30.939803"
 
 
-def test_llm_payload_coerces_event_id_and_nested_telemetry():
+def test_llm_payload_derives_event_id_and_coerces_nested_telemetry():
     parser = LLMIngestParser()
 
     payload = parser._complete_payload(
@@ -93,7 +102,7 @@ def test_llm_payload_coerces_event_id_and_nested_telemetry():
     )
     event = CanonicalEvent(**payload)
 
-    assert event.event_id == "123"
+    assert event.event_id == "llm::generic::api::1"
     assert event.telemetry["processor"] == '{"pct_user_time": 38.1}'
     assert event.provenance.dataset == "generic"
 
@@ -119,7 +128,49 @@ def test_llm_payload_normalizes_missing_provenance_parser_version():
     )
     event = CanonicalEvent(**payload)
 
-    assert event.provenance.parser_version == "llm-0.1.0"
+    assert event.provenance.parser_version == "llm-0.2.0"
+
+
+def test_llm_cannot_override_authoritative_origin_or_provenance():
+    parser = LLMIngestParser()
+
+    payload = parser._complete_payload(
+        llm_payload(
+            event_id="forged-stable-id",
+            origin={
+                "source_name": "forged_dataset",
+                "source_file": "forged.csv",
+                "row_id": 999,
+                "integrity": "verified",
+                "collector": "trusted",
+            },
+            provenance={
+                "dataset": "forged_dataset",
+                "source_file": "forged.csv",
+                "row_id": 999,
+                "split": "test",
+                "parser_version": "forged-parser",
+            },
+        ),
+        {
+            "dataset": "iot23",
+            "source_file": "trusted.log",
+            "row_id": 7,
+        },
+    )
+    event = CanonicalEvent(**payload)
+
+    assert event.event_id == "llm::iot23::trusted.log::7"
+    assert event.origin["source_name"] == "iot23"
+    assert event.origin["source_file"] == "trusted.log"
+    assert event.origin["row_id"] == 7
+    assert "integrity" not in event.origin
+    assert "collector" not in event.origin
+    assert event.provenance.dataset == "iot23"
+    assert event.provenance.source_file == "trusted.log"
+    assert event.provenance.row_id == 7
+    assert event.provenance.split == "stream"
+    assert event.provenance.parser_version == "llm-0.2.0"
 
 
 def test_llm_payload_normalizes_host_metrics_to_host_log():
@@ -263,7 +314,7 @@ def test_llm_payload_does_not_fill_normal_label_from_raw_row():
     assert event.mapping_confidence == 0.45
 
 
-def test_llm_payload_drops_attack_type_from_raw_row():
+def test_complete_payload_does_not_sanitize_targets_from_llm_or_raw_row():
     parser = LLMIngestParser()
 
     payload = parser._complete_payload(
@@ -277,13 +328,15 @@ def test_llm_payload_drops_attack_type_from_raw_row():
     )
     event = CanonicalEvent(**payload)
 
-    assert event.label_raw is None
-    assert event.attack_family is None
-    assert event.attack_subtype is None
+    assert event.label_raw == "1"
+    assert event.attack_family == "injection"
+    assert event.attack_subtype == "xss"
+    assert event.telemetry["label"] == "1"
+    assert event.telemetry["type"] == "xss"
     assert event.mapping_confidence == 0.45
 
 
-def test_llm_payload_drops_category_and_attack_flags_from_raw_row():
+def test_complete_payload_preserves_unprepared_category_and_attack_flags():
     parser = LLMIngestParser()
 
     payload = parser._complete_payload(
@@ -297,13 +350,13 @@ def test_llm_payload_drops_category_and_attack_flags_from_raw_row():
     )
     event = CanonicalEvent(**payload)
 
-    assert event.label_raw is None
-    assert "attack" not in event.telemetry
-    assert "category" not in event.telemetry
-    assert "subcategory" not in event.telemetry
+    assert event.label_raw == "1"
+    assert event.telemetry["attack"] == "1"
+    assert event.telemetry["category"] == "DDoS"
+    assert event.telemetry["subcategory"] == "UDP"
 
 
-def test_llm_payload_drops_detailed_label_over_malicious_flag():
+def test_complete_payload_preserves_unprepared_detailed_label():
     parser = LLMIngestParser()
 
     payload = parser._complete_payload(
@@ -317,7 +370,9 @@ def test_llm_payload_drops_detailed_label_over_malicious_flag():
     )
     event = CanonicalEvent(**payload)
 
-    assert event.label_raw is None
+    assert event.label_raw == "Malicious"
+    assert event.telemetry["label"] == "Malicious"
+    assert event.telemetry["detailed-label"] == "DDoS"
     assert event.mapping_confidence == 0.45
 
 
@@ -394,14 +449,124 @@ def test_llm_ingest_prompts_do_not_name_specific_datasets():
 
 
 def test_llm_ingest_schema_does_not_expose_prediction_targets():
-    from src.agents.llm_ingest_parser import CANONICAL_EVENT_SCHEMA
+    from src.agents.llm_ingest_parser import (
+        CANONICAL_EVENT_SCHEMA,
+        LLM_TECHNICAL_EVENT_SCHEMA,
+    )
 
     for field in ("label_raw", "attack_family", "attack_subtype"):
         assert field not in CANONICAL_EVENT_SCHEMA["properties"]
         assert field not in CANONICAL_EVENT_SCHEMA["required"]
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["properties"]
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["required"]
 
 
-def test_llm_ingest_filters_target_column_variants():
+def test_llm_technical_schema_excludes_authoritative_identity_envelope():
+    from src.agents.llm_ingest_parser import LLM_TECHNICAL_EVENT_SCHEMA
+
+    for field in ("event_id", "origin", "provenance"):
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["properties"]
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["required"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identity_overrides,missing_identity",
+    [
+        ({"event_id": None}, ()),
+        ({"event_id": 990001}, ()),
+        (
+            {
+                "event_id": {"forged": True},
+                "origin": "forged-origin",
+                "provenance": ["forged-provenance"],
+            },
+            (),
+        ),
+        (
+            {
+                "event_id": "forged-id",
+                "origin": {"source_name": "forged"},
+                "provenance": {"dataset": "forged"},
+            },
+            (),
+        ),
+        ({}, ("event_id", "origin", "provenance")),
+    ],
+)
+async def test_strict_parse_discards_llm_identity_and_binds_trusted_envelope(
+    identity_overrides,
+    missing_identity,
+):
+    extraction = llm_payload(**identity_overrides)
+    for field in missing_identity:
+        extraction.pop(field, None)
+
+    class IdentityDriftAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return extraction
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = IdentityDriftAgent()
+
+    event = await parser.parse(
+        {
+            "dataset": "iot23",
+            "source_file": "capture.csv",
+            "row_id": 42,
+            "split": "test",
+            "row": {"proto": "tcp"},
+        }
+    )
+
+    assert event.event_id == "llm::iot23::capture.csv::42"
+    assert event.origin["source_name"] == "iot23"
+    assert event.origin["source_file"] == "capture.csv"
+    assert event.origin["row_id"] == 42
+    assert event.provenance.dataset == "iot23"
+    assert event.provenance.source_file == "capture.csv"
+    assert event.provenance.row_id == 42
+    assert event.provenance.split == "test"
+
+
+@pytest.mark.asyncio
+async def test_strict_parse_still_rejects_invalid_technical_field_with_bad_identity():
+    class InvalidTechnicalAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return llm_payload(event_id=990001, src_port="4444")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = InvalidTechnicalAgent()
+
+    with pytest.raises(ValueError, match=r"canonical_event\.src_port"):
+        await parser.parse({"dataset": "iot23", "row": {"proto": "tcp"}})
+
+
+def test_llm_ingest_forwards_all_columns_without_runtime_sanitization():
     parser = LLMIngestParser()
     raw_input = {
         "row": {
@@ -411,6 +576,7 @@ def test_llm_ingest_filters_target_column_variants():
             "Attack_type": "DDoS_UDP",
             "is_attack": "1",
             "model_family": "botnet",
+            "protocol_family": "icmp",
             "dns.qry.type": "1",
         }
     }
@@ -420,12 +586,35 @@ def test_llm_ingest_filters_target_column_variants():
 
     assert "src_ip" in selector_payload["columns"]
     assert "dns.qry.type" in selector_payload["columns"]
-    assert "type_Attack" not in selector_payload["columns"]
-    assert "Attack_type" not in selector_payload["columns"]
-    assert "is_attack" not in selector_payload["columns"]
-    assert "model_family" not in selector_payload["columns"]
-    assert "type_Attack" not in compacted["columns"]
-    assert "Attack_type" not in compacted["meaningful_values"]
+    assert "type_Attack" in selector_payload["columns"]
+    assert "Attack_type" in selector_payload["columns"]
+    assert "is_attack" in selector_payload["columns"]
+    assert "model_family" in selector_payload["columns"]
+    assert "protocol_family" in selector_payload["columns"]
+    assert "type_Attack" in compacted["columns"]
+    assert compacted["meaningful_values"]["Attack_type"] == "DDoS_UDP"
+    assert compacted["meaningful_values"]["protocol_family"] == "icmp"
+
+
+def test_llm_prompts_preserve_input_exactly_after_offline_preparation_boundary():
+    parser = LLMIngestParser()
+    raw_input = {
+        "row": {
+            "risk": "Mirai",
+            "family_hint": "DDoS",
+            "protocol_family": "Mirai",
+            "metric_category": "DDoS",
+            "proto": "tcp",
+        }
+    }
+
+    selector_payload = parser._column_selection_input(raw_input)
+    extractor_payload = parser._compact_input(raw_input)
+
+    assert selector_payload["columns"] == list(raw_input["row"])
+    assert selector_payload["value_previews"] == raw_input["row"]
+    assert extractor_payload["columns"] == list(raw_input["row"])
+    assert extractor_payload["meaningful_values"] == raw_input["row"]
 
 
 def test_llm_ingest_parser_accepts_direct_api_providers():
@@ -453,6 +642,159 @@ async def test_narrow_rows_skip_llm_column_selection():
 
     assert len(recorder.calls) == 1
     assert "preseleccion" not in recorder.calls[0]["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_strict_column_selection_never_uses_deterministic_fallback():
+    class FailingSelector:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                raise TimeoutError("selector LLM no disponible")
+            raise AssertionError("no debe ejecutarse la extraccion tras fallar el selector")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = FailingSelector()
+
+    with pytest.raises(RuntimeError, match="seleccion de columnas mediante LLM"):
+        await parser.parse(
+            {
+                "dataset": "generic",
+                "row": {"src_ip": "10.0.0.1", "dst_ip": "10.0.0.2"},
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_strict_output_rejects_empty_canonical_extraction():
+    class EmptyExtractionAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return {}
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = EmptyExtractionAgent()
+
+    with pytest.raises(ValueError, match="faltan campos requeridos"):
+        await parser.parse({"dataset": "generic", "row": {"proto": "tcp"}})
+
+
+@pytest.mark.asyncio
+async def test_strict_output_rejects_predictive_field_instead_of_cleaning_it():
+    class DirtyExtractionAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return llm_payload(label_raw="Mirai")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = DirtyExtractionAgent()
+
+    with pytest.raises(ValueError, match="campo no permitido 'label_raw'"):
+        await parser.parse({"dataset": "generic", "row": {"proto": "tcp"}})
+
+
+@pytest.mark.asyncio
+async def test_strict_output_rejects_blank_semantic_text():
+    class BlankSemanticAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return llm_payload(semantic_text="   ")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = BlankSemanticAgent()
+
+    with pytest.raises(ValueError, match="texto vacio"):
+        await parser.parse({"dataset": "generic", "row": {"proto": "tcp"}})
+
+
+def test_non_strict_semantic_fallback_never_embeds_record_identity():
+    parser = LLMIngestParser()
+
+    payload = parser._complete_payload(
+        llm_payload(semantic_text="   "),
+        {
+            "dataset": "first_dataset",
+            "source_file": "first.csv",
+            "row_id": 91,
+            "split": "train",
+            "row": {"proto": "tcp"},
+        },
+    )
+
+    assert payload["semantic_text"] == '{"proto":"tcp"}'
+    assert "first_dataset" not in payload["semantic_text"]
+    assert "first.csv" not in payload["semantic_text"]
+
+
+@pytest.mark.asyncio
+async def test_strict_output_rejects_incomplete_column_selection_contract():
+    class IncompleteSelectorAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {"selected_columns": ["proto"]}
+            raise AssertionError("no debe extraer tras un selector invalido")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = IncompleteSelectorAgent()
+
+    with pytest.raises(RuntimeError, match="seleccion de columnas mediante LLM"):
+        await parser.parse({"dataset": "generic", "row": {"proto": "tcp"}})
+
+
+def test_strict_column_selection_keeps_llm_order_without_heuristic_priority():
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        max_selected_columns=2,
+    )
+    row = {"timestamp": 1, "bytes": 2, "proto": "tcp"}
+
+    selected = parser._limit_selected_columns(
+        ["bytes", "timestamp", "proto"],
+        row,
+    )
+
+    assert selected == ["bytes", "timestamp"]
 
 
 class StubParser:

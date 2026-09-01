@@ -11,24 +11,41 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agents.predictive_sanitization import is_predictive_target_field
 from src.agents.supervised_general import GeneralizedFeatureStandardizer
 from src.contracts.canonical import CanonicalEvent
 
 _STANDARDIZER = GeneralizedFeatureStandardizer(include_origin=False, feature_set="full")
+_FORBIDDEN_PREFIXES = (
+    "origin.",
+    "attack_indicator.",
+    "semantic_hint.",
+    "behavior.",
+    "uncertainty.",
+    "asset_context.",
+)
+_FORBIDDEN_KEYS = {
+    "attack_indicator_count",
+    "behavior_tag_count",
+    "uncertainty_count",
+}
 
 
 def event_features(event_data: dict[str, Any] | CanonicalEvent) -> dict[str, Any]:
-    event = event_data if isinstance(event_data, CanonicalEvent) else CanonicalEvent(**event_data)
+    # Proyeccion fija compartida con el entrenamiento. La entrada operacional
+    # ya debe estar libre de targets; aqui no se elimina ni reescribe ningun
+    # campo del evento.
+    event = (
+        event_data
+        if isinstance(event_data, CanonicalEvent)
+        else CanonicalEvent(**event_data)
+    )
     features = _STANDARDIZER.event_to_features(event)
     clean: dict[str, Any] = {}
     for key, value in features.items():
         key_text = str(key)
-        if is_predictive_target_field(key_text):
+        if key_text.startswith(_FORBIDDEN_PREFIXES):
             continue
-        if key_text.startswith(("origin.", "attack_indicator.", "semantic_hint.")):
-            continue
-        if key_text in {"attack_indicator_count"}:
+        if key_text in _FORBIDDEN_KEYS:
             continue
         clean[key_text] = value
     return clean

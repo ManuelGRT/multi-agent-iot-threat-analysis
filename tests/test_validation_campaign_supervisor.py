@@ -157,7 +157,7 @@ def test_commands_and_phase_environments_are_explicit_and_secret_safe(tmp_path):
     )
     evaluation_env = campaign.evaluation_environment(phase_c_env)
 
-    assert standardize[-3:] == ("--workers", "7", "--retry-fallbacks")
+    assert standardize[-3:] == ("--workers", "7", "--retry-failures")
     assert "--manifest-dir" in evaluate
     assert str(config.manifest_dir) in evaluate
     assert str(config.results_dir) in evaluate

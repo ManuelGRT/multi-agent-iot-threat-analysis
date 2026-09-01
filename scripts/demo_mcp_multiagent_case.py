@@ -2,7 +2,8 @@
 """Demo reproducible de extremo a extremo (Fase 6 del plan de cierre).
 
 Una sola orden ejecuta casos completos por el grafo final multiagente sobre
-la capa MCP, sin APIs externas:
+la capa MCP, sin APIs externas porque todos parten de eventos canonicos
+congelados:
 
     .venv\\Scripts\\python.exe scripts\\demo_mcp_multiagent_case.py --offline
 
@@ -10,15 +11,17 @@ Casos (seleccion determinista):
 1. edge_iiotset      — ataque del dataset Edge-IIoTset estandarizado por
                        Mistral (artefacto congelado 20260621): comparacion
                        directa con el TFM de Jorge (F1 0.9363 vs 0.7479).
-                       NOTA de honestidad: el cache Mistral del corpus NO
-                       contiene Edge, asi que este evento entra ya canonico
-                       (passthrough sanitizado por el final_standardizer);
-                       la estandarizacion via tool MCP desde cache la
-                       ejercitan los otros tres casos.
-2. ton_iot_host      — TON-IoT host metrics DESDE EL CACHE Mistral via
-                       ``standardize_event`` (from_cache=True, cero APIs).
-3. ton_iot_telemetry — TON-IoT telemetria IoT desde el cache Mistral.
-4. iot23             — flujo de red IoT-23 desde el cache Mistral.
+                       Entra como ``canonical_event`` y solo atraviesa la
+                       validacion estricta del contrato MCP.
+2. ton_iot_host      — evento canonico TON-IoT host conservado en el
+                       artefacto historico de Mistral.
+3. ton_iot_telemetry — evento canonico TON-IoT telemetria conservado en el
+                       mismo artefacto historico.
+4. iot23             — evento canonico IoT-23 conservado en el artefacto.
+
+Los prefijos de cache solo sirven para seleccionar de forma reproducible esos
+tres artefactos canonicos. El grafo recibe su campo ``event`` mediante
+``canonical_event``: no consulta la cache en ejecucion ni usa un adaptador.
 
 Cada caso recorre standardize -> detect -> classify -> explain/mitigate ->
 judge, se audita en vivo con el CaseAuditor (Fase 5) y se guarda en
@@ -30,8 +33,9 @@ y falla (exit 1) si algun digest cambia. En la primera ejecucion solo
 registra la referencia y lo dice explicitamente.
 
 Modos:
-- ``--offline`` (recomendado para la defensa): 100% determinista, LLM del
-  mitigador desactivado (modo catalogo), cliente MCP in-process.
+- ``--offline`` (recomendado para la defensa): 100% determinista, eventos
+  canonicos congelados, LLM del mitigador desactivado (modo catalogo) y
+  cliente MCP in-process.
 - ``--mcp-mode stdio``: cada tool viaja por el protocolo MCP real (un
   subproceso por servidor via SDK oficial). Mas lento; demuestra la capa
   MCP autentica.
@@ -64,7 +68,8 @@ EDGE_DATASET_PATH = (
     "artifacts/datasets/edgeiiot_mistral_standardized_tfm_less_both_partial_cache_recalc_20260621.jsonl"
 )
 
-# Prefijos del cache Mistral por caso (heterogeneidad de fuentes/modalidades).
+# Prefijos del artefacto historico Mistral. Solo se usan para seleccionar los
+# eventos canonicos congelados; nunca se entregan al flujo como cache_key.
 CACHE_PREFIXES = {
     "ton_iot_host": "TON_IOT_linux_",
     "ton_iot_telemetry": "TON_IOT_telemetry_",
@@ -78,7 +83,8 @@ EXPECTED_CASES = ["edge_iiotset", *CACHE_PREFIXES.keys()]
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Demo E2E del sistema multiagente MCP.")
     parser.add_argument("--offline", action="store_true",
-                        help="Modo defensa: determinista, sin LLM, sin APIs (recomendado).")
+                        help="Modo defensa: eventos canonicos congelados, sin APIs "
+                             "(recomendado).")
     parser.add_argument("--mcp-mode", choices=["inprocess", "stdio"], default="inprocess",
                         help="stdio = protocolo MCP real por subprocesos (MUY lento: "
                              "cada tool arranca un servidor que recarga modelos).")
@@ -123,10 +129,11 @@ def pick_edge_attack_row(scan_cap: int) -> dict[str, Any] | None:
 
 
 def pick_cache_entry(prefix: str, scan_cap: int) -> dict[str, Any] | None:
-    """Primera entrada ok del cache Mistral con ese prefijo y deteccion clara.
+    """Selecciona un evento canonico congelado por su prefijo historico.
 
     Fallback: la primera entrada ok del prefijo (aunque sea benigna o de baja
-    confianza) — la demo nunca se queda sin caso.
+    confianza) — la demo nunca se queda sin caso. El ``cache_key`` no sale de
+    esta funcion hacia el grafo; solo identifica el artefacto al seleccionarlo.
     """
     from src.mcp import model_registry
 
@@ -168,7 +175,7 @@ def build_case_specs(scan_cap: int) -> list[dict[str, Any]]:
                 "name": "edge_iiotset",
                 "titulo": (
                     "Edge-IIoTset: evento canonico estandarizado por Mistral "
-                    "(artefacto congelado; passthrough sanitizado) - comparativa con Jorge"
+                    "(artefacto congelado; passthrough validado) - comparativa con Jorge"
                 ),
                 "raw_input": {
                     "dataset": "edge_iiotset",
@@ -185,8 +192,14 @@ def build_case_specs(scan_cap: int) -> list[dict[str, Any]]:
         specs.append(
             {
                 "name": name,
-                "titulo": f"{name}: estandarizacion desde el cache Mistral (from_cache)",
-                "raw_input": {"dataset": name, "cache_key": record["cache_key"]},
+                "titulo": (
+                    f"{name}: evento canonico congelado de una "
+                    "estandarizacion historica con Mistral"
+                ),
+                "raw_input": {
+                    "dataset": name,
+                    "canonical_event": record["event"],
+                },
                 "ground_truth": None,
             }
         )

@@ -4,10 +4,9 @@ Disenado para ejecutarse en otra maquina: solo necesita el repo y los
 manifiestos de artifacts/validation_2026/manifests/ (las filas crudas van
 dentro del manifiesto; no hace falta la carpeta data/).
 
-- 100% LLM en vivo (use_llm=True); si una llamada falla tras los reintentos
-  del proveedor, el agente cae al adapter y el resultado queda marcado
-  (notes: llm_failed) — se contabiliza como metrica de robustez, y puede
-  reintentarse despues con --retry-fallbacks.
+- 100% Mistral en vivo. No hay cache, seleccion heuristica de columnas ni
+  adapter de reserva. Si una llamada falla tras los reintentos, la fila queda
+  como abstencion reintentable con --retry-failures y nunca entra al corpus.
 - Reanudable: los resultados se anexan a un JSONL por dataset y las filas ya
   procesadas se saltan en la siguiente ejecucion.
 - Sin columnas target: el manifiesto ya viene sanitizado y este script lo
@@ -26,7 +25,6 @@ Uso tipico (en la maquina de ejecucion):
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import os
 import re
@@ -41,12 +39,6 @@ REPO = Path(__file__).resolve().parents[1]
 MANIFEST_DIR = REPO / "artifacts" / "validation_2026" / "manifests"
 OUT_DIR = REPO / "artifacts" / "validation_2026" / "standardized"
 
-TARGET_COLS = {
-    "attack_label", "attack_type", "label", "type", "detailed-label",
-    "detailed_label", "category", "subcategory", "attack",
-}
-
-_local = threading.local()
 _write_lock = threading.Lock()
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -113,55 +105,88 @@ def release_system_awake(platform_name: str | None = None, setter=None) -> bool:
     return bool(setter(0x80000000))
 
 
-def get_agent():
-    """Un IngestParserAgent con LLM por hilo (el cliente HTTP no se comparte)."""
-    if getattr(_local, "agent", None) is None:
-        from src.orchestration.graph import default_agents
-        _local.agent = default_agents(use_llm=True).ingest
-    return _local.agent
-
-
 def standardize_one(entry: dict) -> dict:
+    """Estandariza una fila por la misma tool estricta del flujo final."""
+    from src.eval.predictive_sanitization import is_predictive_target_field
+    from src.mcp.inference_server import standardize_event
+    from src.mcp.standardization_contract import validate_standardization_success
+    from src.eval.data_sanitization import (
+        is_allowed_raw_technical_field,
+        sanitize_llm_input,
+    )
+
     row = entry["row"]
-    leaked = [k for k in row if k.strip().lower() in TARGET_COLS]
+    leaked = [
+        str(key)
+        for key in row
+        if is_predictive_target_field(key)
+        and not is_allowed_raw_technical_field(key)
+    ]
     if leaked:
         raise RuntimeError(f"target en features del manifiesto: {leaked} ({entry['manifest_id']})")
+    if sanitize_llm_input({"row": row})["row"] != row:
+        raise RuntimeError(
+            "la fila del manifiesto no fue sanitizada durante la preparacion: "
+            + str(entry["manifest_id"])
+        )
 
-    raw_input = {
-        "dataset": entry["dataset"],
-        "row": row,
-        "source_file": entry["source_file"],
-        "row_id": entry["row_id"],
-        "use_llm": True,
-    }
     t0 = time.time()
+    result = standardize_event(
+        dataset=entry["dataset"],
+        row=row,
+        source_file=entry["source_file"],
+        row_id=entry["row_id"],
+        split=entry.get("split") or "stream",
+        cache_mode="bypass",
+    )
     try:
-        event, output = asyncio.run(get_agent().ingest_async(raw_input))
-        notes = list(output.notes or [])
-        return {
-            "manifest_id": entry["manifest_id"],
-            "ok": True,
-            "parsed_by_llm": "parsed_by_llm" in notes,
-            "provider": os.getenv("LLM_PROVIDER", "mistral"),
-            "model": os.getenv("INGEST_LLM_MODEL", "mistral-small-2603"),
-            "notes": notes,
-            "mapping_confidence": output.mapping_confidence,
-            "latency_s": round(time.time() - t0, 2),
-            "canonical_event": event.model_dump(mode="json"),
-        }
-    except Exception as exc:
+        validated = validate_standardization_success(
+            {
+                "dataset": entry["dataset"],
+                "row": row,
+                "source_file": entry["source_file"],
+                "row_id": entry["row_id"],
+                "split": entry.get("split") or "stream",
+            },
+            result,
+        )
+    except (TypeError, ValueError) as exc:
         return {
             "manifest_id": entry["manifest_id"],
             "ok": False,
             "parsed_by_llm": False,
-            "provider": os.getenv("LLM_PROVIDER", "mistral"),
-            "model": os.getenv("INGEST_LLM_MODEL", "mistral-small-2603"),
-            "error": f"{type(exc).__name__}: {exc}",
+            "abstain": True,
+            "requires_human_review": True,
+            "provider": (
+                "mistral" if result.get("provider") == "mistral" else None
+            ),
+            "model": result.get("model") or os.getenv(
+                "INGEST_LLM_MODEL", "mistral-small-2603"
+            ),
+            "failure_code": (
+                result.get("failure_code")
+                if result.get("ok") is not True
+                else "invalid_standardization_result"
+            ) or "invalid_standardization_result",
+            "error": result.get("error") or f"{type(exc).__name__}: {exc}",
             "latency_s": round(time.time() - t0, 2),
         }
+    return {
+        "manifest_id": entry["manifest_id"],
+        "ok": True,
+        "parsed_by_llm": True,
+        "from_cache": validated["from_cache"],
+        "provider": validated["provider"],
+        "model": validated["model"],
+        "notes": validated["notes"],
+        "mapping_confidence": validated["mapping_confidence"],
+        "selected_columns": validated["selected_columns"],
+        "latency_s": round(time.time() - t0, 2),
+        "canonical_event": validated["canonical_event"],
+    }
 
 
-def load_done(out_path: Path, retry_fallbacks: bool) -> set[str]:
+def load_done(out_path: Path, retry_failures: bool) -> set[str]:
     done: set[str] = set()
     if not out_path.exists():
         return done
@@ -171,9 +196,11 @@ def load_done(out_path: Path, retry_fallbacks: bool) -> set[str]:
                 r = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if retry_fallbacks and r.get("ok") and not r.get("parsed_by_llm"):
-                continue  # se reintenta
-            if r.get("ok") or not retry_fallbacks:
+            if retry_failures and not (
+                r.get("ok") is True and r.get("parsed_by_llm") is True
+            ):
+                continue
+            if r.get("ok") or not retry_failures:
                 done.add(r["manifest_id"])
     return done
 
@@ -209,7 +236,7 @@ def run_dataset(
     name: str,
     workers: int,
     limit: int | None,
-    retry_fallbacks: bool,
+    retry_failures: bool,
     max_consecutive_failures: int = 20,
 ) -> dict:
     manifest_path = MANIFEST_DIR / f"{name}_manifest.jsonl"
@@ -218,7 +245,7 @@ def run_dataset(
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / f"{name}_standardized.jsonl"
-    done = load_done(out_path, retry_fallbacks)
+    done = load_done(out_path, retry_failures)
 
     entries = []
     with open(manifest_path, encoding="utf-8") as fh:
@@ -247,17 +274,17 @@ def run_dataset(
                 stats["llm_ok"] += 1
                 confidences.append(float(result.get("mapping_confidence") or 0.0))
                 consecutive_failures = 0
-            elif result.get("ok"):
-                stats["fallback_adapter"] += 1
-                consecutive_failures += 1
             else:
-                stats["error"] += 1
+                if result.get("abstain"):
+                    stats["abstention"] += 1
+                else:
+                    stats["error"] += 1
                 consecutive_failures += 1
             if i % 50 == 0 or i == total:
                 rate = i / max(1e-9, time.time() - t_start)
                 eta_min = (total - i) / max(rate, 1e-9) / 60
                 print(f"  [{name}] {i}/{total} | llm_ok={stats['llm_ok']} "
-                      f"fallback={stats['fallback_adapter']} err={stats['error']} "
+                      f"abstain={stats['abstention']} err={stats['error']} "
                       f"| {rate:.1f} filas/s | ETA {eta_min:.0f} min", flush=True)
             if consecutive_failures >= max_consecutive_failures:
                 raise RuntimeError(
@@ -271,7 +298,7 @@ def run_dataset(
         "model": os.getenv("INGEST_LLM_MODEL", "mistral-small-2603"),
         "processed": total,
         "llm_ok": stats["llm_ok"],
-        "fallback_adapter": stats["fallback_adapter"],
+        "abstentions": stats["abstention"],
         "errors": stats["error"],
         "avg_mapping_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
         "elapsed_min": round((time.time() - t_start) / 60, 1),
@@ -290,8 +317,12 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int, default=None,
                         help="procesar solo N filas (prueba de humo)")
-    parser.add_argument("--retry-fallbacks", action="store_true",
-                        help="reintentar filas que quedaron en fallback de adapter")
+    parser.add_argument(
+        "--retry-failures",
+        dest="retry_failures",
+        action="store_true",
+        help="reintentar filas que quedaron en abstencion o error",
+    )
     parser.add_argument("--max-consecutive-failures", type=int, default=20,
                         help="detener la campana tras N resultados seguidos sin salida LLM")
     args = parser.parse_args()
@@ -320,7 +351,7 @@ def main() -> int:
                 name,
                 args.workers,
                 args.limit,
-                args.retry_fallbacks,
+                args.retry_failures,
                 args.max_consecutive_failures,
             )
     finally:

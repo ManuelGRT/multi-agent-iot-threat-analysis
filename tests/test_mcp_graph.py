@@ -15,7 +15,6 @@ from src.orchestration.mcp_graph import (
     CasePersistenceError,
     FinalAgentBundle,
     build_final_graph,
-    default_final_agents,
     run_case,
 )
 from tests.test_final_agents import (
@@ -40,16 +39,18 @@ FINAL_AGENT_NAMES = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def isolate_case_memory(tmp_path, monkeypatch):
+    """Evita que los tests del endpoint obligatorio ensucien la memoria real."""
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+
+
 def _models_loadable() -> bool:
     try:
         import xgboost  # noqa: F401
     except ImportError:
         return False
     return resolve_path("detection_model").exists() and resolve_path("family_model").exists()
-
-
-def _cache_available() -> bool:
-    return resolve_path("mistral_cache").exists()
 
 
 def stub_bundle(overrides: dict) -> FinalAgentBundle:
@@ -125,7 +126,10 @@ def test_transport_failure_preserves_partial_trace_and_reaches_judge():
 def test_benign_case_skips_classification_but_is_judged():
     agents = stub_bundle(
         {
-            ("inference", "standardize_event"): standardize_ok(),
+            ("inference", "standardize_event"): standardize_ok(
+                selected_columns=["temp"],
+                dataset="ton_iot",
+            ),
             ("inference", "detect_event"): detect_ok(0.03),
         }
     )
@@ -151,13 +155,23 @@ def test_gray_zone_case_abstains_to_human_review():
 
     assert case.status == "needs_human_review"
     assert case.detection.abstain is True
+    assert case.detection.is_malicious is None
     assert case.judge.action == "human_interrupt"
     assert "detector_abstained" in case.judge.issues
+    assert "malicious_without_classification" not in case.judge.issues
+    assert "malicious_without_mitigation" not in case.judge.issues
+    assert case.judge.final_label is None
+    assert case.judge.final_confidence == 0.0
 
 
 def test_low_mapping_confidence_goes_straight_to_judge():
     agents = stub_bundle(
-        {("inference", "standardize_event"): standardize_ok(mapping_confidence=0.2)}
+        {
+            ("inference", "standardize_event"): standardize_ok(
+                mapping_confidence=0.2,
+                dataset="generic",
+            )
+        }
     )
     case = run_case({"dataset": "generic", "text": "algo raro"}, agents=agents)
 
@@ -165,6 +179,40 @@ def test_low_mapping_confidence_goes_straight_to_judge():
     agents_in_trace = [entry.agent for entry in case.trace]
     assert "final_detector" not in agents_in_trace
     assert "mapping_confidence_below_review_threshold" in case.judge.issues
+
+
+def test_llm_standardization_failure_abstains_before_detector():
+    agents = stub_bundle(
+        {
+            ("inference", "standardize_event"): {
+                "ok": False,
+                "abstain": True,
+                "requires_human_review": True,
+                "failure_code": "llm_standardization_failed",
+                "error": "TimeoutError: Mistral no responde",
+            }
+        }
+    )
+
+    case = run_case(
+        {"dataset": "iot23", "row": {"proto": "tcp"}, "row_id": 7},
+        agents=agents,
+    )
+
+    assert case.status == "needs_human_review"
+    assert case.standardization.abstain is True
+    assert case.standardization.requires_human_review is True
+    assert case.standardization.failure_code == "llm_standardization_failed"
+    assert case.canonical_event == {}
+    assert case.detection.is_malicious is None
+    assert case.judge.action == "human_interrupt"
+    assert "standardizer_abstained" in case.judge.issues
+    assert [entry.agent for entry in case.trace] == [
+        "orchestrator",
+        "final_standardizer",
+        "final_judge",
+    ]
+    assert case.trace[1].status == "abstain"
 
 
 def test_tool_error_produces_auditable_case():
@@ -336,7 +384,7 @@ def test_edge_iiotset_event_full_pipeline_with_prepared_models():
     assert case.explanation.mitigations
     assert case.explanation.references
     assert case.explanation.source == "catalog"
-    # sanitizacion: el evento canonico del caso no arrastra targets
+    # precondicion de entrada: el evento canonico del caso no arrastra targets
     assert case.canonical_event.get("label_raw") is None
     assert case.canonical_event.get("attack_family") is None
 
@@ -346,22 +394,6 @@ def test_edge_iiotset_event_full_pipeline_with_prepared_models():
     )
     assert repeat.detection.probability == pytest.approx(case.detection.probability)
     assert repeat.classification.attack_family == case.classification.attack_family
-
-
-@pytest.mark.skipif(
-    not _models_loadable() or not _cache_available(),
-    reason="modelos .joblib o cache Mistral no disponibles",
-)
-def test_case_from_mistral_cache_is_deterministic():
-    with resolve_path("mistral_cache").open("r", encoding="utf-8") as fh:
-        first = json.loads(fh.readline())
-    case = run_case({"dataset": "generic", "cache_key": first["cache_key"]})
-
-    assert case.standardization.from_cache is True
-    assert case.standardization.model == first.get("model", "mistral-small-latest")
-    assert case.status in {"completed", "needs_human_review"}
-    assert [entry.agent for entry in case.trace][0] == "orchestrator"
-    assert case.detection.model_name is not None
 
 
 # ---------------------------------------------------------------------------
@@ -380,16 +412,7 @@ def test_cases_analyze_endpoint_returns_case_result():
         "/cases/analyze",
         json={
             "dataset": "iot23",
-            "row": {
-                "id.orig_h": "10.0.0.2",
-                "id.resp_h": "10.0.0.3",
-                "id.orig_p": 4444,
-                "id.resp_p": 23,
-                "proto": "tcp",
-                "duration": "1.2",
-                "orig_pkts": 120,
-                "orig_ip_bytes": 4096,
-            },
+            "canonical_event": dict(CANONICAL_EVENT),
             "row_id": 42,
         },
     )
@@ -400,6 +423,14 @@ def test_cases_analyze_endpoint_returns_case_result():
     assert payload["trace"], "el caso debe llevar traza"
     assert payload["trace"][0]["agent"] == "orchestrator"
     assert any(entry["agent"] == "final_judge" for entry in payload["trace"])
+
+    stored = MCPToolClient(mode="inprocess").call(
+        "case_memory", "get_case", case_id=payload["case_id"]
+    )
+    assert stored["ok"] is True
+    assert stored["status"] == payload["status"]
+    assert stored["case"] == payload
+    assert len(stored["trace"]) == len(payload["trace"])
 
 
 @pytest.mark.skipif(not _models_loadable(), reason="modelos .joblib no disponibles")
@@ -413,3 +444,105 @@ def test_cases_analyze_endpoint_with_canonical_event():
     payload = response.json()
     assert payload["detection"]["model_name"].startswith("xgboost_detection")
     assert payload["judge"]["action"] in {"approve", "human_interrupt"}
+
+
+def test_cases_analyze_ambiguous_input_reaches_judge_without_detector():
+    response = TestClient(app).post(
+        "/cases/analyze",
+        json={
+            "dataset": "iot23",
+            "row": {"proto": "tcp"},
+            "canonical_event": dict(CANONICAL_EVENT),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "needs_human_review"
+    assert payload["standardization"]["abstain"] is True
+    assert (
+        payload["standardization"]["failure_code"]
+        == "standardization_input_ambiguous"
+    )
+    assert payload["detection"]["is_malicious"] is None
+    assert payload["judge"]["action"] == "human_interrupt"
+    assert [entry["agent"] for entry in payload["trace"]] == [
+        "orchestrator",
+        "final_standardizer",
+        "final_judge",
+    ]
+
+
+def test_cases_analyze_raw_llm_failure_returns_reviewable_case(monkeypatch):
+    import src.mcp.inference_server as inference_server
+
+    class FailingParser:
+        async def parse(self, _raw_input):
+            raise TimeoutError("Mistral no responde")
+
+    monkeypatch.setattr(inference_server, "_build_llm_parser", FailingParser)
+
+    response = TestClient(app).post(
+        "/cases/analyze",
+        json={"dataset": "iot23", "row": {"proto": "tcp"}, "row_id": 7},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "needs_human_review"
+    assert payload["standardization"]["abstain"] is True
+    assert payload["standardization"]["failure_code"] == "llm_standardization_failed"
+    assert payload["detection"]["is_malicious"] is None
+    assert payload["judge"]["action"] == "human_interrupt"
+    assert [entry["agent"] for entry in payload["trace"]] == [
+        "orchestrator",
+        "final_standardizer",
+        "final_judge",
+    ]
+
+
+def test_cases_analyze_empty_llm_extraction_abstains_before_detector(monkeypatch):
+    import src.mcp.inference_server as inference_server
+    from src.agents.llm_ingest_parser import LLMIngestParser
+
+    class EmptyExtractionAgent:
+        model = "mistral-small-2603"
+
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return {}
+
+    parser = LLMIngestParser(
+        provider="mistral",
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = EmptyExtractionAgent()
+    monkeypatch.setattr(inference_server, "_build_llm_parser", lambda: parser)
+
+    response = TestClient(app).post(
+        "/cases/analyze",
+        json={"dataset": "iot23", "row": {"proto": "tcp"}, "row_id": 8},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "needs_human_review"
+    assert payload["standardization"]["abstain"] is True
+    assert payload["standardization"]["failure_code"] == "llm_standardization_failed"
+    assert "faltan campos requeridos" in payload["standardization"]["failure_reason"]
+    assert payload["detection"]["is_malicious"] is None
+    assert payload["judge"]["action"] == "human_interrupt"
+    assert [entry["agent"] for entry in payload["trace"]] == [
+        "orchestrator",
+        "final_standardizer",
+        "final_judge",
+    ]

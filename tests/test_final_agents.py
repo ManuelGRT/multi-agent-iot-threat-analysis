@@ -13,8 +13,9 @@ from src.agents.final import (
     FinalMitigator,
     FinalStandardizer,
 )
-from src.agents.final.final_standardizer import sanitize_canonical_event
 from src.mcp.client import MCPToolClient
+from src.eval.data_sanitization import sanitize_canonical_event, sanitize_llm_input
+from src.mcp.standardization_cache import bind_event_identity
 
 
 CANONICAL_EVENT = {
@@ -55,9 +56,11 @@ class StubClient:
         self.overrides = overrides or {}
         self.real = MCPToolClient(mode="inprocess")
         self.calls: list[tuple[str, str]] = []
+        self.call_arguments: list[tuple[str, str, dict]] = []
 
     def call(self, server: str, tool: str, **arguments):
         self.calls.append((server, tool))
+        self.call_arguments.append((server, tool, copy.deepcopy(arguments)))
         key = (server, tool)
         if key in self.overrides:
             value = self.overrides[key]
@@ -65,14 +68,61 @@ class StubClient:
         return self.real.call(server, tool, **arguments)
 
 
-def standardize_ok(event=None, mapping_confidence=0.9, from_cache=False):
+def standardize_ok(
+    event=None,
+    mapping_confidence=0.9,
+    *,
+    model="mistral-small-2603",
+    selected_columns=None,
+    source="llm",
+    provider="mistral",
+    from_cache=False,
+    dataset="iot23",
+    source_file="api",
+    row_id=0,
+    split="stream",
+    bind_identity=True,
+):
+    canonical = dict(event or CANONICAL_EVENT)
+    canonical["mapping_confidence"] = mapping_confidence
+    if source == "llm" and not from_cache and bind_identity:
+        parser_version = str(
+            (canonical.get("provenance") or {}).get("parser_version")
+            or "llm-0.2.0"
+        )
+        canonical = bind_event_identity(
+            canonical,
+            dataset=dataset,
+            source_file=source_file,
+            row_id=row_id,
+            split=split,
+            parser_version=parser_version,
+        )
+    notes = (
+        ["source:prestandardized"]
+        if source == "prestandardized"
+        else (
+            ["parsed_by_llm", "source:mistral_cache"]
+            if from_cache
+            else ["parsed_by_llm", "source:mistral_live"]
+        )
+    )
     return {
         "ok": True,
-        "canonical_event": event or dict(CANONICAL_EVENT),
+        "canonical_event": canonical,
         "from_cache": from_cache,
-        "cache_key": "stub::stub.csv::0",
-        "model": "mistral-small-latest" if from_cache else "deterministic_adapter",
+        "source": source,
+        "provider": provider,
+        "model": model,
         "mapping_confidence": mapping_confidence,
+        "selected_columns": list(
+            ["proto"]
+            if selected_columns is None
+            else selected_columns
+        ),
+        "notes": notes,
+        "cache_content_hash": "a" * 64 if from_cache else None,
+        "cache_pipeline_hash": "b" * 64 if from_cache else None,
     }
 
 
@@ -96,7 +146,7 @@ def classify_ok(family="ddos", confidence=0.95):
 
 
 # ---------------------------------------------------------------------------
-# sanitizacion (anti target-leakage)
+# preparacion offline para evaluacion (anti target-leakage)
 # ---------------------------------------------------------------------------
 
 def test_sanitize_removes_target_fields_and_scrubs_text():
@@ -112,12 +162,123 @@ def test_sanitize_removes_target_fields_and_scrubs_text():
     assert "attack_type" not in clean["telemetry"]
 
 
+def test_security_boundary_preserves_behavioral_indicators_without_mutation():
+    original = {
+        **LEAKY_EVENT,
+        "attack_indicators": ["syn_flood_pattern", "label=Mirai"],
+    }
+
+    clean = sanitize_canonical_event(original)
+
+    assert clean["attack_indicators"] == ["syn_flood_pattern", ""]
+    assert original["label_raw"] == "DDoS_UDP"
+    assert original["attack_indicators"][1] == "label=Mirai"
+
+
+def test_security_boundary_scrubs_text_before_llm_prompt():
+    clean = sanitize_llm_input(
+        {
+            "dataset": "generic",
+            "text": "src_ip=10.0.0.1 label=Mirai proto=tcp",
+        }
+    )
+
+    assert "label=Mirai" not in clean["text"]
+    assert "src_ip=10.0.0.1" in clean["text"]
+
+
+def test_security_boundary_scrubs_json_text_and_preserves_next_assignment():
+    json_input = sanitize_llm_input(
+        {"text": '{"label":"Mirai","proto":"tcp"}'}
+    )
+    flat_input = sanitize_llm_input(
+        {"text": "src_ip=10.0.0.1 label=Mirai proto=tcp"}
+    )
+    list_input = sanitize_llm_input(
+        {"text": 'label: ["Mirai","DDoS"], proto=tcp'}
+    )
+    embedded_json = sanitize_llm_input(
+        {"text": 'payload={"label":"Mirai","proto":"tcp"}'}
+    )
+    query_string = sanitize_llm_input(
+        {"text": "url=/login?label=Mirai&proto=tcp"}
+    )
+
+    assert json_input["text"] == '{"proto":"tcp"}'
+    assert "label=Mirai" not in flat_input["text"]
+    assert "src_ip=10.0.0.1" in flat_input["text"]
+    assert "proto=tcp" in flat_input["text"]
+    assert list_input["text"] == "proto=tcp"
+    assert embedded_json["text"] == 'payload={"proto":"tcp"}'
+    assert query_string["text"] == "url=/login?proto=tcp"
+
+
+def test_security_boundary_keeps_allowlisted_protocol_fields():
+    clean_input = sanitize_llm_input(
+        {
+            "row": {
+                "protocol_family": "icmp",
+                "dns.qry.type": "AAAA",
+                "label": "Mirai",
+            }
+        }
+    )
+    clean_json_input = sanitize_llm_input(
+        {"text": '{"protocol_family":"icmp","label":"Mirai"}'}
+    )
+    clean_event = sanitize_canonical_event(
+        {
+            **CANONICAL_EVENT,
+            "service_context": {
+                "protocol_family": "icmp",
+                "dns": {"qry": {"type": "AAAA"}},
+                "attack_family": "ddos",
+            },
+        }
+    )
+
+    assert clean_input["row"] == {
+        "protocol_family": "icmp",
+        "dns.qry.type": "AAAA",
+    }
+    assert clean_json_input["text"] == '{"protocol_family":"icmp"}'
+    assert clean_event["service_context"]["protocol_family"] == "icmp"
+    assert clean_event["service_context"]["dns"]["qry"]["type"] == "AAAA"
+    assert "attack_family" not in clean_event["service_context"]
+
+
+def test_security_boundary_removes_family_values_even_under_neutral_or_allowed_keys():
+    clean_input = sanitize_llm_input(
+        {
+            "row": {
+                "risk": "Mirai",
+                "family_hint": "DDoS",
+                "protocol_family": "Mirai",
+                "metric_category": "DDoS",
+                "proto": "tcp",
+            }
+        }
+    )
+    clean_event = sanitize_canonical_event(
+        {
+            **CANONICAL_EVENT,
+            "telemetry": {"risk": "Mirai", "temperature": 21.5},
+            "host": {"family_hint": "DDoS", "cpu": 12.0},
+        }
+    )
+
+    assert clean_input["row"] == {"proto": "tcp"}
+    assert clean_event["telemetry"] == {"temperature": 21.5}
+    assert clean_event["host"] == {"cpu": 12.0}
+
+
 # ---------------------------------------------------------------------------
 # standardizer
 # ---------------------------------------------------------------------------
 
-def test_standardizer_sanitizes_and_routes_detect():
-    stub = StubClient({("inference", "standardize_event"): standardize_ok(dict(LEAKY_EVENT))})
+def test_standardizer_uses_llm_mcp_result_and_routes_detect():
+    sanitized = sanitize_canonical_event(LEAKY_EVENT)
+    stub = StubClient({("inference", "standardize_event"): standardize_ok(sanitized)})
     agent = FinalStandardizer(client=stub)
     update = agent.run({"raw_input": {"dataset": "iot23", "row": {"proto": "tcp"}}})
 
@@ -125,8 +286,16 @@ def test_standardizer_sanitizes_and_routes_detect():
     assert update["canonical_event"]["label_raw"] is None
     assert update["canonical_event"]["attack_family"] is None
     assert update["ingest_output"]["mapping_confidence"] == 0.9
-    assert update["ingest_output"]["model"] == "deterministic_adapter"
-    assert "sanitized:no_target_leakage" in update["ingest_output"]["notes"]
+    assert update["ingest_output"]["model"] == "mistral-small-2603"
+    assert update["ingest_output"]["from_cache"] is False
+    assert update["ingest_output"]["selected_columns"] == ["proto"]
+    assert update["ingest_output"]["notes"] == [
+        "parsed_by_llm",
+        "source:mistral_live",
+    ]
+    _, _, arguments = stub.call_arguments[-1]
+    assert "allow_llm" not in arguments
+    assert "cache_key" not in arguments
     assert update["trace"][-1]["agent"] == "final_standardizer"
     assert update["trace"][-1]["status"] == "ok"
     assert update["trace"][-1]["finished_at"] is not None
@@ -134,40 +303,236 @@ def test_standardizer_sanitizes_and_routes_detect():
 
 def test_standardizer_low_mapping_confidence_routes_judge():
     stub = StubClient(
-        {("inference", "standardize_event"): standardize_ok(mapping_confidence=0.3)}
+        {
+            ("inference", "standardize_event"): standardize_ok(
+                mapping_confidence=0.3,
+                dataset="generic",
+            )
+        }
     )
     update = FinalStandardizer(client=stub).run({"raw_input": {"dataset": "generic"}})
     assert update["route"] == "judge"
 
 
 def test_standardizer_prestandardized_passthrough():
-    stub = StubClient()
-    update = FinalStandardizer(client=stub).run(
-        {"raw_input": {"dataset": "edge_iiotset", "canonical_event": dict(LEAKY_EVENT)}}
+    clean = sanitize_canonical_event(LEAKY_EVENT)
+    stub = StubClient(
+        {
+            ("inference", "standardize_event"): standardize_ok(
+                clean,
+                model="prestandardized_passthrough",
+                selected_columns=[],
+                source="prestandardized",
+                provider=None,
+            )
+        }
     )
-    # no llama a la tool de estandarizacion: passthrough con sanitizacion
-    assert ("inference", "standardize_event") not in stub.calls
+    update = FinalStandardizer(client=stub).run(
+        {"raw_input": {"dataset": "edge_iiotset", "canonical_event": dict(clean)}}
+    )
+    # El agente no limpia el evento: el limite MCP debe validarlo o rechazarlo.
+    assert ("inference", "standardize_event") in stub.calls
+    _, _, arguments = stub.call_arguments[-1]
+    assert arguments["canonical_event"] == clean
     assert update["route"] == "detect"
     assert update["canonical_event"]["label_raw"] is None
     assert update["ingest_output"]["model"] == "prestandardized_passthrough"
 
 
-def test_standardizer_tool_error_routes_judge_with_error():
+def test_standardizer_accepts_valid_mistral_cache_hit():
+    from src.mcp.standardization_cache import compute_content_hash
+
+    cached_event = {
+        **CANONICAL_EVENT,
+        "event_id": "llm::iot23::duplicate.csv::17",
+        "origin": {
+            "source_name": "iot23",
+            "source_file": "duplicate.csv",
+            "row_id": 17,
+            "schema_profile": "network_flow",
+        },
+        "provenance": {
+            "dataset": "iot23",
+            "source_file": "duplicate.csv",
+            "row_id": 17,
+            "split": "test",
+            "parser_version": "llm-0.2.0",
+        },
+    }
+    result = standardize_ok(cached_event, from_cache=True)
+    result["cache_content_hash"] = compute_content_hash(row={"proto": "tcp"})
+    stub = StubClient({("inference", "standardize_event"): result})
+
+    update = FinalStandardizer(client=stub).run(
+        {
+            "raw_input": {
+                "dataset": "iot23",
+                "row": {"proto": "tcp"},
+                "source_file": "duplicate.csv",
+                "row_id": 17,
+                "split": "test",
+            }
+        }
+    )
+
+    assert update["route"] == "detect"
+    assert update["ingest_output"]["from_cache"] is True
+    assert update["ingest_output"]["cache_content_hash"] == result["cache_content_hash"]
+    assert update["ingest_output"]["cache_pipeline_hash"] == "b" * 64
+    _, _, arguments = stub.call_arguments[-1]
+    assert arguments["split"] == "test"
+
+
+def test_standardizer_llm_failure_abstains_to_judge():
     stub = StubClient(
-        {("inference", "standardize_event"): {"ok": False, "error": "ValueError: boom"}}
+        {
+            ("inference", "standardize_event"): {
+                "ok": False,
+                "abstain": True,
+                "requires_human_review": True,
+                "failure_code": "llm_standardization_failed",
+                "error": "RuntimeError: Mistral no disponible",
+            }
+        }
     )
     state = {"raw_input": {"dataset": "no_existe"}}
     update = FinalStandardizer(client=stub).run(state)
     assert update["route"] == "judge"
-    assert any("final_standardizer" in error for error in update["errors"])
-    assert update["trace"][-1]["status"] == "error"
+    assert update["needs_human_review"] is True
+    assert update["ingest_output"]["normalized"] is False
+    assert update["ingest_output"]["abstain"] is True
+    assert update["ingest_output"]["requires_human_review"] is True
+    assert (
+        update["ingest_output"]["failure_code"]
+        == "llm_standardization_failed"
+    )
+    assert update["trace"][-1]["status"] == "abstain"
 
 
-def test_standardizer_from_cache_flag_propagates():
-    stub = StubClient({("inference", "standardize_event"): standardize_ok(from_cache=True)})
-    update = FinalStandardizer(client=stub).run({"raw_input": {"dataset": "ton_iot"}})
-    assert update["ingest_output"]["from_cache"] is True
-    assert "source:mistral_cache" in update["ingest_output"]["notes"]
+def test_standardizer_rejects_live_identity_from_a_different_record():
+    result = standardize_ok(bind_identity=False)
+    stub = StubClient({("inference", "standardize_event"): result})
+
+    update = FinalStandardizer(client=stub).run(
+        {
+            "raw_input": {
+                "dataset": "iot23",
+                "row": {"proto": "tcp"},
+                "source_file": "new.csv",
+                "row_id": 77,
+            }
+        }
+    )
+
+    assert update["route"] == "judge"
+    assert update["ingest_output"]["failure_code"] == (
+        "invalid_standardization_response"
+    )
+    assert "event_id" in update["ingest_output"]["failure_reason"]
+
+
+def test_standardizer_malformed_success_abstains_instead_of_crashing():
+    stub = StubClient(
+        {
+            ("inference", "standardize_event"): {
+                "ok": True,
+                "canonical_event": {"modality": "network_flow"},
+                "mapping_confidence": 1.5,
+            }
+        }
+    )
+
+    update = FinalStandardizer(client=stub).run(
+        {"raw_input": {"dataset": "iot23", "row": {"proto": "tcp"}}}
+    )
+
+    assert update["route"] == "judge"
+    assert update["needs_human_review"] is True
+    assert update["ingest_output"]["failure_code"] == "invalid_standardization_response"
+    assert update["trace"][-1]["status"] == "abstain"
+
+
+@pytest.mark.parametrize(
+    "invalid_metadata",
+    [
+        {"source": "adapter", "provider": None},
+        {"source": "prestandardized", "provider": None},
+        {"from_cache": True},
+        {"abstain": True},
+        {"provider": "ollama"},
+        {"selected_columns": 1},
+        {"selected_columns": ["does_not_exist"]},
+        {"selected_columns": ["attack_family"]},
+        {"selected_columns": ["proto", "proto"]},
+        {"abstain": 0},
+        {"requires_human_review": True},
+        {"failure_code": "llm_standardization_failed"},
+        {"failure_reason": "Mistral unavailable"},
+        {"error": "Mistral unavailable"},
+        {"llm_error": "Mistral unavailable"},
+        {"fallback": True},
+        {"used_fallback": True},
+        {"cache_key": "legacy-row"},
+        {
+            "notes": [
+                "parsed_by_llm",
+                "fallback_adapter",
+            ]
+        },
+        {"notes": ["parsed_by_llm"]},
+        {"mapping_confidence": "0.9"},
+    ],
+)
+def test_standardizer_rejects_non_mistral_success_for_raw_input(invalid_metadata):
+    result = standardize_ok()
+    result.update(invalid_metadata)
+    stub = StubClient({("inference", "standardize_event"): result})
+
+    update = FinalStandardizer(client=stub).run(
+        {"raw_input": {"dataset": "iot23", "row": {"proto": "tcp"}}}
+    )
+
+    assert update["route"] == "judge"
+    assert update["needs_human_review"] is True
+    assert update["ingest_output"]["normalized"] is False
+    assert update["ingest_output"]["abstain"] is True
+    assert update["ingest_output"]["failure_code"] == "invalid_standardization_response"
+    assert "canonical_event" not in update
+    assert update["trace"][-1]["status"] == "abstain"
+
+
+@pytest.mark.parametrize(
+    "invalid_metadata",
+    [
+        {"source": "llm", "provider": "mistral"},
+        {"source": "prestandardized", "provider": "mistral"},
+        {"source": "prestandardized", "provider": None, "from_cache": True},
+    ],
+)
+def test_standardizer_rejects_invalid_prestandardized_success(invalid_metadata):
+    result = standardize_ok(
+        source="prestandardized",
+        provider=None,
+        selected_columns=[],
+    )
+    result.update(invalid_metadata)
+    stub = StubClient({("inference", "standardize_event"): result})
+
+    update = FinalStandardizer(client=stub).run(
+        {
+            "raw_input": {
+                "dataset": "edge_iiotset",
+                "canonical_event": dict(CANONICAL_EVENT),
+            }
+        }
+    )
+
+    assert update["route"] == "judge"
+    assert update["needs_human_review"] is True
+    assert update["ingest_output"]["abstain"] is True
+    assert update["ingest_output"]["source"] == "prestandardized"
+    assert update["ingest_output"]["failure_code"] == "invalid_standardization_response"
+    assert "canonical_event" not in update
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +570,8 @@ def test_detector_gray_zone_abstains(probability):
     assert output["next_route"] == "judge"
     assert update["route"] == "judge"
     assert update["trace"][-1]["status"] == "abstain"
+    assert "sin_veredicto" in update["trace"][-1]["summary"]
+    assert "malicioso=" not in update["trace"][-1]["summary"]
 
 
 def test_detector_gray_zone_boundaries_exclusive():
@@ -345,9 +712,34 @@ def test_judge_approves_clean_case():
 def test_judge_flags_detector_abstention():
     state = clean_state()
     state["detection_output"]["abstain"] = True
+    state.pop("classification_output")
+    state.pop("explanation_output")
     update = FinalJudge().run(state)
     assert update["judge_output"]["action"] == "human_interrupt"
     assert "detector_abstained" in update["judge_output"]["issues"]
+    assert "malicious_without_classification" not in update["judge_output"]["issues"]
+    assert "malicious_without_mitigation" not in update["judge_output"]["issues"]
+    assert update["judge_output"]["final_label"] is None
+    assert update["judge_output"]["final_confidence"] == 0.0
+    assert update["needs_human_review"] is True
+
+
+def test_judge_flags_standardizer_abstention_without_detection():
+    state = {
+        "event_id": "unstandardized-iot23-7",
+        "ingest_output": {
+            "normalized": False,
+            "mapping_confidence": 0.0,
+            "abstain": True,
+            "requires_human_review": True,
+            "failure_code": "llm_standardization_failed",
+        },
+        "needs_human_review": True,
+        "trace": [],
+    }
+    update = FinalJudge().run(state)
+    assert update["judge_output"]["action"] == "human_interrupt"
+    assert "standardizer_abstained" in update["judge_output"]["issues"]
     assert update["needs_human_review"] is True
 
 

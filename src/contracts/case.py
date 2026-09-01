@@ -67,11 +67,19 @@ class TraceEntry(BaseModel):
 
 class StandardizationInfo(BaseModel):
     model: str | None = None
+    provider: str | None = None
+    source: Literal["llm", "prestandardized"] | None = None
     mapping_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     selected_columns: list[str] = Field(default_factory=list)
     from_cache: bool = False
+    cache_content_hash: str | None = None
+    cache_pipeline_hash: str | None = None
     schema_profile: str | None = None
     modality: str | None = None
+    abstain: bool = False
+    requires_human_review: bool = False
+    failure_code: str | None = None
+    failure_reason: str | None = None
 
 
 class DetectionInfo(BaseModel):
@@ -217,14 +225,30 @@ class CaseResult(BaseModel):
                 model=ingest.get("model")
                 or (canonical.get("origin") or {}).get("parser")
                 or (canonical.get("provenance") or {}).get("parser_version"),
+                provider=ingest.get("provider"),
+                source=ingest.get("source"),
                 mapping_confidence=float(ingest.get("mapping_confidence", canonical.get("mapping_confidence", 0.0) or 0.0)),
                 selected_columns=list(ingest.get("selected_columns") or []),
                 from_cache=bool(ingest.get("from_cache", False)),
+                cache_content_hash=ingest.get("cache_content_hash"),
+                cache_pipeline_hash=ingest.get("cache_pipeline_hash"),
                 schema_profile=canonical.get("schema_profile"),
                 modality=ingest.get("modality") or canonical.get("modality"),
+                abstain=bool(ingest.get("abstain", False)),
+                requires_human_review=bool(
+                    ingest.get("requires_human_review", False)
+                ),
+                failure_code=ingest.get("failure_code"),
+                failure_reason=ingest.get("failure_reason"),
             ),
             detection=DetectionInfo(
-                is_malicious=detection.get("is_malicious"),
+                # La clase binaria de trabajo se conserva en el estado interno,
+                # pero una abstencion no es un veredicto publico del caso.
+                is_malicious=(
+                    None
+                    if detection.get("abstain")
+                    else detection.get("is_malicious")
+                ),
                 probability=float(detection.get("probability", 0.0) or 0.0),
                 model_name=detection.get("model_name"),
                 abstain=bool(detection.get("abstain", False)),

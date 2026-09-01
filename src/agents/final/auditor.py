@@ -9,7 +9,7 @@ Valida un ``CaseResult`` terminado en cuatro dimensiones:
    orden temporal sin retrocesos.
 3. **Target leakage**: el evento canonico del caso no arrastra campos de
    label/attack (ni en claves, ni en semantic_text, ni en las features que
-   veran los modelos) — reutiliza ``predictive_sanitization``.
+   veran los modelos). Solo detecta y reporta; nunca modifica el caso.
 4. **Umbrales**: mapping_confidence, zona gris de deteccion y confianza de
    clasificacion deben haberse traducido en revision humana cuando toca.
 
@@ -23,9 +23,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from src.agents.predictive_sanitization import (
+from src.contracts.leakage import (
     contains_predictive_target_text,
+    is_allowed_canonical_target_path,
     is_predictive_target_field,
+    is_predictive_target_value,
 )
 from src.contracts.case import CaseResult
 
@@ -76,7 +78,7 @@ BEHAVIORAL_FIELD_ALLOWLIST = {"attack_indicators"}
 
 
 def canonical_leakage_issues(canonical_event: dict[str, Any]) -> list[str]:
-    """Problemas de target leakage en un evento canonico ya sanitizado.
+    """Problemas de target leakage en un evento canonico ya preparado.
 
     Un evento del flujo final NO debe llevar valores en NINGUNA clave target
     del nivel superior (label_raw, attack_family, label, class...), ni
@@ -94,12 +96,18 @@ def canonical_leakage_issues(canonical_event: dict[str, Any]) -> list[str]:
         if isinstance(value, dict):
             for key, item in value.items():
                 key_path = f"{path}.{key}" if path else str(key)
-                if is_predictive_target_field(key) and item not in (None, "", [], {}):
+                if (
+                    is_predictive_target_field(key)
+                    and not is_allowed_canonical_target_path(key_path)
+                    and item not in (None, "", [], {})
+                ):
                     issues.append(f"clave_target_anidada:{key_path}={item!r}")
                 walk(item, key_path)
         elif isinstance(value, list):
             for index, item in enumerate(value):
                 walk(item, f"{path}[{index}]")
+        elif is_predictive_target_value(value):
+            issues.append(f"valor_target_anidado:{path}={value!r}")
 
     for container in ("telemetry", "host", "service_context", "host_context", "telemetry_context"):
         walk(canonical_event.get(container) or {}, container)
@@ -162,6 +170,7 @@ class CaseAuditor:
         # ---------------- 1. consistencia ----------------
         detection = case.detection
         classification = case.classification
+        standardizer_abstained = case.standardization.abstain
         # un caso que termino en error nunca puede certificarse como fiable
         add(
             "consistencia_sin_estado_error",
@@ -192,6 +201,17 @@ class CaseAuditor:
                 "consistencia_abstencion_flaggeada",
                 flagged_for_review,
                 detail=f"status={case.status} action={case.judge.action}",
+            )
+        if standardizer_abstained:
+            add(
+                "consistencia_abstencion_estandarizador_flaggeada",
+                flagged_for_review
+                and case.standardization.requires_human_review
+                and case.judge.action == "human_interrupt",
+                detail=(
+                    f"status={case.status} action={case.judge.action} "
+                    f"failure_code={case.standardization.failure_code}"
+                ),
             )
         if case.status == "completed" and detection.is_malicious:
             add(
@@ -263,7 +283,8 @@ class CaseAuditor:
         if case.status != "error":
             add("traza_juez_presente", "final_judge" in agents_in_trace)
             add("traza_estandarizador_presente", "final_standardizer" in agents_in_trace)
-            add("traza_detector_presente", "final_detector" in agents_in_trace)
+            if not standardizer_abstained:
+                add("traza_detector_presente", "final_detector" in agents_in_trace)
         if detection.is_malicious and not detection.abstain and case.status != "error":
             add("traza_clasificador_presente", "final_classifier" in agents_in_trace)
             add("traza_mitigador_presente", "final_mitigator" in agents_in_trace)

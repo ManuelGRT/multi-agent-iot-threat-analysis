@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
-from src.agents.predictive_sanitization import is_predictive_target_field
+from src.eval.predictive_sanitization import is_predictive_target_field
 from src.contracts.canonical import CanonicalEvent
 
 class BaseAdapter(ABC):

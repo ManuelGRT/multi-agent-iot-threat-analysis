@@ -73,7 +73,7 @@
         <mxCell id="auditor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;dashed=0;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;spacing=6;" value="Auditor&#237;a E2E (Fase 5)&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-size:11px;&quot;&gt;CaseAuditor por caso (consistencia &#183; traza &#183; leakage &#183; umbrales) + run_system_audit.py (semaforos, no-regresi&#243;n, baselines)&lt;/span&gt;" vertex="1">
           <mxGeometry height="70" width="540" x="860" y="800" as="geometry" />
         </mxCell>
-        <mxCell id="nota" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#666666;" value="Demo reproducible: demo_mcp_multiagent_case.py --offline &#183; digests SHA256 estables entre ejecuciones &#183; API: POST /cases/analyze &#183; suite: 347 tests" vertex="1">
+        <mxCell id="nota" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#666666;" value="Demo reproducible: demo_mcp_multiagent_case.py --offline &#183; digests SHA256 estables entre ejecuciones &#183; API: POST /cases/analyze &#183; suite automatizada en verde" vertex="1">
           <mxGeometry height="22" width="1400" x="127" y="900" as="geometry" />
         </mxCell>
         <mxCell id="e1" edge="1" parent="1" source="fuentes" target="adapt" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;strokeWidth=2;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;">

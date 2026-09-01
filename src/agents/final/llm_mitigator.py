@@ -84,7 +84,8 @@ MITIGATION_SCHEMA = {
 }
 
 # Campos del evento canonico que el LLM puede ver (anti-leakage: sin origin,
-# provenance ni campos de etiqueta; el evento ya llega sanitizado ademas).
+# provenance ni campos de etiqueta; el evento ya llega libre de targets por
+# precondicion del sistema).
 EVENT_CONTEXT_FIELDS = (
     "event_id",
     "modality",

@@ -41,12 +41,14 @@ regenerarse con el protocolo de este plan.
   1. Deduplicación por representación canónica ANTES del split (dedup exacto
      sobre el vector de features + dedup de casi-duplicados por hash de la
      tupla de campos técnicos).
-  2. Sanitización verificada: 0 campos target en features (chequeo del auditor).
+  2. Sanitización anti-leakage durante la preparación, antes de invocar
+     cualquier componente del sistema: 0 campos target en las entradas y
+     features (chequeo posterior del auditor). El grafo nunca limpia datos.
   3. Semilla fija y particiones serializadas (reproducible).
   4. Informe del solapamiento residual train/test (debe ser 0 exacto).
 - **Métricas del agente de estandarización por dataset** (el valor central):
   tasa parse_ok, mapping_confidence media, schema_profile asignado,
-  label-leak = 0, cobertura de campos técnicos, % de fallback a adapter.
+  label-leak = 0, cobertura de campos técnicos y tasa de abstención/reintento.
 
 ## Datasets y volúmenes
 
@@ -69,22 +71,28 @@ cuantifica el efecto de la contaminación antes de re-experimentar.
 
 ### Fase B — Muestreo estratificado por dataset (sin coste LLM)
 Para cada dataset: inventario de clases nativas, muestreo 500/clase + binario
-(desde `data/`), dedup previo, particiones 70/15/15 serializadas y congeladas
-ANTES de estandarizar. **Entregable:** manifiestos de partición por dataset.
+(desde `data/`), sanitización anti-leakage, dedup previo, particiones 70/15/15
+serializadas y congeladas ANTES de estandarizar. Los manifiestos constituyen
+entradas limpias; el runtime solo las valida. **Entregable:** manifiestos de
+partición por dataset.
 
 ### Fase C — Estandarización de las muestras
-**Estado 2026-08-06:** en ejecucion en vivo con `mistral-small-2603`, salida
-incremental reanudable y supervisor preparado para reparar fallbacks.
+**Estado 2026-08-31:** política final estricta con `mistral-small-2603`, salida
+incremental reanudable y supervisor preparado para reintentar abstenciones.
 **DECISIÓN (2026-08-03, confirmada por el propietario del proyecto): opción C3 —
 el 100 % de las muestras de TODOS los datasets (incluido URBAN_IOT) se
-estandariza con el LLM EN VIVO.** El adapter determinista queda solo como
-respaldo ante fallos puntuales (y cada fallback se contabiliza como métrica de
-robustez del agente). Esta campaña sustituye a la regla «no llamadas masivas»
-del handoff, que protegía la caché histórica: se ejecuta con manifiesto,
-reanudación y caché incremental propia del experimento.
+estandariza con el LLM EN VIVO.** Para garantizar una llamada real por muestra,
+esta campaña activa explícitamente el *bypass* de la caché SQLite. La caché de
+operación puede reutilizar éxitos Mistral por hash exacto para duplicados, pero
+no interviene en este experimento. No hay selección heurística ni adaptador de
+respaldo: un fallo queda como abstención y se reintenta; nunca entra como
+resultado válido al corpus. Esta campaña
+sustituye a la regla «no llamadas masivas» del handoff y se ejecuta con
+manifiesto, reanudación y JSONL incremental como checkpoint del experimento.
 Estimación: ~50.000-70.000 llamadas (ajustar con el inventario de Fase B);
 lotes con reintentos, throttling y checkpoint por dataset.
-Verificación anti-leakage sobre todo lo estandarizado.
+Verificación anti-leakage posterior sobre todo lo estandarizado; cualquier
+corrección se realiza en la preparación/evaluación, nunca dentro del grafo.
 
 ### Fase D — Entrenamiento y evaluación limpios (~1 día)
 **Estado 2026-08-06:** implementada y cubierta por tests; queda a la espera de
@@ -118,6 +126,6 @@ y 0,7479 (DeepSeek FT). Criterios:
 |---|---|
 | El F1 limpio de Edge cae por debajo de 0,7479 | Plan de contingencia narrativo de Fase E (éxito parcial); la validación multi-dataset del agente sigue siendo la aportación central |
 | Coste/tiempo de estandarización en vivo | Opciones C1-C3 con estimaciones; C2 concentra el gasto donde importa |
-| Cuotas/rate limit de Mistral en lotes | Lotes con reintentos y reanudación por manifiesto; cache incremental propio del experimento |
-| Los caches antiguos usan claves distintas | Fase B normaliza el manifiesto (dataset::fichero::fila) y mapea las claves de junio |
+| Cuotas/rate limit de Mistral en lotes | Lotes con reintentos y reanudación por manifiesto/JSONL; las abstenciones no se aceptan como estandarizaciones |
+| Los caches antiguos usan claves distintas | No se usan en la campaña: el *bypass* fuerza Mistral en vivo. La caché operativa nueva usa hash exacto del contenido limpio |
 | Nuevas cifras rompen el auditor actual | Fase F actualiza baselines y umbrales en el mismo commit |

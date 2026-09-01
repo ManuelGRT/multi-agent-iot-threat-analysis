@@ -22,9 +22,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 
-from src.agents.predictive_sanitization import is_predictive_target_field
+from src.eval.predictive_sanitization import is_predictive_target_field
 from src.agents.supervised_general import GeneralizedFeatureStandardizer
 from src.contracts.canonical import CanonicalEvent
+from src.eval.data_sanitization import sanitize_canonical_event
 
 
 DEFAULT_STANDARDIZED = "artifacts/datasets/mistral_prebalanced_no_simulated_logs_standardized_20260704_all.jsonl"
@@ -233,16 +234,29 @@ def make_xy(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[i
 
 
 def event_features(event_data: dict[str, Any]) -> dict[str, Any]:
-    event = CanonicalEvent(**event_data)
+    event = CanonicalEvent(**sanitize_canonical_event(event_data))
     features = GeneralizedFeatureStandardizer(include_origin=False, feature_set="full").event_to_features(event)
     clean: dict[str, Any] = {}
     for key, value in features.items():
         key_text = str(key)
         if is_predictive_target_field(key_text):
             continue
-        if key_text.startswith(("origin.", "attack_indicator.", "semantic_hint.")):
+        if key_text.startswith(
+            (
+                "origin.",
+                "attack_indicator.",
+                "semantic_hint.",
+                "behavior.",
+                "uncertainty.",
+                "asset_context.",
+            )
+        ):
             continue
-        if key_text in {"attack_indicator_count"}:
+        if key_text in {
+            "attack_indicator_count",
+            "behavior_tag_count",
+            "uncertainty_count",
+        }:
             continue
         clean[key_text] = value
     return clean

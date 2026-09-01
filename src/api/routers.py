@@ -13,36 +13,6 @@ from src.mcp.client import MCPToolClient
 router = APIRouter()
 FINAL_API_USE_LLM_MITIGATOR = True
 FINAL_API_PERSIST_CASES = True
-LEGACY_SUPPORTED_DATASETS = (
-    "bot-iot",
-    "bot_iot",
-    "edge-iiotset",
-    "edge_iiotset",
-    "generic",
-    "iot-23",
-    "iot23",
-    "ton-iot",
-    "ton_iot",
-    "unknown",
-)
-LEGACY_ANALYSIS_DETAIL = (
-    "Endpoint retirado: usa /cases/analyze. El flujo final exige Mistral, "
-    "abstencion controlada y revision por el juez."
-)
-
-
-class AnalyzeRequest(BaseModel):
-    """Contrato conservado solo para responder 410 en endpoints retirados."""
-
-    dataset: str = Field(default="generic")
-    row: dict[str, Any] | None = None
-    text: str | None = None
-    raw: dict[str, Any] | str | None = None
-    canonical_event: dict[str, Any] | None = None
-    source_file: str = "api"
-    row_id: str | int = 0
-    use_llm_mitigator: bool | None = None
-    persist: bool = False
 
 
 class CaseAnalyzeRequest(BaseModel):
@@ -53,18 +23,8 @@ class CaseAnalyzeRequest(BaseModel):
     dataset: str = Field(default="generic")
     row: dict[str, Any] | None = None
     text: str | None = None
-    canonical_event: dict[str, Any] | None = None
     source_file: str = "api"
     row_id: str | int = 0
-
-
-class AnalyzeFileRequest(BaseModel):
-    path: str
-    dataset: str = "generic"
-    limit: int = Field(default=10, ge=1, le=500)
-    offset: int = Field(default=0, ge=0)
-    use_llm_mitigator: bool | None = None
-    persist: bool = False
 
 
 @router.get("/health")
@@ -88,22 +48,13 @@ def _run_final_case(
     return case.model_dump(mode="json")
 
 
-@router.post("/events/analyze", deprecated=True)
-def analyze_event(request: AnalyzeRequest) -> dict[str, Any]:
-    """Endpoint legacy cerrado para impedir rutas con adaptadores."""
-    del request
-    raise HTTPException(status_code=410, detail=LEGACY_ANALYSIS_DETAIL)
-
-
 @router.post("/cases/analyze")
 def analyze_case(request: CaseAnalyzeRequest) -> dict[str, Any]:
-    """Analiza un evento con el grafo final MCP y devuelve el CaseResult con traza."""
-    if not any(
-        value is not None for value in (request.row, request.text, request.canonical_event)
-    ):
+    """Analiza una entrada cruda mediante Mistral y el grafo final MCP."""
+    if not any(value is not None for value in (request.row, request.text)):
         raise HTTPException(
             status_code=400,
-            detail="Se requiere al menos uno de: row, text, canonical_event",
+            detail="Se requiere al menos uno de: row, text",
         )
     raw_input = request.model_dump(mode="json")
     return _run_final_case(
@@ -160,27 +111,3 @@ def audit_case(case_id: str) -> CaseAuditReport:
         )
 
     return CaseAuditor().audit(case)
-
-
-@router.post("/datasets/adapt", deprecated=True)
-def adapt_event(request: AnalyzeRequest) -> dict[str, Any]:
-    """Endpoint legacy cerrado para impedir estandarizacion fuera del juez."""
-    del request
-    raise HTTPException(status_code=410, detail=LEGACY_ANALYSIS_DETAIL)
-
-
-@router.get("/datasets/supported", deprecated=True)
-def supported_datasets() -> dict[str, Any]:
-    """Metadatos de formatos legacy; no son rutas del flujo final."""
-    return {
-        "datasets": list(LEGACY_SUPPORTED_DATASETS),
-        "scope": "legacy_adapter_metadata_only",
-        "analysis_endpoint": "/cases/analyze",
-    }
-
-
-@router.post("/datasets/analyze-file", deprecated=True)
-def analyze_file(request: AnalyzeFileRequest) -> dict[str, Any]:
-    """El batch legacy se retira para evitar llamadas Mistral masivas implícitas."""
-    del request
-    raise HTTPException(status_code=410, detail=LEGACY_ANALYSIS_DETAIL)

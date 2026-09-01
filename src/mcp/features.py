@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agents.supervised_general import GeneralizedFeatureStandardizer
 from src.contracts.canonical import CanonicalEvent
+from src.mcp.feature_standardizer import GeneralizedFeatureStandardizer
 
 _STANDARDIZER = GeneralizedFeatureStandardizer(include_origin=False, feature_set="full")
 _FORBIDDEN_PREFIXES = (

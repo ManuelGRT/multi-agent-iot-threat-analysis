@@ -8,7 +8,7 @@ Ejecuta, sin APIs externas (100% local y determinista):
    validos + auditoria por caso (CaseAuditor, Fase 5a).
 2. Metricas batch de los MODELOS DESPLEGADOS (.joblib) reproduciendo el split
    de test exacto de sus scripts de entrenamiento (seed 42) y puntuando con
-   ``mcp-evaluation.score_run``: no-regresion frente a las metricas congeladas
+   con utilidades offline: no-regresion frente a las metricas congeladas
    de los artefactos de entrenamiento.
 3. Certificacion de los baselines congelados (Fase 0): Edge canonico
    multiclase 0.9363 >= 0.93 y > 0.7479 (Jorge LLM FT), binario >= 0.99,
@@ -47,6 +47,7 @@ from src.agents.final.auditor import (
     canonical_leakage_issues,
     feature_leakage_issues,
 )
+from src.eval.reporting import compare_with_baseline, export_report, load_baselines, score_run
 from src.mcp.client import MCPToolClient
 from src.mcp.common import artifacts_dir, resolve_confined_path, resolve_path
 from src.orchestration.mcp_graph import default_final_agents, run_case
@@ -188,7 +189,7 @@ def latest_training_artifact(prefix: str) -> dict[str, Any] | None:
         return json.load(fh)
 
 
-def batch_detection(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
+def batch_detection(tolerance: float) -> dict[str, Any]:
     from scripts.train_xgboost_detection_standardized_datasets import (
         load_edge_binary,
         load_prebalanced_binary,
@@ -209,7 +210,7 @@ def batch_detection(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
     proba = [float(p[1]) for p in model.predict_proba(features)]
     y_pred = [int(p >= 0.5) for p in proba]
     y_true = [record["label"] for record in test]
-    score = client.call("evaluation", "score_run", y_true=y_true, y_pred=y_pred, task="binary", y_score=proba)
+    score = score_run(y_true, y_pred, task="binary", y_score=proba)
 
     frozen = latest_training_artifact("xgboost_detection_standardized_with_edge")
     frozen_test = (frozen or {}).get("metrics", {}).get("test", {})
@@ -230,7 +231,7 @@ def batch_detection(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
     }
 
 
-def batch_family(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
+def batch_family(tolerance: float) -> dict[str, Any]:
     from scripts.evaluate_xgboost_attack_family_classification_group_lodo import (
         dataset_group,
         load_edge_attack_families,
@@ -257,7 +258,7 @@ def batch_family(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
     features = [event_features(record["event"]) for record in test]
     y_pred = model.predict(features)
     y_true = [record["label"] for record in test]
-    score = client.call("evaluation", "score_run", y_true=y_true, y_pred=list(y_pred), task="multiclass")
+    score = score_run(y_true, list(y_pred), task="multiclass")
 
     frozen = latest_training_artifact("xgboost_attack_family_balanced_group")
     frozen_test = (frozen or {}).get("metrics", {}).get("test", {})
@@ -284,11 +285,9 @@ def batch_family(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
     ]
     edge_slice: dict[str, Any] = {"n": len(edge_pairs)}
     if edge_pairs:
-        edge_score = client.call(
-            "evaluation",
-            "score_run",
-            y_true=[p[0] for p in edge_pairs],
-            y_pred=[p[1] for p in edge_pairs],
+        edge_score = score_run(
+            [p[0] for p in edge_pairs],
+            [p[1] for p in edge_pairs],
             task="multiclass",
         )
         edge_slice["f1_live"] = round(float(edge_score.get("f1", 0.0)), 4)
@@ -319,14 +318,14 @@ def batch_family(client: MCPToolClient, tolerance: float) -> dict[str, Any]:
 # 3. Baselines congelados + 4. cobertura CAPEC de Jorge
 # ---------------------------------------------------------------------------
 
-def check_frozen_baselines(client: MCPToolClient) -> dict[str, Any]:
-    baselines = client.call("evaluation", "get_baselines")["baselines"]
+def check_frozen_baselines() -> dict[str, Any]:
+    baselines = load_baselines()
     thresholds = baselines["audit_thresholds"]
     edge_multi = baselines["task_multiclass"]["current_system_canonical_edge"]["f1"]
     edge_binary = baselines["task_binary"]["current_system_canonical_edge"]["f1"]
     jorge = baselines["task_multiclass"]["jorge_deepseek_finetuned_less"]["f1"]
 
-    comparison = client.call("evaluation", "compare_with_baseline", f1=edge_multi, task="multiclass")
+    comparison = compare_with_baseline(edge_multi, task="multiclass")
     checks = {
         "multiclase_edge_canonico_>=_umbral": edge_multi >= thresholds["multiclass_f1_min_canonical_edge"],
         "multiclase_edge_canonico_supera_jorge": comparison["beats_jorge"],
@@ -488,12 +487,12 @@ def main(argv: list[str] | None = None) -> int:
         family = {"omitido": True, "semaforo": AMBER}
     else:
         print("[2/5] Metricas batch del detector desplegado (split test reproducido)...")
-        detection = batch_detection(client, args.tolerance)
+        detection = batch_detection(args.tolerance)
         print("[3/5] Metricas batch del clasificador de familia desplegado...")
-        family = batch_family(client, args.tolerance)
+        family = batch_family(args.tolerance)
 
     print("[4/5] Baselines congelados + cobertura CAPEC de Jorge...")
-    baselines = check_frozen_baselines(client)
+    baselines = check_frozen_baselines()
     jorge_coverage = check_jorge_capec_coverage(client)
 
     print("[5/5] Chequeo de target leakage (muestra + trampa)...")
@@ -555,19 +554,14 @@ def main(argv: list[str] | None = None) -> int:
         {"heading": "6. Target leakage", "body": leakage},
         {"heading": "Casos derivados a revision humana", "body": review_cases or "Ninguno."},
     ]
-    report = client.call(
-        "evaluation",
-        "export_report",
+    report_path = export_report(
         title="Informe de auditoria E2E del sistema multiagente MCP",
         sections=sections,
         filename=f"{prefix}.md",
     )
-    if report.get("ok") is not True or not report.get("path"):
-        print(f"ERROR: no se pudo generar el informe Markdown: {report.get('error', report)}")
-        return 2
 
     print(json.dumps({"semaforos": semaforos, "todo_verde": all_green,
-                      "informe_md": report.get("path"), "informe_json": str(json_path)},
+                      "informe_md": str(report_path), "informe_json": str(json_path)},
                      indent=2, ensure_ascii=False))
     return 0 if all_green else 1
 

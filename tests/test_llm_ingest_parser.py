@@ -1,8 +1,7 @@
 import pytest
 
-from src.agents.ingest_parser import IngestParserAgent
 from src.agents.llm_ingest_parser import LLMIngestParser
-from src.contracts.canonical import CanonicalEvent, Provenance
+from src.contracts.canonical import CanonicalEvent
 
 
 def llm_payload(**overrides):
@@ -795,76 +794,3 @@ def test_strict_column_selection_keeps_llm_order_without_heuristic_priority():
     )
 
     assert selected == ["bytes", "timestamp"]
-
-
-class StubParser:
-    async def parse(self, raw_input):
-        return CanonicalEvent(
-            event_id="stub-llm",
-            modality="network_flow",
-            src_ip="10.0.0.1",
-            dst_ip="10.0.0.2",
-            transport_proto="tcp",
-            label_raw="normal",
-            semantic_text=str(raw_input),
-            provenance=Provenance(dataset="generic"),
-            mapping_confidence=0.9,
-        )
-
-
-class FailingParser:
-    async def parse(self, raw_input):
-        raise TimeoutError("slow llm")
-
-
-@pytest.mark.asyncio
-async def test_generic_async_ingest_prefers_llm_when_available():
-    agent = IngestParserAgent(llm_parser=StubParser())
-
-    event, output = await agent.ingest_async({"dataset": "generic", "text": "some log"})
-
-    assert event.event_id == "stub-llm"
-    assert output.notes == ["parsed_by_llm"]
-
-
-@pytest.mark.asyncio
-async def test_generic_async_ingest_falls_back_to_adapter_when_llm_fails():
-    agent = IngestParserAgent(llm_parser=FailingParser())
-
-    event, output = await agent.ingest_async(
-        {
-            "dataset": "generic",
-            "text": "src_ip=10.0.0.1 dst_ip=10.0.0.2 proto=tcp label=normal",
-            "row_id": 1,
-        }
-    )
-
-    assert event.src_ip == "10.0.0.1"
-    assert event.label_raw == "normal"
-    assert "llm_failed" in output.notes
-    assert "fallback_adapter" in output.notes
-
-
-@pytest.mark.asyncio
-async def test_edge_async_ingest_fallback_handles_partial_year_time():
-    agent = IngestParserAgent(llm_parser=FailingParser())
-
-    event, output = await agent.ingest_async(
-        {
-            "dataset": "edge_iiotset",
-            "row": {
-                "frame.time": " 2021 22:25:14.432732000 ",
-                "ip.src_host": "10.0.0.1",
-                "ip.dst_host": "10.0.0.2",
-                "ip.proto": "tcp",
-            },
-            "source_file": "edge.csv",
-            "row_id": 1947,
-            "use_llm": True,
-        }
-    )
-
-    assert event.ts is not None
-    assert event.ts.isoformat() == "2021-01-01T22:25:14.432732"
-    assert "llm_failed" in output.notes
-    assert "fallback_adapter" in output.notes

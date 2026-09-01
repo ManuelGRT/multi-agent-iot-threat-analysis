@@ -10,8 +10,8 @@ FINAL_RUNTIME_MODULES = (
     "src/mcp/inference_server.py",
     "src/mcp/standardization_contract.py",
     "src/mcp/features.py",
+    "src/mcp/feature_standardizer.py",
     "src/agents/llm_ingest_parser.py",
-    "src/agents/supervised_general.py",
     "src/agents/final/final_standardizer.py",
     "src/agents/final/final_detector.py",
     "src/agents/final/final_classifier.py",
@@ -29,9 +29,39 @@ OFFLINE_SANITIZATION_MODULES = frozenset(
 )
 LEGACY_RUNTIME_MODULES = frozenset(
     {
+        "src.adapters",
+        "src.agents.abstraction",
+        "src.agents.classifier",
+        "src.agents.detector",
+        "src.agents.explainer",
         "src.agents.ingest_parser",
+        "src.agents.judge",
+        "src.agents.supervised_edge",
+        "src.contracts.taxonomy",
+        "src.drift",
+        "src.latent",
+        "src.mcp.datasets_server",
+        "src.mcp.evaluation_server",
+        "src.orchestration.checkpoints",
         "src.orchestration.graph",
     }
+)
+REMOVED_RUNTIME_PATHS = (
+    "src/adapters",
+    "src/agents/abstraction.py",
+    "src/agents/classifier.py",
+    "src/agents/detector.py",
+    "src/agents/explainer.py",
+    "src/agents/ingest_parser.py",
+    "src/agents/judge.py",
+    "src/agents/supervised_edge.py",
+    "src/contracts/taxonomy.py",
+    "src/drift",
+    "src/latent",
+    "src/mcp/datasets_server.py",
+    "src/mcp/evaluation_server.py",
+    "src/orchestration/checkpoints.py",
+    "src/orchestration/graph.py",
 )
 
 
@@ -61,11 +91,32 @@ def test_final_runtime_does_not_import_legacy_graph_or_adapter_router():
     offenders: dict[str, list[str]] = {}
     for relative in FINAL_RUNTIME_MODULES:
         imported = _imports(REPO / relative)
-        forbidden = sorted(imported.intersection(LEGACY_RUNTIME_MODULES))
+        forbidden = sorted(
+            module
+            for module in imported
+            if any(
+                module == legacy or module.startswith(f"{legacy}.")
+                for legacy in LEGACY_RUNTIME_MODULES
+            )
+        )
         if forbidden:
             offenders[relative] = forbidden
 
     assert offenders == {}
+
+
+def test_legacy_runtime_has_been_removed_from_the_repository():
+    present: list[str] = []
+    for relative in REMOVED_RUNTIME_PATHS:
+        path = REPO / relative
+        if path.is_file():
+            present.append(relative)
+        elif path.is_dir() and any(
+            candidate.is_file() and "__pycache__" not in candidate.parts
+            for candidate in path.rglob("*")
+        ):
+            present.append(relative)
+    assert present == []
 
 
 def test_sanitization_lives_under_evaluation_namespace_only():

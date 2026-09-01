@@ -114,10 +114,8 @@ def test_sample_rows_mixes_attack_and_benign():
     reason="modelos o datasets no disponibles",
 )
 def test_batch_detection_red_without_frozen_artifact(monkeypatch):
-    from src.mcp.client import MCPToolClient
-
     monkeypatch.setattr(audit_script, "latest_training_artifact", lambda prefix: None)
-    result = audit_script.batch_detection(MCPToolClient(), tolerance=0.02)
+    result = audit_script.batch_detection(tolerance=0.02)
     assert result["artefacto_congelado_encontrado"] is False
     assert result["semaforo"] == audit_script.RED  # sin referencia no hay verde
 

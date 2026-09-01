@@ -46,12 +46,11 @@ CANONICAL_EVENT = {
 
 def test_all_servers_expose_tools():
     expected = {
-        "datasets": {"list_datasets", "load_sample", "load_batch", "get_schema_profile"},
         "inference": {"standardize_event", "detect_event", "classify_event", "get_family_scores"},
         "case_memory": {"create_case", "append_trace", "get_case", "retrieve_similar_cases"},
         "threat_intel": {"map_family_to_attack", "map_family_to_capec", "suggest_mitigations"},
-        "evaluation": {"score_run", "compare_with_baseline", "export_report"},
     }
+    assert set(SERVER_MODULES) == set(expected)
     for server, tools in expected.items():
         available = set(client.list_tools(server))
         assert tools <= available, f"{server}: faltan tools {tools - available}"
@@ -64,8 +63,8 @@ def test_tool_results_carry_trace_metadata():
     assert "tool_version" in result and "latency_ms" in result
 
 
-def test_tool_errors_are_returned_not_raised():
-    result = client.call("datasets", "load_sample", dataset="no_existe")
+def test_tool_errors_are_returned_not_raised(case_db):
+    result = client.call("case_memory", "get_case", case_id="no_existe")
     assert result["ok"] is False
     assert "error" in result
 
@@ -173,163 +172,6 @@ def test_case_memory_enforces_foreign_keys_and_rejects_orphan_writes(case_db):
     )
     assert orphan_update["ok"] is False
     assert "Caso no encontrado: case-missing" in orphan_update["error"]
-
-
-# ---------------------------------------------------------------------------
-# evaluation
-# ---------------------------------------------------------------------------
-
-def test_evaluation_score_run_multiclass():
-    result = client.call(
-        "evaluation",
-        "score_run",
-        y_true=["ddos", "ddos", "scanning", "benign"],
-        y_pred=["ddos", "scanning", "scanning", "benign"],
-        task="multiclass",
-    )
-    assert result["ok"]
-    assert result["n_samples"] == 4
-    assert 0.0 <= result["f1"] <= 1.0
-
-
-def test_evaluation_compare_with_baseline():
-    result = client.call("evaluation", "compare_with_baseline", f1=0.9363, task="multiclass")
-    if not result["ok"]:
-        pytest.skip("baselines no congelados en este entorno")
-    assert result["beats_jorge"] is True
-    assert result["meets_audit_threshold"] is True
-    low = client.call("evaluation", "compare_with_baseline", f1=0.60, task="multiclass")
-    assert low["beats_jorge"] is False
-    assert low["meets_audit_threshold"] is False
-
-
-def test_evaluation_export_report(tmp_path, monkeypatch):
-    monkeypatch.setenv("TFM_ARTIFACTS_DIR", str(tmp_path))
-    result = client.call(
-        "evaluation",
-        "export_report",
-        title="Informe de prueba",
-        sections=[{"heading": "Resumen", "body": {"f1": 0.93}}],
-        filename="informe_test.md",
-    )
-    assert result["ok"]
-    content = Path(result["path"]).read_text(encoding="utf-8")
-    assert "# Informe de prueba" in content and "0.93" in content
-
-
-@pytest.mark.parametrize("filename", ["../escape.md", "subdir/../../escape.md"])
-def test_evaluation_export_report_rejects_traversal(tmp_path, monkeypatch, filename):
-    artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("TFM_ARTIFACTS_DIR", str(artifacts))
-
-    result = client.call(
-        "evaluation",
-        "export_report",
-        title="No debe escribirse",
-        sections=[],
-        filename=filename,
-    )
-
-    assert result["ok"] is False
-    assert not (tmp_path / "escape.md").exists()
-
-
-def test_evaluation_export_report_rejects_absolute_path(tmp_path, monkeypatch):
-    artifacts = tmp_path / "artifacts"
-    outside = tmp_path / "absolute.md"
-    monkeypatch.setenv("TFM_ARTIFACTS_DIR", str(artifacts))
-
-    result = client.call(
-        "evaluation",
-        "export_report",
-        title="No debe escribirse",
-        sections=[],
-        filename=str(outside),
-    )
-
-    assert result["ok"] is False
-    assert not outside.exists()
-
-
-def test_evaluation_export_report_allows_nested_relative_path(tmp_path, monkeypatch):
-    artifacts = tmp_path / "artifacts"
-    monkeypatch.setenv("TFM_ARTIFACTS_DIR", str(artifacts))
-
-    result = client.call(
-        "evaluation",
-        "export_report",
-        title="Informe anidado",
-        sections=[],
-        filename="reports/informe.md",
-    )
-
-    assert result["ok"] is True
-    assert Path(result["path"]) == (artifacts / "reports" / "informe.md").resolve()
-
-
-def test_datasets_explicit_path_is_confined_to_data_root(tmp_path, monkeypatch):
-    data_root = tmp_path / "data"
-    data_root.mkdir()
-    inside = data_root / "iot23.csv"
-    inside.write_text("proto,label\ntcp,Mirai\n", encoding="utf-8")
-    outside = tmp_path / "outside.csv"
-    outside.write_text("proto,label\nudp,DDoS\n", encoding="utf-8")
-    monkeypatch.setenv("TFM_DATA_DIR", str(data_root))
-
-    allowed = client.call(
-        "datasets", "load_sample", dataset="iot23", n=1, path=str(inside)
-    )
-    absolute_escape = client.call(
-        "datasets", "load_sample", dataset="iot23", n=1, path=str(outside)
-    )
-    traversal = client.call(
-        "datasets", "load_sample", dataset="iot23", n=1, path="../outside.csv"
-    )
-
-    assert allowed["ok"] is True
-    assert allowed["count"] == 1
-    assert absolute_escape["ok"] is False
-    assert traversal["ok"] is False
-
-
-def test_datasets_default_source_supports_relative_configured_root(tmp_path, monkeypatch):
-    data_root = tmp_path / "data" / "IOT23"
-    data_root.mkdir(parents=True)
-    (data_root / "sample.csv").write_text(
-        "proto,label\ntcp,Mirai\n", encoding="utf-8"
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TFM_DATA_DIR", "data")
-
-    result = client.call("datasets", "load_sample", dataset="iot23", n=1)
-
-    assert result["ok"] is True
-    assert result["count"] == 1
-
-
-# ---------------------------------------------------------------------------
-# datasets + inference (dependen de artefactos/modelos locales)
-# ---------------------------------------------------------------------------
-
-def _standardized_available() -> bool:
-    from src.mcp.common import resolve_path
-
-    return resolve_path("standardized_dataset").exists()
-
-
-def test_datasets_list_always_answers():
-    result = client.call("datasets", "list_datasets")
-    assert result["ok"]
-    names = {d["name"] for d in result["datasets"]}
-    assert "standardized_corpus" in names
-
-
-@pytest.mark.skipif(not _standardized_available(), reason="corpus estandarizado no disponible")
-def test_datasets_load_standardized_sample():
-    result = client.call("datasets", "load_sample", dataset="standardized_corpus", n=2)
-    assert result["ok"] and result["count"] == 2
-    row = result["rows"][0]
-    assert "canonical_event" in row and "target" in row
 
 
 class FakeLLMParser:
@@ -744,26 +586,6 @@ def test_detect_and_classify_with_prepared_models():
     assert classification["attack_family"]
     assert 0.0 <= classification["confidence"] <= 1.0
     assert len(classification["top_scores"]) >= 1
-
-
-@pytest.mark.skipif(not _models_loadable() or not _standardized_available(), reason="modelos o corpus no disponibles")
-def test_detection_agrees_with_corpus_labels_on_sample():
-    """Sanidad: sobre 20 filas del corpus, el detector acierta la mayoria."""
-    rows = client.call("datasets", "load_sample", dataset="standardized_corpus", n=20)["rows"]
-    hits = 0
-    total = 0
-    for row in rows:
-        target = row.get("target") or {}
-        if "is_attack" not in target:
-            continue
-        detection = client.call("inference", "detect_event", canonical_event=row["canonical_event"])
-        if not detection["ok"]:
-            continue
-        total += 1
-        if detection["is_malicious"] == bool(target["is_attack"]):
-            hits += 1
-    assert total > 0
-    assert hits / total >= 0.7, f"acierto {hits}/{total} demasiado bajo"
 
 
 # ---------------------------------------------------------------------------

@@ -1,29 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 import re
 from pathlib import Path
 from typing import Any
 
-import joblib
-
-from src.contracts.agents import ClassificationOutput, DetectionOutput
 from src.contracts.canonical import CanonicalEvent
-
-
-GENERAL_FAMILIES = [
-    "benign",
-    "ddos",
-    "scanning",
-    "botnet",
-    "bruteforce",
-    "injection",
-    "malware",
-    "exfiltration",
-    "mitm",
-    "unknown_attack",
-]
 
 
 class GeneralizedFeatureStandardizer:
@@ -220,120 +202,6 @@ class GeneralizedFeatureStandardizer:
             features[f"{prefix}_port.bucket.ephemeral"] = 1
 
 
-@dataclass
-class GeneralSupervisedModelBundle:
-    detector_pipeline: Any
-    classifier_pipeline: Any
-    detector_threshold: float = 0.5
-    detector_abstain_margin: float = 0.0
-    classifier_abstain_threshold: float = 0.45
-    include_origin: bool = False
-    feature_set: str = "full"
-    standardizer_version: str = GeneralizedFeatureStandardizer.version
-    model_name: str = "generalized_supervised_multiagent_v1"
-
-
-def save_general_bundle(bundle: GeneralSupervisedModelBundle, path: str | Path) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(bundle, path)
-
-
-def load_general_bundle(path: str | Path) -> GeneralSupervisedModelBundle:
-    return joblib.load(path)
-
-
-class GeneralSupervisedDetector:
-    def __init__(self, bundle: GeneralSupervisedModelBundle):
-        self.bundle = bundle
-        self.standardizer = GeneralizedFeatureStandardizer(
-            include_origin=getattr(bundle, "include_origin", False),
-            feature_set=getattr(bundle, "feature_set", "full"),
-        )
-        self.model_name = f"general_detector::{bundle.model_name}"
-
-    def detect(self, event: CanonicalEvent) -> DetectionOutput:
-        features = self.standardizer.event_to_features(event)
-        probability = _positive_probability(self.bundle.detector_pipeline, features)
-        threshold = self.bundle.detector_threshold
-        abstain_margin = max(0.0, float(getattr(self.bundle, "detector_abstain_margin", 0.0) or 0.0))
-        if abstain_margin and abs(probability - threshold) <= abstain_margin:
-            return DetectionOutput(
-                event_id=event.event_id,
-                is_malicious=False,
-                probability=probability,
-                evidence=[
-                    f"general_supervised_probability={probability:.4f}",
-                    f"threshold={threshold:.4f}",
-                    f"abstain_margin={abstain_margin:.4f}",
-                    f"feature_count={len(features)}",
-                ],
-                model_name=self.model_name,
-                next_route="judge",
-                abstain=True,
-            )
-        is_malicious = probability >= self.bundle.detector_threshold
-        return DetectionOutput(
-            event_id=event.event_id,
-            is_malicious=is_malicious,
-            probability=probability,
-            evidence=[
-                f"general_supervised_probability={probability:.4f}",
-                f"threshold={threshold:.4f}",
-                f"feature_count={len(features)}",
-            ],
-            model_name=self.model_name,
-            next_route="classify" if is_malicious else "end",
-            abstain=False,
-        )
-
-
-class GeneralSupervisedClassifier:
-    def __init__(self, bundle: GeneralSupervisedModelBundle):
-        self.bundle = bundle
-        self.standardizer = GeneralizedFeatureStandardizer(
-            include_origin=getattr(bundle, "include_origin", False),
-            feature_set=getattr(bundle, "feature_set", "full"),
-        )
-        self.model_name = f"general_classifier::{bundle.model_name}"
-
-    def classify(self, event: CanonicalEvent, detection: DetectionOutput) -> ClassificationOutput:
-        if not detection.is_malicious:
-            return ClassificationOutput(
-                event_id=event.event_id,
-                attack_family=None,
-                attack_subtype=None,
-                confidence=max(0.0, min(1.0, 1.0 - detection.probability)),
-                reason=["general_detector_marked_benign", f"general_classifier_model={self.model_name}"],
-                next_route="end",
-            )
-        features = self.standardizer.event_to_features(event)
-        predicted_family = str(self.bundle.classifier_pipeline.predict([features])[0])
-        confidence = _predicted_class_probability(self.bundle.classifier_pipeline, features, predicted_family)
-        if predicted_family == "benign":
-            return ClassificationOutput(
-                event_id=event.event_id,
-                attack_family=None,
-                attack_subtype=None,
-                confidence=confidence,
-                reason=["general_classifier_predicted_benign", f"general_classifier_model={self.model_name}"],
-                next_route="end",
-            )
-        return ClassificationOutput(
-            event_id=event.event_id,
-            attack_family=predicted_family,
-            attack_subtype=predicted_family,
-            confidence=confidence,
-            cross_dataset_neighbors=[],
-            reason=[
-                f"general_attack_family={predicted_family}",
-                f"general_classifier_probability={confidence:.4f}",
-                f"feature_count={len(features)}",
-                f"general_classifier_model={self.model_name}",
-            ],
-            next_route="explain" if confidence >= getattr(self.bundle, "classifier_abstain_threshold", 0.45) else "judge",
-        )
-
-
 COMMON_PORTS = {
     20: "ftp_data",
     21: "ftp",
@@ -429,41 +297,6 @@ def schema_profile(event: CanonicalEvent) -> str:
     if {"src_port", "dst_port"} & keys or any("state" in key or "proto" in key for key in keys):
         return "network_flow"
     return event.modality
-
-
-def _positive_probability(pipeline: Any, features: dict[str, Any]) -> float:
-    if hasattr(pipeline, "predict_proba"):
-        probabilities = pipeline.predict_proba([features])[0]
-        classes = _pipeline_classes(pipeline)
-        if True in classes:
-            return float(probabilities[classes.index(True)])
-        if 1 in classes:
-            return float(probabilities[classes.index(1)])
-        if "malicious" in classes:
-            return float(probabilities[classes.index("malicious")])
-        return float(max(probabilities))
-    prediction = pipeline.predict([features])[0]
-    return 1.0 if bool(prediction) else 0.0
-
-
-def _predicted_class_probability(pipeline: Any, features: dict[str, Any], predicted: str) -> float:
-    if hasattr(pipeline, "predict_proba"):
-        probabilities = pipeline.predict_proba([features])[0]
-        classes = [str(item) for item in _pipeline_classes(pipeline)]
-        if predicted in classes:
-            return float(probabilities[classes.index(predicted)])
-        return float(max(probabilities))
-    return 1.0
-
-
-def _pipeline_classes(pipeline: Any) -> list[Any]:
-    if hasattr(pipeline, "classes_"):
-        return list(getattr(pipeline, "classes_"))
-    named_steps = getattr(pipeline, "named_steps", {})
-    model = named_steps.get("model") if isinstance(named_steps, dict) else None
-    if model is not None and hasattr(model, "classes_"):
-        return list(getattr(model, "classes_"))
-    return []
 
 
 def _coerce_number(value: Any) -> float | None:

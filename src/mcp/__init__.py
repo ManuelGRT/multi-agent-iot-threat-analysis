@@ -1,15 +1,16 @@
 # src/mcp/__init__.py
-"""Capa MCP del sistema multiagente (Fase 2 del plan de cierre).
+"""Capa MCP del sistema multiagente final.
 
-Cinco servidores MCP construidos con FastMCP (SDK oficial) exponen los
-artefactos preparados del TFM como herramientas conectables y auditables:
+Tres servidores MCP construidos con FastMCP (SDK oficial) exponen el runtime
+online como herramientas conectables y auditables:
 
-- ``datasets_server``:    datasets crudos y corpus estandarizado.
 - ``inference_server``:   estandarizacion Mistral obligatoria (sin fallback),
                           deteccion y clasificacion con modelos .joblib.
 - ``case_memory_server``: memoria de casos con trazas (SQLite).
 - ``threat_intel_server``: mapeo familia -> ATT&CK/CAPEC y mitigaciones.
-- ``evaluation_server``:  metricas, comparacion con baselines e informes.
+
+La preparacion de datasets, la sanitizacion y la evaluacion permanecen fuera
+del runtime online, bajo ``src.eval`` y los scripts de validacion.
 
 Cada servidor puede ejecutarse como proceso MCP real::
 

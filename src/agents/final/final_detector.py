@@ -74,13 +74,19 @@ class FinalDetector(FinalAgent):
             abstain=abstain,
         )
         confidence = probability if is_malicious else 1.0 - probability
+        summary = (
+            f"sin_veredicto p={probability:.4f} "
+            f"abstencion=True ruta={next_route}"
+            if abstain
+            else (
+                f"malicioso={is_malicious} p={probability:.4f} "
+                f"abstencion=False ruta={next_route}"
+            )
+        )
         entry.finish(
             status="abstain" if abstain else "ok",
             confidence=confidence,
-            summary=(
-                f"malicioso={is_malicious} p={probability:.4f} "
-                f"abstencion={abstain} ruta={next_route}"
-            ),
+            summary=summary,
         )
         update: dict[str, Any] = {
             "detection_output": output.model_dump(mode="json"),

@@ -242,7 +242,13 @@ class CaseResult(BaseModel):
                 failure_reason=ingest.get("failure_reason"),
             ),
             detection=DetectionInfo(
-                is_malicious=detection.get("is_malicious"),
+                # La clase binaria de trabajo se conserva en el estado interno,
+                # pero una abstencion no es un veredicto publico del caso.
+                is_malicious=(
+                    None
+                    if detection.get("abstain")
+                    else detection.get("is_malicious")
+                ),
                 probability=float(detection.get("probability", 0.0) or 0.0),
                 model_name=detection.get("model_name"),
                 abstain=bool(detection.get("abstain", False)),

@@ -570,6 +570,8 @@ def test_detector_gray_zone_abstains(probability):
     assert output["next_route"] == "judge"
     assert update["route"] == "judge"
     assert update["trace"][-1]["status"] == "abstain"
+    assert "sin_veredicto" in update["trace"][-1]["summary"]
+    assert "malicioso=" not in update["trace"][-1]["summary"]
 
 
 def test_detector_gray_zone_boundaries_exclusive():
@@ -710,9 +712,15 @@ def test_judge_approves_clean_case():
 def test_judge_flags_detector_abstention():
     state = clean_state()
     state["detection_output"]["abstain"] = True
+    state.pop("classification_output")
+    state.pop("explanation_output")
     update = FinalJudge().run(state)
     assert update["judge_output"]["action"] == "human_interrupt"
     assert "detector_abstained" in update["judge_output"]["issues"]
+    assert "malicious_without_classification" not in update["judge_output"]["issues"]
+    assert "malicious_without_mitigation" not in update["judge_output"]["issues"]
+    assert update["judge_output"]["final_label"] is None
+    assert update["judge_output"]["final_confidence"] == 0.0
     assert update["needs_human_review"] is True
 
 

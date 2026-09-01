@@ -34,6 +34,7 @@ class FinalJudge(FinalAgent):
 
         issues: list[str] = []
         standardizer_abstained = bool(ingest.get("abstain"))
+        detector_abstained = bool(detection.get("abstain"))
         if errors:
             issues.append("pipeline_errors_present")
         if standardizer_abstained:
@@ -50,28 +51,43 @@ class FinalJudge(FinalAgent):
                 probability = float(detection.get("probability", 0.0) or 0.0)
                 if bool(detection.get("is_malicious")) != (probability >= 0.5):
                     issues.append("detection_label_probability_mismatch")
-        if detection.get("abstain"):
+        if detector_abstained:
             issues.append("detector_abstained")
         if (
-            detection.get("is_malicious")
+            not detector_abstained
+            and detection.get("is_malicious")
             and classification
             and float(classification.get("confidence", 1.0) or 0.0)
             < REVIEW_CLASSIFICATION_CONFIDENCE
         ):
             issues.append("classification_confidence_below_review_threshold")
-        if detection.get("is_malicious") and not classification:
+        if (
+            not detector_abstained
+            and detection.get("is_malicious")
+            and not classification
+        ):
             issues.append("malicious_without_classification")
-        if detection.get("is_malicious") and str(
-            classification.get("attack_family") or ""
-        ).strip().lower() in {"benign", "normal"}:
+        if (
+            not detector_abstained
+            and detection.get("is_malicious")
+            and str(classification.get("attack_family") or "").strip().lower()
+            in {"benign", "normal"}
+        ):
             issues.append("malicious_classified_as_benign")
-        if detection.get("is_malicious") and not explanation:
+        if (
+            not detector_abstained
+            and detection.get("is_malicious")
+            and not explanation
+        ):
             issues.append("malicious_without_mitigation")
         if explanation.get("requires_human_review"):
             issues.append("mitigator_requested_human_review")
 
         probability = float(detection.get("probability", 0.0) or 0.0)
-        if classification.get("attack_family"):
+        if standardizer_abstained or detector_abstained:
+            final_label = None
+            final_confidence = 0.0
+        elif classification.get("attack_family"):
             final_label = str(classification["attack_family"])
             final_confidence = float(classification.get("confidence", 0.0) or 0.0)
         elif detection:

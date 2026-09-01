@@ -23,9 +23,6 @@
   select, textarea, button { width: 100%; font: inherit; border-radius: 8px; border: 1px solid var(--borde); }
   select { padding: 7px 8px; background: #fff; }
   textarea { min-height: 210px; padding: 8px; font-family: Consolas, monospace; font-size: 12px; resize: vertical; }
-  .toggles { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 13px; }
-  .toggles label { display: flex; align-items: center; gap: 8px; margin: 0; color: #1c2333; }
-  .toggles input { width: auto; }
   button.analizar { margin-top: 14px; background: var(--azul); color: #fff; border: none; padding: 10px; font-weight: 600; cursor: pointer; }
   button.analizar:disabled { opacity: .55; cursor: wait; }
   .aviso { font-size: 11.5px; color: var(--gris); margin-top: 8px; line-height: 1.45; }
@@ -68,6 +65,9 @@
   .scorefila { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 6px; font-size: 12px; padding: 1.5px 0; }
   .mitigacion { padding: 5px 0; border-bottom: 1px dashed var(--borde); font-size: 12.3px; line-height: 1.4; }
   .mitigacion:last-child { border-bottom: none; }
+  .mitigacion-texto { margin-top: 4px; }
+  .mitigacion-base { margin-top: 3px; color: var(--gris); font-size: 11px; }
+  .mitigacion-alerta { margin-top: 3px; color: var(--err); font-size: 11px; }
   .refchip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; background: var(--azul-claro); color: var(--azul); border-radius: 6px; font-size: 11.5px; text-decoration: none; }
   .refchip:hover { background: #d5d5ee; }
 
@@ -76,13 +76,25 @@
   table.traza th { color: var(--gris); font-weight: 600; font-size: 11.5px; text-transform: uppercase; }
   details.json { margin-top: 12px; }
   details.json pre { background: #101828; color: #d5dbe8; padding: 12px; border-radius: 10px; overflow: auto; font-size: 11.5px; max-height: 420px; }
+  .auditoria-panel { border-style: dashed; border-color: #aeb4c2; }
+  .auditoria-flujo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 3px 0 8px; }
+  .auditoria-nodo { border: 1px solid var(--borde); border-radius: 8px; background: #fff; padding: 7px 10px; font-size: 12.5px; }
+  .auditoria-nodo.agente { border: 2px solid var(--azul); color: var(--azul); font-weight: 600; }
+  .auditoria-flecha { color: var(--gris); }
+  .auditoria-nota { color: var(--gris); font-size: 11.5px; line-height: 1.4; margin: 4px 0 10px; }
+  .auditoria-resumen { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; font-size: 12.5px; }
+  .auditoria-incidencias { margin-top: 8px; font-size: 12px; }
+  .auditoria-incidencias ul { margin: 5px 0 0; padding-left: 20px; }
+  .auditoria-check-label { font-weight: 600; }
+  .auditoria-check-id { margin-top: 2px; color: var(--gris); font: 10.5px Consolas, monospace; }
+  .auditoria-check-descripcion { min-width: 220px; line-height: 1.35; }
+  details.auditoria-detalle { margin-top: 10px; }
   .oculto { display: none; }
 </style>
 </head>
 <body>
 <header>
   <h1>Sistema Multiagente de Análisis de Amenazas IoT/IIoT</h1>
-  <p>Visor del flujo de extremo a extremo: entrada cruda → estandarización → detección → clasificación → mitigación → juez → caso auditable</p>
 </header>
 <main>
   <!-- ============ ENTRADA ============ -->
@@ -90,15 +102,9 @@
     <h2>Entrada</h2>
     <label for="ejemplo">Ejemplo precargado</label>
     <select id="ejemplo"></select>
-    <label for="payload">Evento crudo (petición JSON a <code>/cases/analyze</code>)</label>
+    <label for="payload">Evento crudo (petición JSON al Endpoint <code>/cases/analyze</code>)</label>
     <textarea id="payload" spellcheck="false"></textarea>
-    <div class="toggles">
-      <label><input type="checkbox" id="use_llm_mitigator"> Mitigación contextualizada por LLM</label>
-      <label><input type="checkbox" id="persist"> Persistir caso en la memoria</label>
-    </div>
     <button class="analizar" id="analizar">Analizar caso</button>
-    <p class="aviso">Toda entrada cruda se estandariza obligatoriamente con Mistral y necesita
-    <code>MISTRAL_API_KEY</code>. Si el servicio no responde, el caso se deriva al juez para revisión humana.</p>
   </div>
 
   <!-- ============ FLUJO ============ -->
@@ -124,33 +130,146 @@
       </tr></thead><tbody id="traza-body"></tbody></table>
       <details class="json"><summary>CaseResult completo (JSON)</summary><pre id="json-out"></pre></details>
     </div>
+
+    <div class="panel auditoria-panel oculto" id="panel-auditoria" style="margin-top:12px" aria-live="polite">
+      <h2>Auditoría posterior independiente</h2>
+      <div class="auditoria-flujo" aria-label="Flujo posterior de auditoría">
+        <span class="auditoria-nodo">CaseResult persistido</span>
+        <span class="auditoria-flecha" aria-hidden="true">→</span>
+        <span class="auditoria-nodo agente">🧾 Agente auditor</span>
+      </div>
+      <p class="auditoria-nota">Se ejecuta después del juez, sobre el caso cerrado.</p>
+      <div id="auditoria-estado"></div>
+      <div class="auditoria-resumen" id="auditoria-resumen"></div>
+      <div class="auditoria-incidencias" id="auditoria-incidencias"></div>
+      <details class="auditoria-detalle oculto" id="auditoria-detalle">
+        <summary>Comprobaciones del auditor</summary>
+        <table class="traza"><thead><tr>
+          <th>Comprobación</th><th>Descripción</th><th>Resultado</th><th>Detalle técnico</th>
+        </tr></thead><tbody id="auditoria-checks"></tbody></table>
+      </details>
+    </div>
   </div>
 </main>
 
+<script id="demo-examples" type="application/json">
+{
+  "[IoT-23] Benigno real · NTP": {
+    "expected_profile": "network_flow",
+    "payload": {
+      "dataset": "iot23",
+      "source_file": "demo_iot23_conn.csv",
+      "row_id": 124,
+      "row": {"ts":"1540487336.184154","uid":"CPNbNp2gKV9loYbdS","id.orig_h":"192.168.1.132","id.orig_p":"35056","id.resp_h":"216.239.35.8","id.resp_p":"123","proto":"udp","service":"-","duration":"0.016972","orig_bytes":"48","resp_bytes":"48","conn_state":"SF","local_orig":"-","local_resp":"-","missed_bytes":"0","history":"Dd","orig_pkts":"1","orig_ip_bytes":"76","resp_pkts":"1","resp_ip_bytes":"76","tunnel_parents":"-"}
+    }
+  },
+  "[IoT-23] Ataque real · botnet C&C": {
+    "expected_profile": "network_flow",
+    "payload": {
+      "dataset": "iot23",
+      "source_file": "demo_iot23_conn.csv",
+      "row_id": 3207,
+      "row": {"ts":"1538520821.627997","uid":"CGLDvm3X8xOnv1Rfwf","id.orig_h":"192.168.100.103","id.orig_p":"38098","id.resp_h":"66.85.157.90","id.resp_p":"443","proto":"tcp","service":"-","duration":"44325.615625","orig_bytes":"19431","resp_bytes":"19431","conn_state":"S1","local_orig":"-","local_resp":"-","missed_bytes":"4500","history":"ShADCaGcgd","orig_pkts":"8872","orig_ip_bytes":"372893","resp_pkts":"9307","resp_ip_bytes":"388975","tunnel_parents":"-"}
+    }
+  },
+  "[BoT-IoT] Benigno real · NTP": {
+    "expected_profile": "network_flow",
+    "payload": {
+      "dataset": "bot_iot",
+      "source_file": "demo_bot_iot.csv",
+      "row_id": 577156,
+      "row": {"pkSeqID":"3577157","stime":"1526349282.18004","flgs":"e","flgs_number":"1","proto":"udp","proto_number":"3","saddr":"192.168.100.148","sport":"41936","daddr":"27.124.125.250","dport":"123","pkts":"2","bytes":"180","state":"CON","state_number":"2","ltime":"1526349282.22849","seq":"32809","dur":"0.048447","mean":"0.048447","stddev":"0","sum":"0.048447","min":"0.048447","max":"0.048447","spkts":"1","dpkts":"1","sbytes":"90","dbytes":"90","rate":"20.641111","srate":"0","drate":"0","TnBPSrcIP":"2047","TnBPDstIP":"360","TnP_PSrcIP":"24","TnP_PDstIP":"4","TnP_PerProto":"123687","TnP_Per_Dport":"8","AR_P_Proto_P_SrcIP":"2.37931","AR_P_Proto_P_DstIP":"41.204","N_IN_Conn_P_DstIP":"2","N_IN_Conn_P_SrcIP":"14","AR_P_Proto_P_Sport":"41.2822","AR_P_Proto_P_Dport":"24.6715","Pkts_P_State_P_Protocol_P_DestIP":"4","Pkts_P_State_P_Protocol_P_SrcIP":"12"}
+    }
+  },
+  "[BoT-IoT] Ataque real · reconocimiento": {
+    "expected_profile": "network_flow",
+    "payload": {
+      "dataset": "bot_iot",
+      "source_file": "demo_bot_iot.csv",
+      "row_id": 578050,
+      "row": {"pkSeqID":"3578051","stime":"1526876123.69904","flgs":"e","flgs_number":"1","proto":"tcp","proto_number":"1","saddr":"192.168.100.150","sport":"46997","daddr":"192.168.100.3","dport":"19801","pkts":"2","bytes":"120","state":"RST","state_number":"1","ltime":"1526876123.69912","seq":"772","dur":"0.000073","mean":"0.000073","stddev":"0","sum":"0.000073","min":"0.000073","max":"0.000073","spkts":"1","dpkts":"1","sbytes":"60","dbytes":"60","rate":"13698.629883","srate":"0","drate":"0","TnBPSrcIP":"12000","TnBPDstIP":"12000","TnP_PSrcIP":"200","TnP_PDstIP":"200","TnP_PerProto":"200","TnP_Per_Dport":"2","AR_P_Proto_P_SrcIP":"15256.7","AR_P_Proto_P_DstIP":"15256.7","N_IN_Conn_P_DstIP":"100","N_IN_Conn_P_SrcIP":"100","AR_P_Proto_P_Sport":"15256.7","AR_P_Proto_P_Dport":"27397.3","Pkts_P_State_P_Protocol_P_DestIP":"200","Pkts_P_State_P_Protocol_P_SrcIP":"200"}
+    }
+  },
+  "[Edge-IIoTset] Benigno real · MQTT": {
+    "expected_profile": "network_packet",
+    "payload": {
+      "dataset": "edge_iiotset",
+      "source_file": "demo_edge_iiot.csv",
+      "row_id": 119315,
+      "row": {"frame.time":" 2021 17:03:01.881333000 ","ip.src_host":"192.168.0.101","ip.dst_host":"192.168.0.128","arp.dst.proto_ipv4":"0","arp.opcode":"0.0","arp.hw.size":"0.0","arp.src.proto_ipv4":"0","icmp.checksum":"0.0","icmp.seq_le":"0.0","icmp.transmit_timestamp":"0.0","icmp.unused":"0.0","http.file_data":"0.0","http.content_length":"0.0","http.request.uri.query":"0.0","http.request.method":"0.0","http.referer":"0.0","http.request.full_uri":"0.0","http.request.version":"0.0","http.response":"0.0","http.tls_port":"0.0","tcp.ack":"5.0","tcp.ack_raw":"33541935.0","tcp.checksum":"8631.0","tcp.connection.fin":"0.0","tcp.connection.rst":"0.0","tcp.connection.syn":"0.0","tcp.connection.synack":"0.0","tcp.dstport":"1883.0","tcp.flags":"16.0","tcp.flags.ack":"1.0","tcp.len":"0.0","tcp.options":"0","tcp.payload":"0","tcp.seq":"59.0","tcp.srcport":"49197.0","udp.port":"0.0","udp.stream":"0.0","udp.time_delta":"0.0","dns.qry.name":"0.0","dns.qry.name.len":"0","dns.qry.qu":"0.0","dns.qry.type":"0.0","dns.retransmission":"0.0","dns.retransmit_request":"0.0","dns.retransmit_request_in":"0.0","mqtt.conack.flags":"0","mqtt.conflag.cleansess":"0.0","mqtt.conflags":"0.0","mqtt.hdrflags":"0.0","mqtt.len":"0.0","mqtt.msg_decoded_as":"0.0","mqtt.msg":"0","mqtt.msgtype":"0.0","mqtt.proto_len":"0.0","mqtt.protoname":"0","mqtt.topic":"0","mqtt.topic_len":"0.0","mqtt.ver":"0.0","mbtcp.len":"0.0","mbtcp.trans_id":"0.0","mbtcp.unit_id":"0.0"}
+    }
+  },
+  "[Edge-IIoTset] Ataque real · DDoS TCP": {
+    "expected_profile": "network_packet",
+    "payload": {
+      "dataset": "edge_iiotset",
+      "source_file": "demo_edge_iiot.csv",
+      "row_id": 50554,
+      "row": {"frame.time":" 2021 19:07:57.904459000 ","ip.src_host":"192.168.0.128","ip.dst_host":"31.172.176.71","arp.dst.proto_ipv4":"0","arp.opcode":"0.0","arp.hw.size":"0.0","arp.src.proto_ipv4":"0","icmp.checksum":"0.0","icmp.seq_le":"0.0","icmp.transmit_timestamp":"0.0","icmp.unused":"0.0","http.file_data":"0.0","http.content_length":"0.0","http.request.uri.query":"0.0","http.request.method":"0.0","http.referer":"0.0","http.request.full_uri":"0.0","http.request.version":"0.0","http.response":"0.0","http.tls_port":"0.0","tcp.ack":"121.0","tcp.ack_raw":"1548597051.0","tcp.checksum":"46871.0","tcp.connection.fin":"0.0","tcp.connection.rst":"1.0","tcp.connection.syn":"0.0","tcp.connection.synack":"0.0","tcp.dstport":"21444.0","tcp.flags":"20.0","tcp.flags.ack":"1.0","tcp.len":"0.0","tcp.options":"0.0","tcp.payload":"0","tcp.seq":"1.0","tcp.srcport":"80.0","udp.port":"0.0","udp.stream":"0.0","udp.time_delta":"0.0","dns.qry.name":"0.0","dns.qry.name.len":"0.0","dns.qry.qu":"0.0","dns.qry.type":"0.0","dns.retransmission":"0.0","dns.retransmit_request":"0.0","dns.retransmit_request_in":"0.0","mqtt.conack.flags":"0.0","mqtt.conflag.cleansess":"0.0","mqtt.conflags":"0.0","mqtt.hdrflags":"0.0","mqtt.len":"0.0","mqtt.msg_decoded_as":"0.0","mqtt.msg":"0.0","mqtt.msgtype":"0.0","mqtt.proto_len":"0.0","mqtt.protoname":"0.0","mqtt.topic":"0.0","mqtt.topic_len":"0.0","mqtt.ver":"0.0","mbtcp.len":"0.0","mbtcp.trans_id":"0.0","mbtcp.unit_id":"0.0"}
+    }
+  },
+  "[TON-IoT/red] Benigno real · DNS": {
+    "expected_profile": "network_flow",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_network.csv",
+      "row_id": 118143,
+      "row": {"src_ip":"192.168.1.180","src_port":"54248","dst_ip":"192.168.1.190","dst_port":"53","proto":"udp","service":"dns","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"59","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"elasticsearch","dns_qclass":"1","dns_qtype":"1","dns_rcode":"0","dns_AA":"F","dns_RD":"T","dns_RA":"F","dns_rejected":"F","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
+    }
+  },
+  "[TON-IoT/red] Ataque real · escaneo": {
+    "expected_profile": "network_flow",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_network.csv",
+      "row_id": 186828,
+      "row": {"src_ip":"192.168.1.32","src_port":"53921","dst_ip":"192.168.1.103","dst_port":"1236","proto":"tcp","service":"-","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"44","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"-","dns_qclass":"0","dns_qtype":"0","dns_rcode":"0","dns_AA":"-","dns_RD":"-","dns_RA":"-","dns_rejected":"-","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
+    }
+  },
+  "[TON-IoT/host] Ataque real · inyección": {
+    "expected_profile": "host_metrics",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_linux_process.csv",
+      "row_id": 21599,
+      "row": {"PID":"6497","TRUN":"0","TSLPI":"53","TSLPU":"0","POLI":"norm","NICE":"0","PRI":"120","RTPR":"0","CPUNR":"1","Status":"0","EXC":"0","State":"S","CPU":"0.04","CMD":"firefox"}
+    }
+  },
+  "[TON-IoT/telemetría] Benigno real · estación meteorológica": {
+    "expected_profile": "iot_telemetry",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_weather.csv",
+      "row_id": 8601,
+      "row": {"date":"31-Mar-19","time":"12:41:13","temperature":"23.61985261","pressure":"1.741141085","humidity":"79.13571638"}
+    }
+  },
+  "[TON-IoT/telemetría] Ataque real · ransomware": {
+    "expected_profile": "iot_telemetry",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_weather.csv",
+      "row_id": 36927,
+      "row": {"date":"28-Apr-19","time":"4:26:35","temperature":"48.58343945","pressure":"2.408192654","humidity":"38.42336781"}
+    }
+  },
+  "[Urban-IoT] Sin etiqueta · solo estandarización": {
+    "expected_profile": "iot_telemetry",
+    "payload": {
+      "dataset": "urban_iot",
+      "source_file": "demo_urban_iot.csv",
+      "row_id": 23022,
+      "row": {"NODE":"4850","LAT":"8.631275995855345","LNG":"1.989256301705459","TIME":"2021-01-02 07:28:11","ACTIVE":"1"}
+    }
+  },
+  "JSON libre": {
+    "expected_profile": "unknown",
+    "payload": {"dataset":"generic","source_file":"demo_free_input.json","row_id":0,"row":{}}
+  }
+}
+</script>
 <script>
-const EJEMPLOS = {
-  "Flujo IoT-23 sospechoso (telnet)": {
-    dataset: "iot23", row_id: 990001,
-    row: { "id.orig_h": "10.0.0.2", "id.resp_h": "10.0.0.3", "id.orig_p": 4444,
-           "id.resp_p": 23, "proto": "tcp", "conn_state": "S0", "orig_pkts": 120,
-           "orig_ip_bytes": 4096, "resp_pkts": 0, "resp_ip_bytes": 0, "duration": 0.8 }
-  },
-  "Flujo IoT-23 benigno (HTTPS)": {
-    dataset: "iot23", row_id: 990002,
-    row: { "id.orig_h": "192.168.1.50", "id.resp_h": "142.250.184.14", "id.orig_p": 52100,
-           "id.resp_p": 443, "proto": "tcp", "service": "ssl", "conn_state": "SF",
-           "orig_pkts": 14, "orig_ip_bytes": 2300, "resp_pkts": 16, "resp_ip_bytes": 8900,
-           "duration": 3.2 }
-  },
-  "Telemetría TON-IoT (termostato anómalo)": {
-    dataset: "ton_iot", row_id: 990003,
-    row: { "ts": "2026-08-03 12:00:01", "device": "thermostat-07",
-           "current_temperature": 93.5, "thermostat_status": 1, "motion_status": 0,
-           "temp_condition": "high" }
-  },
-  "Edge-IIoTset DDoS (evento canonico de la demo)": {"dataset": "edge_iiotset", "row_id": 133181, "canonical_event": {"event_id": "llm::EDGE_IIOTSET::data\\EDGE_IIOTSET\\ML-EdgeIIoT-dataset.csv::133181", "modality": "network_flow", "ts": null, "src_ip": "192.168.0.128", "dst_ip": null, "src_port": 15619, "dst_port": null, "transport_proto": null, "app_proto": null, "packet_count": null, "byte_count": null, "duration_ms": null, "telemetry": {"frame.time": "57.89.101.191", "ip.src_host": "192.168.0.128", "ip.dst_host": "0", "tcp.connection.fin": "0.0", "tcp.connection.rst": "0.0", "tcp.connection.syn": "0.0", "tcp.connection.synack": "0.0", "tcp.dstport": "0.0", "tcp.flags": "0.0", "tcp.len": "0.0", "tcp.payload": "0.0", "tcp.srcport": "15619.0", "udp.port": "0.0", "udp.stream": "782815.0", "udp.time_delta": "0.0", "dns.qry.name": "0.0", "dns.qry.type": "0.0", "mqtt.msg": "0.0", "mqtt.msgtype": "0.0", "mqtt.topic": "0.0"}, "host": {}, "label_raw": null, "attack_family": null, "attack_subtype": null, "severity": null, "schema_profile": "network_packet", "origin": {"source_name": "EDGE_IIOTSET", "source_file": "data\\EDGE_IIOTSET\\ML-EdgeIIoT-dataset.csv", "row_id": 133181, "schema_profile": "network_packet"}, "feature_groups": {"network_endpoint": ["ip.dst_host", "ip.src_host"], "ports": ["tcp.dstport", "tcp.srcport", "udp.port"], "protocol": ["dns.qry.type", "mqtt.msgtype", "tcp.connection.fin", "tcp.connection.rst", "tcp.connection.syn", "tcp.connection.synack", "tcp.flags"], "network_volume": ["tcp.len", "tcp.payload"], "state_flags": ["tcp.connection.fin", "tcp.connection.rst", "tcp.connection.syn", "tcp.connection.synack"], "textual_alert_context": ["dns.qry.name", "mqtt.msg", "mqtt.topic"], "timing": ["udp.time_delta"], "statistics": ["udp.stream"]}, "evidence_fields": ["dns.qry.name", "dns.qry.type", "ip.dst_host", "ip.src_host", "mqtt.msg", "mqtt.msgtype", "mqtt.topic", "tcp.connection.fin", "tcp.connection.rst", "tcp.connection.syn", "tcp.connection.synack", "tcp.dstport", "tcp.flags", "tcp.len", "tcp.payload", "tcp.srcport", "udp.port", "udp.stream", "udp.time_delta"], "traffic_direction": null, "service_context": {"dns": {"query_name": null, "query_type": null}, "mqtt": {"message_type": null, "topic": null}}, "host_context": {}, "telemetry_context": {}, "anomaly_summary": "Paquete TCP/UDP con flags de conexión (SYN/SYN-ACK/FIN/RST) y posible tráfico MQTT/DNS detectado. Falta contexto de destino para completar análisis.", "behavior_tags": [], "attack_indicators": [], "asset_context": null, "uncertainty": [], "semantic_text": "Paquete detectado desde 192.168.0.128 (puerto 15619) con flags TCP activas (SYN: true, SYN-ACK: null, FIN: null, RST: null) y tráfico UDP asociado (puerto 782815). Posible inicio de conexión TCP o tráfico MQTT/DNS sin destino definido.", "provenance": {"dataset": "EDGE_IIOTSET", "source_file": null, "row_id": null, "split": "stream", "parser_version": "1.0", "ingestion_ts": "2026-06-20T15:28:33.882923Z"}, "mapping_confidence": 0.88, "missing_fields": ["dst_ip", "dst_port", "transport_proto", "app_proto", "packet_count", "byte_count", "duration_ms", "ts"]}},
-  "JSON libre": { dataset: "generic", row_id: 0, row: {} }
-};
+const EJEMPLOS = JSON.parse(document.querySelector("#demo-examples").textContent);
 
 const NODOS = [
   { id: "orchestrator", icono: "🧭", nombre: "Orquestador" },
@@ -161,13 +280,147 @@ const NODOS = [
   { id: "final_judge", icono: "⚖️", nombre: "Juez" },
 ];
 
+const AUDIT_CHECK_INFO = {
+  "consistencia_sin_estado_error": {
+    label: "Estado final válido",
+    description: "Comprueba que el caso no haya terminado con error.",
+  },
+  "consistencia_errores_derivados": {
+    label: "Errores atendidos",
+    description: "Comprueba que los errores hayan llevado a revisión o a un error controlado.",
+  },
+  "consistencia_veredicto_deteccion_presente": {
+    label: "Detección disponible",
+    description: "Comprueba que un caso completado tenga veredicto benigno o malicioso.",
+  },
+  "consistencia_benigno_sin_familia": {
+    label: "Benigno sin familia de ataque",
+    description: "Comprueba que un caso benigno no tenga asignada una familia maliciosa.",
+  },
+  "consistencia_abstencion_flaggeada": {
+    label: "Abstención del detector atendida",
+    description: "Comprueba que una abstención del detector solicite revisión humana.",
+  },
+  "consistencia_abstencion_estandarizador_flaggeada": {
+    label: "Abstención del estandarizador atendida",
+    description: "Comprueba que una estandarización fallida se derive al juez para revisión.",
+  },
+  "consistencia_malicioso_con_familia": {
+    label: "Ataque con familia asignada",
+    description: "Comprueba que un caso malicioso completado tenga familia de ataque.",
+  },
+  "consistencia_probabilidad_en_rango": {
+    label: "Probabilidad válida",
+    description: "Comprueba que la probabilidad de detección esté entre 0 y 1.",
+  },
+  "consistencia_etiqueta_vs_probabilidad": {
+    label: "Etiqueta coherente con la probabilidad",
+    description: "Comprueba que benigno o malicioso coincida con el umbral de detección.",
+  },
+  "consistencia_malicioso_no_benigno": {
+    label: "Familia realmente maliciosa",
+    description: "Comprueba que un ataque no esté clasificado como benigno o normal.",
+  },
+  "consistencia_estado_vs_juez": {
+    label: "Estado coherente con el juez",
+    description: "Comprueba que un caso completado haya sido aprobado sin revisión pendiente.",
+  },
+  "consistencia_catalogo_sin_llm_suggested": {
+    label: "Procedencia del catálogo coherente",
+    description: "Comprueba que una salida de catálogo no contenga referencias propuestas por el LLM.",
+  },
+  "traza_no_vacia": {
+    label: "Traza disponible",
+    description: "Comprueba que el caso conserve al menos una entrada de ejecución.",
+  },
+  "traza_entradas_cerradas": {
+    label: "Pasos de la traza finalizados",
+    description: "Comprueba que todos los pasos tengan hora de finalización.",
+  },
+  "traza_sin_duraciones_negativas": {
+    label: "Duraciones válidas",
+    description: "Comprueba que ningún paso termine antes de empezar.",
+  },
+  "traza_orden_temporal": {
+    label: "Orden temporal correcto",
+    description: "Comprueba que los pasos estén registrados cronológicamente.",
+  },
+  "traza_orden_de_agentes": {
+    label: "Orden de agentes correcto",
+    description: "Comprueba que los agentes aparezcan en el orden previsto del flujo.",
+  },
+  "traza_juez_presente": {
+    label: "Juez registrado",
+    description: "Comprueba que el juez aparezca en la traza.",
+  },
+  "traza_estandarizador_presente": {
+    label: "Estandarizador registrado",
+    description: "Comprueba que el estandarizador aparezca en la traza.",
+  },
+  "traza_detector_presente": {
+    label: "Detector registrado",
+    description: "Comprueba que el detector aparezca cuando la estandarización continúa.",
+  },
+  "traza_clasificador_presente": {
+    label: "Clasificador registrado",
+    description: "Comprueba que un caso malicioso procesado pase por el clasificador.",
+  },
+  "traza_mitigador_presente": {
+    label: "Mitigador registrado",
+    description: "Comprueba que un caso malicioso clasificado pase por el mitigador.",
+  },
+  "traza_detector_antes_de_clasificar": {
+    label: "Detección previa a la clasificación",
+    description: "Comprueba que haya detección cuando aparece el clasificador.",
+  },
+  "traza_errores_derivados": {
+    label: "Errores de traza atendidos",
+    description: "Comprueba que cualquier paso con error termine en revisión o error controlado.",
+  },
+  "leakage_evento_canonico": {
+    label: "Evento sin fuga de etiquetas",
+    description: "Comprueba que el evento estandarizado no conserve targets o etiquetas reales.",
+  },
+  "leakage_features_modelos": {
+    label: "Variables sin fuga de etiquetas",
+    description: "Comprueba que los modelos no reciban targets entre sus variables de entrada.",
+  },
+  "leakage_evento_canonico_presente": {
+    label: "Evento canónico disponible",
+    description: "Comprueba que un caso completado conserve el evento estandarizado.",
+  },
+  "umbral_mapping_confidence_derivado": {
+    label: "Mapeo incierto revisado",
+    description: "Comprueba que una estandarización con baja confianza solicite revisión humana.",
+  },
+  "umbral_zona_gris_abstiene": {
+    label: "Zona gris tratada con abstención",
+    description: "Comprueba que una probabilidad dudosa haga abstenerse al detector.",
+  },
+  "umbral_confianza_clasificacion_derivada": {
+    label: "Clasificación incierta revisada",
+    description: "Comprueba que una familia con baja confianza solicite revisión humana.",
+  },
+};
+
 const $ = (s) => document.querySelector(s);
 const pct = (x) => (100 * (x ?? 0)).toFixed(1) + " %";
+const ratioWidth = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.min(100, Math.max(0, 100 * numeric)) : 0;
+};
+const escapeHtml = (value) => String(value ?? "").replace(
+  /[&<>"']/g,
+  char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char],
+);
 
 function initEjemplos() {
   const sel = $("#ejemplo");
   Object.keys(EJEMPLOS).forEach(k => sel.add(new Option(k, k)));
-  sel.onchange = () => { $("#payload").value = JSON.stringify(EJEMPLOS[sel.value], null, 2); };
+  sel.onchange = () => {
+    const spec = EJEMPLOS[sel.value];
+    $("#payload").value = JSON.stringify(spec.payload, null, 2);
+  };
   sel.onchange();
 }
 
@@ -177,7 +430,7 @@ function initPipeline() {
   NODOS.forEach(n => {
     const d = document.createElement("div");
     d.className = "nodo pendiente"; d.id = "nodo-" + n.id;
-    d.innerHTML = `<div class="icono">${n.icono}</div><div class="nombre">${n.nombre}</div><div class="estado"></div>`;
+    d.innerHTML = `<div class="icono">${escapeHtml(n.icono)}</div><div class="nombre">${escapeHtml(n.nombre)}</div><div class="estado"></div>`;
     p.appendChild(d);
   });
 }
@@ -209,9 +462,27 @@ async function replayTrace(caso) {
   }
 }
 
-function badgeSource(src) {
+function badgeSource(src, llmName = "LLM") {
   const m = { catalog: "ok", llm: "warn", llm_suggested: "err", fallback: "gris", hybrid: "warn", rule_based: "gris" };
-  return `<span class="badge ${m[src] || "gris"}">${src}</span>`;
+  const labels = {
+    catalog: "catálogo",
+    llm: `${llmName} + catálogo`,
+    llm_suggested: `${llmName} · sin catálogo`,
+    fallback: "fallback",
+    hybrid: `${llmName} + catálogo`,
+    rule_based: "reglas",
+  };
+  return `<span class="badge ${m[src] || "gris"}">${escapeHtml(labels[src] || src || "—")}</span>`;
+}
+
+function safeReferenceUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value), window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function pintarTarjetas(caso) {
@@ -219,36 +490,39 @@ function pintarTarjetas(caso) {
   const std = caso.standardization || {}, det = caso.detection || {},
         cls = caso.classification || {}, exp = caso.explanation || {}, juez = caso.judge || {};
 
+  const cacheHash = String(std.cache_content_hash || "");
   $("#t-std .cuerpo").innerHTML = `
-    <div class="kv"><span class="k">Modelo</span><span>${std.model ?? "—"}</span></div>
-    <div class="kv"><span class="k">Fuente</span><span>${std.source ?? "—"}</span></div>
-    <div class="kv"><span class="k">Proveedor</span><span>${std.provider ?? "—"}</span></div>
+    <div class="kv"><span class="k">Modelo</span><span>${escapeHtml(std.model ?? "—")}</span></div>
+    <div class="kv"><span class="k">Fuente</span><span>${escapeHtml(std.source ?? "—")}</span></div>
+    <div class="kv"><span class="k">Proveedor</span><span>${escapeHtml(std.provider ?? "—")}</span></div>
     <div class="kv"><span class="k">Caché Mistral</span><span>${std.from_cache ? "sí (duplicado exacto)" : "no (llamada en vivo o preestandarizado)"}</span></div>
-    ${std.cache_content_hash ? `<div class="kv"><span class="k">Hash del contenido</span><span title="${std.cache_content_hash}" style="font-size:11px">${std.cache_content_hash.slice(0, 16)}…</span></div>` : ""}
-    <div class="kv"><span class="k">Perfil de esquema</span><span>${std.schema_profile ?? "—"}</span></div>
-    <div class="kv"><span class="k">Modalidad</span><span>${std.modality ?? "—"}</span></div>
+    ${cacheHash ? `<div class="kv"><span class="k">Hash del contenido</span><span title="${escapeHtml(cacheHash)}" style="font-size:11px">${escapeHtml(cacheHash.slice(0, 16))}…</span></div>` : ""}
+    <div class="kv"><span class="k">Perfil de esquema</span><span>${escapeHtml(std.schema_profile ?? "—")}</span></div>
+    <div class="kv"><span class="k">Modalidad</span><span>${escapeHtml(std.modality ?? "—")}</span></div>
     <div class="kv"><span class="k">Confianza de mapeo</span><span>${pct(std.mapping_confidence)}</span></div>
-    <div class="barra"><div class="relleno" style="width:${100 * (std.mapping_confidence ?? 0)}%"></div></div>
-    ${std.abstain ? `<p><span class="badge warn">ABSTENCIÓN → revisión humana</span><br><small>${std.failure_code ?? "standardization_failed"}</small></p>`
+    <div class="barra"><div class="relleno" style="width:${ratioWidth(std.mapping_confidence)}%"></div></div>
+    ${std.abstain ? `<p><span class="badge warn">ABSTENCIÓN → revisión humana</span><br><small>${escapeHtml(std.failure_code ?? "standardization_failed")}</small></p>`
       : (std.mapping_confidence ?? 1) < 0.5 ? '<p><span class="badge warn">mapeo &lt; 0,5 → revisión humana</span></p>' : ""}`;
 
-  const verd = det.is_malicious == null ? '<span class="badge gris">sin veredicto</span>'
+  const verd = det.abstain ? '<span class="badge warn">SIN VEREDICTO · ABSTENCIÓN</span>'
+    : det.is_malicious == null ? '<span class="badge gris">sin veredicto</span>'
     : det.is_malicious ? '<span class="badge err">MALICIOSO</span>' : '<span class="badge ok">benigno</span>';
   $("#t-det .cuerpo").innerHTML = `
     <div class="kv"><span class="k">Veredicto</span><span>${verd}</span></div>
-    <div class="kv"><span class="k">Probabilidad</span><span>${pct(det.probability)}</span></div>
-    <div class="barra gauge"><div class="zona-gris"></div><div class="relleno" style="width:${100 * (det.probability ?? 0)}%"></div></div>
+    <div class="kv"><span class="k">Probabilidad maliciosa</span><span>${pct(det.probability)}</span></div>
+    <div class="barra gauge"><div class="zona-gris"></div><div class="relleno" style="width:${ratioWidth(det.probability)}%"></div></div>
     <div class="kv" style="margin-top:4px"><span class="k">Zona gris [0,4–0,6]</span>
       <span>${det.abstain ? '<span class="badge warn">ABSTENCIÓN</span>' : "no aplicada"}</span></div>
-    <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${det.model_name ?? "—"}</span></div>`;
+    ${det.abstain ? '<p style="color:var(--gris);font-size:11.5px">El booleano interno del umbral no se considera un veredicto durante la abstención.</p>' : ""}
+    <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${escapeHtml(det.model_name ?? "—")}</span></div>`;
 
   if (cls.attack_family) {
     const filas = Object.entries(cls.top_scores || {}).sort((a, b) => b[1] - a[1]).slice(0, 5)
-      .map(([f, s]) => `<div class="scorefila"><span>${f}</span>
-        <div class="barra"><div class="relleno" style="width:${100 * s}%"></div></div>
+      .map(([f, s]) => `<div class="scorefila"><span>${escapeHtml(f)}</span>
+        <div class="barra"><div class="relleno" style="width:${ratioWidth(s)}%"></div></div>
         <span>${pct(s)}</span></div>`).join("");
     $("#t-cls .cuerpo").innerHTML = `
-      <div class="kv"><span class="k">Familia</span><span><b>${cls.attack_family}</b></span></div>
+      <div class="kv"><span class="k">Familia</span><span><b>${escapeHtml(cls.attack_family)}</b></span></div>
       <div class="kv"><span class="k">Confianza</span><span>${pct(cls.confidence)}
         ${cls.confidence < 0.65 ? ' <span class="badge warn">&lt; 0,65 → revisión</span>' : ""}</span></div>
       <p style="margin:6px 0 2px;color:var(--gris);font-size:11.5px">Distribución top-5</p>${filas}`;
@@ -256,37 +530,170 @@ function pintarTarjetas(caso) {
     $("#t-cls .cuerpo").innerHTML = '<p style="color:var(--gris)">No ejecutado (evento benigno o abstención del detector).</p>';
   }
 
-  const items = (exp.mitigation_items?.length ? exp.mitigation_items
-      : (exp.mitigations || []).map(t => ({ text: t, source: exp.source })))
-    .slice(0, 6).map(i => `<div class="mitigacion">${badgeSource(i.source)} ${i.text}</div>`).join("");
+  const llmName = String(exp.model_name || "").includes("::mistral::") ? "Mistral" : "LLM";
+  const mitigationItems = exp.mitigation_items?.length ? exp.mitigation_items
+    : (exp.mitigations || []).map(text => ({ text, source: exp.source }));
+  const items = mitigationItems.map(item => {
+    const context = typeof item.context === "string" ? item.context.trim() : "";
+    const visibleText = context || String(item.text || "");
+    const visibleSource = context ? "llm" : (item.source === "llm" ? "catalog" : item.source);
+    const catalogBase = context ? String(item.base || item.text || "").trim() : "";
+    return `<div class="mitigacion">
+      ${badgeSource(visibleSource, llmName)}
+      <div class="mitigacion-texto">${escapeHtml(visibleText)}</div>
+      ${catalogBase ? `<div class="mitigacion-base">Base catalogada: ${escapeHtml(catalogBase)}</div>` : ""}
+      ${item.source === "llm_suggested" ? '<div class="mitigacion-alerta">Recomendación no respaldada por el catálogo · requiere revisión humana</div>' : ""}
+    </div>`;
+  }).join("");
   const refs = (exp.references || []).map(r => {
     const id = r.attack_id || r.capec_id || r.name || "ref";
-    return r.url ? `<a class="refchip" href="${r.url}" target="_blank" rel="noopener">${id}</a>`
-                 : `<span class="refchip">${id}</span>`;
+    const url = safeReferenceUrl(r.url);
+    return url ? `<a class="refchip" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(id)}</a>`
+               : `<span class="refchip">${escapeHtml(id)}</span>`;
   }).join("");
-  $("#t-mit .cuerpo").innerHTML = exp.summary || items || refs ? `
-    <div class="kv"><span class="k">Fuente</span><span>${badgeSource(exp.source)}</span></div>
-    ${exp.summary ? `<p style="font-size:12.3px">${exp.summary}</p>` : ""}
+  const llmSummary = typeof exp.llm_context_summary === "string" ? exp.llm_context_summary.trim() : "";
+  const visibleSummary = llmSummary || String(exp.summary || "");
+  const summarySource = llmSummary ? "llm" : (exp.source === "hybrid" ? "catalog" : exp.source);
+  $("#t-mit .cuerpo").innerHTML = visibleSummary || items || refs ? `
+    <div class="kv"><span class="k">Fuente global</span><span>${badgeSource(exp.source, llmName)}</span></div>
+    <div class="kv"><span class="k">Recomendaciones</span><span>${mitigationItems.length}</span></div>
+    ${visibleSummary ? `<p style="font-size:12.3px">${badgeSource(summarySource, llmName)} ${escapeHtml(visibleSummary)}</p>` : ""}
     ${items}${refs ? `<p style="margin:8px 0 0">${refs}</p>` : ""}`
     : '<p style="color:var(--gris)">No ejecutado.</p>';
 
   const acc = { approve: "ok", human_interrupt: "warn", abstain: "warn", rework: "warn", reject: "err" }[juez.action] || "gris";
+  const judgeIssues = Array.isArray(juez.issues)
+    ? juez.issues.map(issue => escapeHtml(issue)).join(", ")
+    : "";
   $("#t-juez .cuerpo").innerHTML = `
-    <div class="kv"><span class="k">Acción</span><span><span class="badge ${acc}">${juez.action}</span></span></div>
-    <div class="kv"><span class="k">Etiqueta final</span><span>${juez.final_label ?? "—"}</span></div>
+    <div class="kv"><span class="k">Acción</span><span><span class="badge ${acc}">${escapeHtml(juez.action ?? "—")}</span></span></div>
+    <div class="kv"><span class="k">Etiqueta final</span><span>${escapeHtml(juez.final_label ?? "—")}</span></div>
     <div class="kv"><span class="k">Confianza final</span><span>${pct(juez.final_confidence)}</span></div>
     <div class="kv"><span class="k">Revisión humana</span><span>${juez.requires_human_review ? "sí" : "no"}</span></div>
-    ${juez.issues?.length ? `<p style="font-size:12px"><span class="k">Incidencias:</span> ${juez.issues.join(", ")}</p>` : ""}`;
+    ${judgeIssues ? `<p style="font-size:12px"><span class="k">Incidencias:</span> ${judgeIssues}</p>` : ""}`;
 }
 
 function pintarTraza(caso) {
   $("#panel-traza").classList.remove("oculto");
-  $("#traza-body").innerHTML = (caso.trace || []).map(t => `
-    <tr><td>${t.agent}</td><td>${t.tool ?? "—"}</td>
-    <td><span class="badge ${{ok:"ok",abstain:"warn",fallback:"warn",error:"err"}[t.status] || "gris"}">${t.status}</span></td>
-    <td>${t.confidence != null ? pct(t.confidence) : "—"}</td>
-    <td style="font-size:11.5px">${t.summary ?? ""}${t.error ? ` <span class="badge err" title="${t.error.replaceAll('"', "'")}">causa: ${t.error.slice(0, 90)}</span>` : ""}</td></tr>`).join("");
+  $("#traza-body").innerHTML = (caso.trace || []).map(t => {
+    const errorText = t.error == null ? "" : String(t.error);
+    const errorBadge = errorText
+      ? ` <span class="badge err" title="${escapeHtml(errorText)}">causa: ${escapeHtml(errorText.slice(0, 90))}</span>`
+      : "";
+    const statusClass = {ok:"ok",abstain:"warn",fallback:"warn",error:"err"}[t.status] || "gris";
+    return `<tr><td>${escapeHtml(t.agent)}</td><td>${escapeHtml(t.tool ?? "—")}</td>
+      <td><span class="badge ${statusClass}">${escapeHtml(t.status ?? "—")}</span></td>
+      <td>${t.confidence != null ? pct(t.confidence) : "—"}</td>
+      <td style="font-size:11.5px">${escapeHtml(t.summary ?? "")}${errorBadge}</td></tr>`;
+  }).join("");
   $("#json-out").textContent = JSON.stringify(caso, null, 2);
+}
+
+function limpiarAuditoria() {
+  $("#panel-auditoria").classList.add("oculto");
+  $("#auditoria-estado").replaceChildren();
+  $("#auditoria-resumen").replaceChildren();
+  $("#auditoria-incidencias").replaceChildren();
+  $("#auditoria-checks").replaceChildren();
+  $("#auditoria-detalle").classList.add("oculto");
+  $("#auditoria-detalle").open = false;
+}
+
+function pintarAuditoria(report) {
+  const panel = $("#panel-auditoria");
+  panel.classList.remove("oculto");
+
+  const estado = $("#auditoria-estado");
+  estado.replaceChildren();
+  const estados = {
+    approve: { clase: "ok", texto: "APROBADA" },
+    review: { clase: "warn", texto: "REVISIÓN" },
+    reject: { clase: "err", texto: "RECHAZADA" },
+  };
+  const meta = estados[report.verdict] || { clase: "gris", texto: String(report.verdict || "desconocido") };
+  const badge = document.createElement("span");
+  badge.className = "badge " + meta.clase;
+  badge.textContent = meta.texto;
+  estado.append("Veredicto del auditor: ", badge);
+
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const superados = checks.filter(c => c.passed).length;
+  const resumen = $("#auditoria-resumen");
+  resumen.replaceChildren();
+  const datoChecks = document.createElement("span");
+  datoChecks.textContent = `Comprobaciones superadas: ${superados}/${checks.length}`;
+  resumen.append(datoChecks);
+
+  const incidencias = $("#auditoria-incidencias");
+  incidencias.replaceChildren();
+  const issues = Array.isArray(report.issues) ? report.issues : [];
+  if (issues.length) {
+    const titulo = document.createElement("strong");
+    titulo.textContent = "Incidencias:";
+    const lista = document.createElement("ul");
+    issues.forEach(issue => {
+      const item = document.createElement("li");
+      item.textContent = String(issue);
+      lista.appendChild(item);
+    });
+    incidencias.append(titulo, lista);
+  } else {
+    incidencias.textContent = "Sin incidencias.";
+  }
+
+  const cuerpo = $("#auditoria-checks");
+  cuerpo.replaceChildren();
+  [...checks].sort((a, b) => Number(a.passed) - Number(b.passed)).forEach(check => {
+    const fila = document.createElement("tr");
+    const info = AUDIT_CHECK_INFO[check.check] || {
+      label: String(check.check || "Comprobación técnica").replaceAll("_", " "),
+      description: "Comprobación técnica del auditor.",
+    };
+    const nombre = document.createElement("td");
+    const etiqueta = document.createElement("div");
+    etiqueta.className = "auditoria-check-label";
+    etiqueta.textContent = info.label;
+    const identificador = document.createElement("div");
+    identificador.className = "auditoria-check-id";
+    identificador.textContent = String(check.check || "—");
+    nombre.append(etiqueta, identificador);
+    const descripcion = document.createElement("td");
+    descripcion.className = "auditoria-check-descripcion";
+    descripcion.textContent = info.description;
+    const resultado = document.createElement("td");
+    const resultadoBadge = document.createElement("span");
+    resultadoBadge.className = "badge " + (check.passed ? "ok" : "err");
+    resultadoBadge.textContent = check.passed ? "superado" : "fallo";
+    resultado.appendChild(resultadoBadge);
+    const detalle = document.createElement("td");
+    detalle.textContent = check.detail == null ? "—" : String(check.detail);
+    fila.append(nombre, descripcion, resultado, detalle);
+    cuerpo.appendChild(fila);
+  });
+  $("#auditoria-detalle").classList.toggle("oculto", checks.length === 0);
+}
+
+async function cargarAuditoria(caso) {
+  const panel = $("#panel-auditoria");
+  panel.classList.remove("oculto");
+  const estado = $("#auditoria-estado");
+  estado.textContent = "Auditando el CaseResult persistido…";
+  try {
+    const resp = await fetch(`/cases/${encodeURIComponent(caso.case_id)}/audit`);
+    if (!resp.ok) {
+      const error = await resp.json().catch(() => ({}));
+      throw new Error(error.detail || resp.statusText);
+    }
+    pintarAuditoria(await resp.json());
+  } catch (error) {
+    estado.replaceChildren();
+    const badge = document.createElement("span");
+    badge.className = "badge err";
+    badge.textContent = "AUDITORÍA NO DISPONIBLE";
+    const detalle = document.createElement("span");
+    detalle.textContent = ` ${error.message}`;
+    estado.append(badge, detalle);
+  }
 }
 
 async function analizar() {
@@ -294,12 +701,11 @@ async function analizar() {
   let payload;
   try { payload = JSON.parse($("#payload").value); }
   catch { alert("El JSON de entrada no es válido"); return; }
-  payload.use_llm_mitigator = $("#use_llm_mitigator").checked;
-  payload.persist = $("#persist").checked;
 
   btn.disabled = true; btn.textContent = "Analizando…";
   $("#banner").className = "banner"; $("#tarjetas").classList.add("oculto");
   $("#panel-traza").classList.add("oculto");
+  limpiarAuditoria();
   initPipeline();
   try {
     const resp = await fetch("/cases/analyze", {
@@ -313,12 +719,13 @@ async function analizar() {
     b.className = "banner " + caso.status;
     const dur = caso.finished_at && caso.created_at
       ? ((new Date(caso.finished_at) - new Date(caso.created_at)) / 1000).toFixed(1) + " s" : "";
-    const txt = { completed: "Caso completado y aprobado",
-                  needs_human_review: "Caso derivado a revisión humana",
-                  error: "Caso terminado en error" }[caso.status] || caso.status;
-    b.innerHTML = `${txt} &nbsp;<small>· ${caso.case_id} ${dur ? "· " + dur : ""}</small>`;
+    const txt = { completed: "Caso completado, aprobado y persistido",
+                  needs_human_review: "Caso persistido y derivado a revisión humana",
+                  error: "Caso persistido con error" }[caso.status] || caso.status;
+    b.innerHTML = `${escapeHtml(txt)} &nbsp;<small>· ${escapeHtml(caso.case_id)} ${dur ? "· " + escapeHtml(dur) : ""}</small>`;
     pintarTarjetas(caso);
     pintarTraza(caso);
+    await cargarAuditoria(caso);
   } catch (e) {
     const b = $("#banner");
     b.className = "banner error";

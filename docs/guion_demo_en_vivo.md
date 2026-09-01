@@ -6,7 +6,7 @@
 > reformularlo explicitamente como resultado preliminar.
 
 **Proyecto:** `tfm_multiagent` · Sistema multiagente de ciberseguridad IoT/IIoT sobre MCP
-**Modo:** en vivo — la entrada llega limpia; un duplicado exacto puede reutilizar un éxito Mistral y todo *cache miss* exige Mistral; la contextualización LLM del mitigador es opcional
+**Modo:** en vivo — la entrada llega limpia; un duplicado exacto puede reutilizar un éxito Mistral y todo *cache miss* exige Mistral; el mitigador intenta siempre la contextualización LLM y todo caso se persiste
 **Duración estimada:** 15–20 minutos (los 5 bloques) · **Plan B:** modo `--offline` con `canonical_event` congelados (100 % determinista)
 
 ---
@@ -36,7 +36,7 @@ $env:MISTRAL_API_KEY = "<clave>"
 $env:INGEST_LLM_MODEL = "mistral-small-2603"      # opcional; es el default actual
 $env:INGEST_LLM_TIMEOUT_SECONDS = "60"            # recomendado para acotar cada llamada de la demo
 $env:MITIGATOR_LLM_PROVIDER = "mistral"          # mitigacion contextualizada
-$env:MITIGATOR_LLM_MODEL = "mistral-small-latest"
+$env:MITIGATOR_LLM_MODEL = "mistral-small-2603"
 $env:MISTRAL_RATE_LIMIT_RETRIES = "5"            # opcional: eleva el default de 3 reintentos a 5
 $env:MISTRAL_RETRY_WAIT_SECONDS = "2"            # espera base si la respuesta no aporta Retry-After
 
@@ -171,11 +171,9 @@ frontal:
 Abrir **http://localhost:8000** en el navegador (a pantalla completa para la
 proyección) y:
 
-1. Seleccionar el ejemplo **«Flujo IoT-23 sospechoso (telnet)»**.
-2. Marcar, si se quiere mostrar la contextualización, **«Mitigación
-   contextualizada por LLM»** y marcar **«Persistir caso»**. La
-   estandarización viva no tiene casilla: para una entrada cruda Mistral es
-   siempre obligatorio.
+1. Seleccionar el ejemplo **«[IoT-23] Ataque real · botnet C&C»**.
+2. Comprobar que el frontal no presenta controles para desactivar la
+   contextualización ni la persistencia: ambas son políticas del endpoint.
 3. Pulsar **Analizar caso** y narrar la animación del pipeline mientras corre.
 
 ### Resultado esperado (y qué señalar en pantalla)
@@ -195,12 +193,19 @@ proyección) y:
 - Tarjeta del Clasificador: familia con su top-5 de puntuaciones en barras (no
   prometer una familia concreta en un evento inventado; el valor está en las
   confianzas visibles).
-- Tarjeta del Mitigador: fuente `hybrid`, cada mitigación con su badge de
-  procedencia (`catalog`/`llm`/`llm_suggested`) y las referencias como chips
-  clicables a attack.mitre.org — clicar una en vivo (T1498) para mostrar que
-  las referencias son reales.
+- Tarjeta del Mitigador: fuente visible `Mistral + catálogo` cuando existe
+  contextualización y `catálogo` cuando se aplica el fallback. Para una base
+  contextualizada muestra primero el texto de Mistral y debajo su literal
+  catalogado; si Mistral no respondió, muestra el
+  catálogo. Las `llm_suggested` se enseñan completas y marcadas como no
+  respaldadas. Las referencias aparecen como chips clicables a
+  attack.mitre.org — clicar una en vivo (T1584.005) para mostrar que son reales.
 - Banner final con el estado y el `case_id`; tabla de traza con los 6 agentes
   y, plegado, el `CaseResult` JSON completo.
+- Debajo de la traza aparece **Auditoría posterior independiente**: el auditor
+  lee el `CaseResult` ya persistido, muestra `approve`/`review`/`reject` y el
+  número de comprobaciones superadas. El desplegable incluye una descripción
+  breve de cada comprobación. Señalar que no forma parte de la ruta operacional.
 
 **Remate del bloque:** explicar la degradación controlada real: si falla la
 selección, la extracción o la validación de Mistral después de un *cache miss*,
@@ -211,7 +216,9 @@ un adaptador. La sanitización no forma parte del runtime ni del grafo.
 
 **Alternativa sin navegador** (por si falla la proyección): la misma llamada
 por consola con `Invoke-RestMethod http://127.0.0.1:8000/cases/analyze` y el
-JSON del ejemplo (cuerpo con `"use_llm_mitigator": true`).
+JSON del ejemplo; no hay que añadir flags operativos al cuerpo. Con el
+`case_id` devuelto, consultar el mismo informe mostrado por el panel mediante
+`Invoke-RestMethod http://127.0.0.1:8000/cases/<case_id>/audit`.
 
 ---
 

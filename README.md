@@ -24,7 +24,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 | **Estandarizador** | Recibe una entrada cruda ya limpia. Una caché SQLite por hash exacto reutiliza únicamente éxitos previos de Mistral para contenido duplicado y reconstruye la identidad y procedencia del caso actual. En un *cache miss*, Mistral selecciona las columnas y genera el evento; un `canonical_event` previo solo se valida | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana. Nunca usa adaptadores |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase: ¿qué familia de ataque? | Familia y confianza; si < 0,65, el caso va a revisión |
-| **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC); un LLM opcional las contextualiza al caso concreto | Todo lo que el LLM añada sin respaldo del catálogo queda marcado `llm_suggested` |
+| **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarlas con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; todo añadido sin respaldo queda marcado `llm_suggested` |
 | **Juez** | Reglas deterministas sobre el caso completo | Aprobar o derivar a revisión humana |
 | **Auditor** | Revisa a posteriori el caso cerrado (coherencia, traza, umbrales, fugas) | Aprobar, revisar o rechazar |
 
@@ -105,15 +105,25 @@ uvicorn src.api.app:app --port 8000
 
 Abre `http://localhost:8000`: un visor con ejemplos precargados muestra el
 flujo completo (pipeline por agente, decisiones, mitigaciones con referencias
-y la traza del caso). La entrada cruda debe llegar limpia. El estandarizador
-busca primero un éxito Mistral con el mismo hash exacto en la caché SQLite; en
+y la traza del caso). Tras cerrarlo y persistirlo, el visor ejecuta el agente
+auditor en un panel independiente: informa `approve`, `review` o `reject` y
+desglosa sus comprobaciones sin modificar la decisión del juez ni añadir una
+entrada a la traza operacional. En la tarjeta del mitigador se presenta primero
+la contextualización de Mistral; si no existe, se muestra el texto del catálogo.
+También se conserva debajo la base catalogada y se muestran todas las
+recomendaciones, incluidas las `llm_suggested`. La entrada cruda debe llegar
+limpia. El estandarizador busca primero un éxito Mistral con el mismo hash
+exacto en la caché SQLite; en
 un *miss* necesitas `MISTRAL_API_KEY` y se llama a Mistral en vivo. Si el
 proveedor no responde o devuelve una salida inválida, el caso termina en el
 juez como abstención y revisión humana. La ruta final nunca usa adaptadores.
 `INGEST_LLM_TIMEOUT_SECONDS` permite acotar cada llamada (por ejemplo, `60`
 en una demo; una fila tabular realiza selección y extracción por separado).
-La contextualización LLM del mitigador sigue siendo opcional. Para una
-ejecución sin APIs externas utiliza la demo `--offline`, que carga eventos
+En el endpoint final, todos los casos se persisten en la memoria SQLite y, si
+el detector confirma un caso malicioso, el mitigador intenta siempre la
+contextualización anclada con Mistral. Si el modelo no está disponible, el
+caso conserva las contramedidas y referencias verificables del catálogo. Para
+una ejecución sin APIs externas utiliza la demo `--offline`, que carga eventos
 canónicos congelados.
 
 También puedes llamar a la API directamente:
@@ -122,11 +132,16 @@ También puedes llamar a la API directamente:
 Invoke-RestMethod http://127.0.0.1:8000/cases/analyze -Method Post `
   -ContentType "application/json" `
   -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42}'
+
+# Con el case_id devuelto, recalcula la auditoría posterior sin mutar el caso
+Invoke-RestMethod http://127.0.0.1:8000/cases/<case_id>/audit
 ```
 
-Devuelve el `CaseResult` completo. Con `"use_llm_mitigator": true` se activa la
-contextualización LLM anclada (proveedor y modelo vía `MITIGATOR_LLM_PROVIDER`
-y `MITIGATOR_LLM_MODEL`; si el LLM falla, hay *fallback* total al catálogo).
+Devuelve el `CaseResult` completo. La persistencia y la contextualización LLM
+anclada son políticas obligatorias de `/cases/analyze`, no parámetros del
+cliente. El proveedor y modelo se pueden configurar mediante
+`MITIGATOR_LLM_PROVIDER` y `MITIGATOR_LLM_MODEL`; por defecto se usa Mistral y,
+si falla, hay *fallback* total al catálogo.
 Los endpoints antiguos `/events/analyze`, `/datasets/adapt` y
 `/datasets/analyze-file` responden `410 Gone`: se han cerrado para que ninguna
 ruta pública pueda reactivar adaptadores ni omitir la revisión del juez.

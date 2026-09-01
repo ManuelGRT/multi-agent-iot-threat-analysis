@@ -149,5 +149,6 @@ recupera (§4).
 - **Suite**: pruebas automatizadas para MCP, agentes finales, mitigación
   anclada, auditor y demo; el recuento exacto se obtiene con `pytest -q`.
 - **Trazabilidad**: todo caso devuelve `case_id` + `trace[]` completa con
-  tiempos, confianzas y errores por agente; persistencia opcional en la
-  memoria de casos SQLite.
+  tiempos, confianzas y errores por agente; el endpoint final persiste siempre
+  en la memoria de casos SQLite (la ejecución interna/CLI conserva controles
+  explícitos para pruebas aisladas).

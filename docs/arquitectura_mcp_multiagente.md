@@ -133,7 +133,7 @@ inicio, fin, confianza y errores; todos operan contra la capa MCP.
 | `FinalStandardizer` | `standardize_event` | Recibe entrada limpia, reutiliza un éxito Mistral solo ante coincidencia exacta de contenido y exige Mistral en un *miss*. Si la tool se abstiene o `mapping_confidence < 0.5`, enruta al juez; un `canonical_event` preestandarizado solo se valida |
 | `FinalDetector` | `detect_event` (XGBoost estandarizado con Edge) | `is_malicious`, probabilidad; **zona gris 0.4–0.6 → abstención**; benigno también pasa por el juez |
 | `FinalClassifier` | `classify_event` (XGBoost familia balanced_group) | familia, confianza, top-k scores |
-| `FinalMitigator` | `suggest_mitigations` + LLM opcional | explicación + mitigaciones por fase + referencias ATT&CK/CAPEC; `source: catalog\|hybrid` |
+| `FinalMitigator` | `suggest_mitigations` + intento LLM | explicación + mitigaciones por fase + referencias ATT&CK/CAPEC; `source: hybrid` si Mistral responde y `catalog` como fallback |
 | `FinalJudge` | — (reglas sobre el estado) | approve / human_interrupt; issues auditables |
 | `CaseAuditor` | — (post-hoc, Fase 5) | approve / review / **reject** por consistencia, trazabilidad, leakage y umbrales |
 
@@ -141,9 +141,10 @@ inicio, fin, confianza y errores; todos operan contra la capa MCP.
 
 Flujo en dos pasos: (1) base determinista del catálogo threat intel
 (mitigaciones por fase contención/erradicación/prevención + referencias
-MITRE ATT&CK, CAPEC y mitigaciones M-*); (2) contextualización LLM opcional
+MITRE ATT&CK, CAPEC y mitigaciones M-*); (2) intento de contextualización LLM
 (`LLMMitigationAgent`, multi-proveedor: Mistral/Ollama/OpenRouter/Groq/
-Google/Transformers). **Regla dura:** el LLM no puede introducir técnicas ni
+Google/Transformers), obligatorio en `/cases/analyze` para todo caso que
+alcance el mitigador. **Regla dura:** el LLM no puede introducir técnicas ni
 referencias fuera del catálogo sin la marca `llm_suggested` — el anclaje
 (`anchor_llm_payload`) lo garantiza estructuralmente, incluidos IDs MITRE
 citados en texto libre. Si el LLM falla: fallback total al catálogo.
@@ -185,7 +186,10 @@ Rutas de abstención (todo caso pasa por el juez y queda auditable; el
   (agentes en orden, entradas cerradas, sin retrocesos temporales), target
   leakage (claves target en el evento, patrones en `semantic_text`,
   features que verían los modelos) y umbrales. Veredicto
-  approve/review/reject.
+  approve/review/reject. La API lo expone mediante
+  `GET /cases/{case_id}/audit`: recupera el `CaseResult` persistido y recalcula
+  un informe de solo lectura. El auditor no se inserta en el grafo, no añade
+  una entrada a `trace[]` y no cambia la decisión ya cerrada por el juez.
 - **De sistema** (`scripts/run_system_audit.py`): smoke E2E por dataset,
   métricas batch de los modelos desplegados **reproduciendo el split de
   test exacto** de sus entrenamientos (seed 42; delta 0.0 verificado),
@@ -225,7 +229,7 @@ protocolo MCP real. Salidas en `artifacts/demo/`.
 # servidor MCP real por stdio (smoke manual)
 .\.venv\Scripts\python.exe -m src.mcp.threat_intel_server
 
-# API (POST /cases/analyze devuelve el CaseResult con traza)
+# API (POST /cases/analyze + GET /cases/{case_id}/audit)
 .\.venv\Scripts\uvicorn.exe src.api.app:app --reload
 ```
 
@@ -234,7 +238,7 @@ Ejemplo de análisis de caso vía API:
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/cases/analyze -Method Post `
   -ContentType "application/json" `
-  -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42,"persist":true}'
+  -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42}'
 ```
 
 ### Configuración de Mistral para el estandarizador
@@ -252,19 +256,19 @@ vivo (selección de columnas + extracción). Si no está disponible, el caso se
 abstiene y el juez solicita revisión humana. Un `canonical_event` congelado no
 requiere la API porque ya fue estandarizado.
 
-### Configuración del LLM del mitigador (opcional)
+### Configuración del LLM del mitigador
 
 ```powershell
-$env:LLM_MITIGATOR_ENABLED="true"          # activa la contextualización
-$env:MITIGATOR_LLM_PROVIDER="mistral"      # mistral | ollama | openrouter | groq | google | transformers
-$env:MITIGATOR_LLM_MODEL="mistral-small-latest"   # opcional (default por proveedor)
+$env:MITIGATOR_LLM_PROVIDER="mistral"      # opcional; Mistral es el default del endpoint final
+$env:MITIGATOR_LLM_MODEL="mistral-small-2603"     # opcional (default por proveedor)
 $env:MISTRAL_API_KEY="..."                 # según proveedor
 ```
 
-Sin la configuración específica del mitigador (o con fallo de ese LLM), el
-mitigador funciona en modo catálogo puro. Este fallback pertenece solo al
-mitigador; el estandarizador solo evita una llamada Mistral ante un duplicado
-exacto con éxito previo y nunca utiliza adaptadores.
+El endpoint intenta siempre el LLM del mitigador y persiste siempre el caso;
+el cliente no puede desactivar estas políticas. Si ese LLM no está configurado
+o falla, el mitigador conserva el catálogo puro. Este fallback pertenece solo
+al mitigador; el estandarizador solo evita una llamada Mistral ante un
+duplicado exacto con éxito previo y nunca utiliza adaptadores.
 
 ## 8. Dónde está cada cosa
 

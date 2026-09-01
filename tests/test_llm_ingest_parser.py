@@ -449,11 +449,121 @@ def test_llm_ingest_prompts_do_not_name_specific_datasets():
 
 
 def test_llm_ingest_schema_does_not_expose_prediction_targets():
-    from src.agents.llm_ingest_parser import CANONICAL_EVENT_SCHEMA
+    from src.agents.llm_ingest_parser import (
+        CANONICAL_EVENT_SCHEMA,
+        LLM_TECHNICAL_EVENT_SCHEMA,
+    )
 
     for field in ("label_raw", "attack_family", "attack_subtype"):
         assert field not in CANONICAL_EVENT_SCHEMA["properties"]
         assert field not in CANONICAL_EVENT_SCHEMA["required"]
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["properties"]
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["required"]
+
+
+def test_llm_technical_schema_excludes_authoritative_identity_envelope():
+    from src.agents.llm_ingest_parser import LLM_TECHNICAL_EVENT_SCHEMA
+
+    for field in ("event_id", "origin", "provenance"):
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["properties"]
+        assert field not in LLM_TECHNICAL_EVENT_SCHEMA["required"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identity_overrides,missing_identity",
+    [
+        ({"event_id": None}, ()),
+        ({"event_id": 990001}, ()),
+        (
+            {
+                "event_id": {"forged": True},
+                "origin": "forged-origin",
+                "provenance": ["forged-provenance"],
+            },
+            (),
+        ),
+        (
+            {
+                "event_id": "forged-id",
+                "origin": {"source_name": "forged"},
+                "provenance": {"dataset": "forged"},
+            },
+            (),
+        ),
+        ({}, ("event_id", "origin", "provenance")),
+    ],
+)
+async def test_strict_parse_discards_llm_identity_and_binds_trusted_envelope(
+    identity_overrides,
+    missing_identity,
+):
+    extraction = llm_payload(**identity_overrides)
+    for field in missing_identity:
+        extraction.pop(field, None)
+
+    class IdentityDriftAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return extraction
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = IdentityDriftAgent()
+
+    event = await parser.parse(
+        {
+            "dataset": "iot23",
+            "source_file": "capture.csv",
+            "row_id": 42,
+            "split": "test",
+            "row": {"proto": "tcp"},
+        }
+    )
+
+    assert event.event_id == "llm::iot23::capture.csv::42"
+    assert event.origin["source_name"] == "iot23"
+    assert event.origin["source_file"] == "capture.csv"
+    assert event.origin["row_id"] == 42
+    assert event.provenance.dataset == "iot23"
+    assert event.provenance.source_file == "capture.csv"
+    assert event.provenance.row_id == 42
+    assert event.provenance.split == "test"
+
+
+@pytest.mark.asyncio
+async def test_strict_parse_still_rejects_invalid_technical_field_with_bad_identity():
+    class InvalidTechnicalAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return llm_payload(event_id=990001, src_port="4444")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = InvalidTechnicalAgent()
+
+    with pytest.raises(ValueError, match=r"canonical_event\.src_port"):
+        await parser.parse({"dataset": "iot23", "row": {"proto": "tcp"}})
 
 
 def test_llm_ingest_forwards_all_columns_without_runtime_sanitization():

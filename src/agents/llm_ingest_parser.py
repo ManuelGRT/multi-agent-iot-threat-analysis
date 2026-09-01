@@ -70,7 +70,7 @@ Reglas de mapeo generico:
 - schema_profile debe ser uno de: network_flow, network_packet, host_metrics, iot_telemetry, alert_text, pcap_ref, unknown.
 - Usa network_flow para flujos agregados de comunicaciones; network_packet para cabeceras/protocolos de paquetes; host_metrics para senales de endpoint; iot_telemetry para sensores fisicos; alert_text para logs o alertas textuales.
 - No generes etiquetas, familias ni subtipos de ataque. Esos son objetivos de otros agentes y no forman parte del evento canonico de entrada.
-- origin es metadato de trazabilidad y se completara fuera del razonamiento si no aparece en la entrada. No uses origin como regla de decision.
+- event_id, origin y provenance son metadatos de confianza asignados por el runtime. No los generes ni los uses como regla de decision.
 - feature_groups debe agrupar columnas por funcion tecnica generica: network_endpoint, ports, protocol, network_volume, state_flags, host_metrics, iot_telemetry, textual_alert_context, timing, statistics u other.
 - evidence_fields debe listar columnas tecnicas utiles para decidir; excluye etiquetas o anotaciones del dataset.
 - Los valores tecnicos seleccionados que no encajen en un campo canonico directo deben preservarse en telemetry o host con su nombre de columna original.
@@ -204,6 +204,26 @@ CANONICAL_EVENT_SCHEMA = {
         "provenance",
         "mapping_confidence",
         "missing_fields",
+    ],
+}
+
+
+# La identidad y la procedencia pertenecen al sobre confiable del runtime, no
+# al contenido inferido por el modelo. Se mantiene el schema completo arriba
+# como contrato final y se deriva de el el unico schema que recibe Mistral.
+AUTHORITATIVE_METADATA_FIELDS = frozenset({"event_id", "origin", "provenance"})
+LLM_TECHNICAL_EVENT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        key: value
+        for key, value in CANONICAL_EVENT_SCHEMA["properties"].items()
+        if key not in AUTHORITATIVE_METADATA_FIELDS
+    },
+    "required": [
+        key
+        for key in CANONICAL_EVENT_SCHEMA["required"]
+        if key not in AUTHORITATIVE_METADATA_FIELDS
     ],
 }
 
@@ -349,10 +369,24 @@ class LLMIngestParser:
                 llm_input,
                 selection_metadata=selection_metadata,
             ),
-            json_schema=CANONICAL_EVENT_SCHEMA,
+            json_schema=LLM_TECHNICAL_EVENT_SCHEMA,
         )
+        if isinstance(payload, dict):
+            # Compatibilidad defensiva con proveedores que devuelven claves
+            # fuera del schema solicitado. Solo se descarta la envolvente de
+            # identidad, que nunca es autoridad del LLM; cualquier otro campo
+            # adicional sigue fallando con la validacion estricta.
+            payload = {
+                key: value
+                for key, value in payload.items()
+                if key not in AUTHORITATIVE_METADATA_FIELDS
+            }
         if self.strict_output_validation:
-            _validate_json_schema(payload, CANONICAL_EVENT_SCHEMA, "canonical_event")
+            _validate_json_schema(
+                payload,
+                LLM_TECHNICAL_EVENT_SCHEMA,
+                "canonical_event",
+            )
         payload = self._complete_payload(payload, llm_input)
         return CanonicalEvent(**payload)
 
@@ -413,7 +447,6 @@ class LLMIngestParser:
                 if not self._is_empty_or_zero(input_row.get(key))
             },
             "canonical_output_fields": [
-                "origin",
                 "schema_profile",
                 "feature_groups",
                 "evidence_fields",

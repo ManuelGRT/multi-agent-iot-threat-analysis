@@ -65,13 +65,14 @@ def _pipeline_hash(model: str) -> str:
     from src.agents.llm_ingest_parser import (
         CANONICAL_EVENT_SCHEMA,
         COLUMN_SELECTION_SCHEMA,
+        LLM_TECHNICAL_EVENT_SCHEMA,
         LLM_PARSER_VERSION,
         LLM_COLUMN_SELECTION_SYSTEM,
         LLM_INGEST_SYSTEM,
     )
 
     contract = {
-        "contract_version": "mistral-standardization-v2",
+        "contract_version": "mistral-standardization-v3-core-envelope",
         "provider": "mistral",
         "model": model,
         "parser_version": LLM_PARSER_VERSION,
@@ -82,6 +83,7 @@ def _pipeline_hash(model: str) -> str:
         "ingest_prompt": LLM_INGEST_SYSTEM,
         "column_selection_prompt": LLM_COLUMN_SELECTION_SYSTEM,
         "canonical_schema": CANONICAL_EVENT_SCHEMA,
+        "llm_technical_schema": LLM_TECHNICAL_EVENT_SCHEMA,
         "column_selection_schema": COLUMN_SELECTION_SCHEMA,
     }
     encoded = json.dumps(

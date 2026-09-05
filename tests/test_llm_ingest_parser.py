@@ -541,6 +541,66 @@ async def test_strict_parse_discards_llm_identity_and_binds_trusted_envelope(
 
 
 @pytest.mark.asyncio
+async def test_strict_parse_normalizes_known_packet_modality_alias():
+    class PacketModalityAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["ip.src_host", "tcp.srcport"],
+                    "modality_guess": "network_packet",
+                    "schema_profile_guess": "network_packet",
+                    "rationale": "cabeceras de un paquete TCP",
+                }
+            return llm_payload(
+                modality="network_packet",
+                schema_profile="network_packet",
+            )
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = PacketModalityAgent()
+
+    event = await parser.parse(
+        {
+            "dataset": "edge_iiotset",
+            "row": {"ip.src_host": "10.0.0.1", "tcp.srcport": "443"},
+        }
+    )
+
+    assert event.modality == "network_flow"
+    assert event.schema_profile == "network_packet"
+
+
+@pytest.mark.asyncio
+async def test_strict_parse_still_rejects_unknown_modality():
+    class UnknownModalityAgent:
+        async def invoke_json(self, system_prompt, user_payload, json_schema):
+            del user_payload, json_schema
+            if "preseleccion" in system_prompt:
+                return {
+                    "selected_columns": ["proto"],
+                    "modality_guess": "network_flow",
+                    "schema_profile_guess": "network_flow",
+                    "rationale": "protocolo de transporte",
+                }
+            return llm_payload(modality="binary_blob")
+
+    parser = LLMIngestParser(
+        require_llm_column_selection=True,
+        strict_output_validation=True,
+        column_selection_threshold=1,
+    )
+    parser.agent = UnknownModalityAgent()
+
+    with pytest.raises(ValueError, match=r"canonical_event\.modality"):
+        await parser.parse({"dataset": "iot23", "row": {"proto": "tcp"}})
+
+
+@pytest.mark.asyncio
 async def test_strict_parse_still_rejects_invalid_technical_field_with_bad_identity():
     class InvalidTechnicalAgent:
         async def invoke_json(self, system_prompt, user_payload, json_schema):

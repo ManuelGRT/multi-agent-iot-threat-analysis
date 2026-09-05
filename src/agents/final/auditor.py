@@ -246,10 +246,17 @@ class CaseAuditor:
             detail=f"status={case.status} approved={case.judge.approved}",
         )
         if case.explanation.source == "catalog":
+            has_non_catalog_reference = any(
+                ref.source != "catalog" for ref in case.explanation.references
+            )
             add(
                 "consistencia_catalogo_sin_llm_suggested",
-                all(ref.source == "catalog" for ref in case.explanation.references),
-                detail="referencias llm_suggested con source=catalog",
+                not has_non_catalog_reference,
+                detail=(
+                    "referencias llm_suggested con source=catalog"
+                    if has_non_catalog_reference
+                    else None
+                ),
             )
 
         # ---------------- 2. trazabilidad ----------------
@@ -314,10 +321,15 @@ class CaseAuditor:
         else:
             # sin evento canonico no hay nada que auditar contra leakage:
             # solo es admisible si el caso NO quedo certificado como completed
+            completed_without_canonical_event = case.status == "completed"
             add(
                 "leakage_evento_canonico_presente",
-                case.status != "completed",
-                detail="caso completed sin evento canonico",
+                not completed_without_canonical_event,
+                detail=(
+                    "caso completed sin evento canonico"
+                    if completed_without_canonical_event
+                    else None
+                ),
             )
 
         # ---------------- 4. umbrales ----------------

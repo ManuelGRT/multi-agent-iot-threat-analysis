@@ -100,6 +100,12 @@ def test_clean_attack_case_is_approved():
     assert report.verdict == "approve", report.issues
     assert report.passed
     assert report.issues == []
+    catalog_check = next(
+        check
+        for check in report.checks
+        if check.check == "consistencia_catalogo_sin_llm_suggested"
+    )
+    assert catalog_check.detail is None
 
 
 def test_clean_benign_case_is_approved():
@@ -152,6 +158,13 @@ def test_standardizer_abstention_without_detector_is_valid_review():
     assert report.verdict == "review", report.issues
     assert report.passed
     assert not any("traza_detector_presente" in issue for issue in report.issues)
+    canonical_check = next(
+        check
+        for check in report.checks
+        if check.check == "leakage_evento_canonico_presente"
+    )
+    assert canonical_check.passed
+    assert canonical_check.detail is None
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +235,12 @@ def test_catalog_source_with_llm_suggested_reference_is_rejected():
     report = auditor.audit(case)
     assert report.verdict == "reject"
     assert any("consistencia_catalogo_sin_llm_suggested" in issue for issue in report.issues)
+    catalog_check = next(
+        check
+        for check in report.checks
+        if check.check == "consistencia_catalogo_sin_llm_suggested"
+    )
+    assert catalog_check.detail == "referencias llm_suggested con source=catalog"
 
 
 def test_completed_status_with_rejecting_judge_is_rejected():
@@ -506,6 +525,12 @@ def test_completed_case_without_canonical_event_is_rejected():
     report = auditor.audit(clean_attack_case(canonical_event={}))
     assert report.verdict == "reject"
     assert any("leakage_evento_canonico_presente" in issue for issue in report.issues)
+    canonical_check = next(
+        check
+        for check in report.checks
+        if check.check == "leakage_evento_canonico_presente"
+    )
+    assert canonical_check.detail == "caso completed sin evento canonico"
 
 
 def test_feature_leakage_check_fires_on_contaminated_features(monkeypatch):

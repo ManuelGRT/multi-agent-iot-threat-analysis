@@ -343,3 +343,19 @@ def test_frontend_explains_every_auditor_check_without_hard_type():
     assert "Fallos duros" not in html
     assert "<th>Tipo</th>" not in html
     assert "check.hard" not in html
+
+
+def test_frontend_formats_auditor_details_for_people_without_hiding_raw_evidence():
+    html = TestClient(app).get("/").text
+
+    assert "formatAuditDetail(check)" in html
+    assert 'detalle.className = "auditoria-check-detalle"' in html
+    assert 'detalle.title = String(check.detail);' in html
+    assert "Sin incidencias." in html
+    assert "Familia asignada:" in html
+    assert "Probabilidad maliciosa:" in html
+    assert "Secuencia observada:" in html
+    assert "Agentes con error:" in html
+    assert "Variable objetivo recibida por el modelo" in html
+    assert 'new Intl.NumberFormat("es-ES"' in html
+    assert 'detalle.textContent = check.detail == null ? "—"' not in html

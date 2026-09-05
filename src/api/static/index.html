@@ -88,6 +88,7 @@
   .auditoria-check-label { font-weight: 600; }
   .auditoria-check-id { margin-top: 2px; color: var(--gris); font: 10.5px Consolas, monospace; }
   .auditoria-check-descripcion { min-width: 220px; line-height: 1.35; }
+  .auditoria-check-detalle { min-width: 190px; max-width: 360px; line-height: 1.35; overflow-wrap: anywhere; }
   details.auditoria-detalle { margin-top: 10px; }
   .oculto { display: none; }
 </style>
@@ -406,6 +407,176 @@ const escapeHtml = (value) => String(value ?? "").replace(
   char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char],
 );
 
+const AUDIT_AGENT_LABELS = {
+  orchestrator: "Orquestador",
+  final_standardizer: "Estandarizador",
+  final_detector: "Detector",
+  final_classifier: "Clasificador",
+  final_mitigator: "Mitigador",
+  final_judge: "Juez",
+};
+
+const AUDIT_STATUS_LABELS = {
+  open: "abierto",
+  completed: "completado",
+  needs_human_review: "requiere revisión humana",
+  error: "error",
+};
+
+const AUDIT_ACTION_LABELS = {
+  approve: "aprobación",
+  human_interrupt: "revisión humana",
+  abstain: "abstención",
+  rework: "reprocesamiento",
+  reject: "rechazo",
+};
+
+const AUDIT_FAILURE_LABELS = {
+  llm_standardization_failed: "fallo de estandarización mediante LLM",
+  llm_column_selection_failed: "fallo al seleccionar columnas mediante LLM",
+  invalid_llm_response: "respuesta del LLM no válida",
+};
+
+function auditField(raw, field) {
+  const match = String(raw || "").match(new RegExp(`${field}=((?:\\[[^\\]]*\\])|[^\\s]+)`));
+  return match ? match[1] : null;
+}
+
+function auditList(raw) {
+  const text = String(raw || "").trim();
+  if (!text || text === "[]") return [];
+  const body = text.startsWith("[") && text.endsWith("]") ? text.slice(1, -1) : text;
+  const quoted = [...body.matchAll(/'((?:\\'|[^'])*)'|"((?:\\"|[^"])*)"/g)]
+    .map(match => (match[1] ?? match[2] ?? "").replaceAll("\\'", "'").replaceAll('\\"', '"'));
+  if (quoted.length) return quoted;
+  return body.split(",").map(item => item.trim()).filter(Boolean);
+}
+
+function auditAgentLabel(value) {
+  const text = String(value ?? "");
+  for (const [agent, label] of Object.entries(AUDIT_AGENT_LABELS)) {
+    if (text === agent) return label;
+    if (text.startsWith(agent + ":")) return label + text.slice(agent.length);
+  }
+  return text;
+}
+
+function auditAgentList(raw, emptyText, separator = ", ") {
+  const agents = auditList(raw).map(auditAgentLabel);
+  return agents.length ? agents.join(separator) : emptyText;
+}
+
+function auditPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "no disponible";
+  return new Intl.NumberFormat("es-ES", {
+    style: "percent",
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(numeric);
+}
+
+function auditState(value) {
+  return AUDIT_STATUS_LABELS[value] || String(value || "no disponible");
+}
+
+function auditAction(value) {
+  return AUDIT_ACTION_LABELS[value] || String(value || "no disponible");
+}
+
+function auditYesNo(value) {
+  if (["True", "true"].includes(value)) return "sí";
+  if (["False", "false"].includes(value)) return "no";
+  return "no disponible";
+}
+
+function auditDetectionLabel(value) {
+  if (["True", "true"].includes(value)) return "malicioso";
+  if (["False", "false"].includes(value)) return "benigno";
+  return "sin veredicto";
+}
+
+function auditFamily(value) {
+  return value == null || ["None", "null", ""].includes(value) ? "ninguna" : value;
+}
+
+function formatLeakageEvidence(raw) {
+  const labels = {
+    campo_target_con_valor: "Campo objetivo con valor",
+    clave_target_anidada: "Clave objetivo anidada",
+    valor_target_anidado: "Valor objetivo anidado",
+    feature_target: "Variable objetivo recibida por el modelo",
+    evento_no_featurizable: "Evento no convertible en variables",
+    semantic_text_contiene_patron_target: "semantic_text contiene una etiqueta objetivo",
+    anomaly_summary_contiene_patron_target: "anomaly_summary contiene una etiqueta objetivo",
+  };
+  return String(raw).split("; ").map(item => {
+    const separator = item.indexOf(":");
+    const code = separator >= 0 ? item.slice(0, separator) : item;
+    const evidence = separator >= 0 ? item.slice(separator + 1) : "";
+    const label = labels[code] || code.replaceAll("_", " ");
+    return evidence ? `${label}: ${evidence}` : label;
+  }).join(" · ");
+}
+
+function formatAuditDetail(check) {
+  const raw = check.detail == null ? "" : String(check.detail).trim();
+  if (!raw) return check.passed ? "Sin incidencias." : "Sin detalle adicional.";
+
+  const status = () => auditState(auditField(raw, "status"));
+  const errors = () => auditAgentList(auditField(raw, "errors"), "ninguno");
+  const probability = () => auditPercent(auditField(raw, "probability"));
+  const verdict = () => auditDetectionLabel(auditField(raw, "is_malicious"));
+
+  switch (check.check) {
+    case "consistencia_sin_estado_error":
+    case "consistencia_errores_derivados":
+      return `Estado: ${status()} · Errores: ${errors()}`;
+    case "consistencia_veredicto_deteccion_presente":
+    case "consistencia_etiqueta_vs_probabilidad":
+      return `Veredicto observado: ${verdict()} · Probabilidad maliciosa: ${probability()}`;
+    case "consistencia_benigno_sin_familia":
+    case "consistencia_malicioso_no_benigno":
+      return `Familia asignada: ${auditFamily(auditField(raw, "familia"))}`;
+    case "consistencia_abstencion_flaggeada":
+      return `Estado: ${status()} · Acción del juez: ${auditAction(auditField(raw, "action"))}`;
+    case "consistencia_abstencion_estandarizador_flaggeada": {
+      const code = auditField(raw, "failure_code");
+      return `Estado: ${status()} · Acción del juez: ${auditAction(auditField(raw, "action"))}`
+        + ` · Motivo: ${AUDIT_FAILURE_LABELS[code] || code || "no disponible"}`;
+    }
+    case "consistencia_probabilidad_en_rango":
+      return `Probabilidad maliciosa: ${probability()}`;
+    case "consistencia_estado_vs_juez":
+      return `Estado: ${status()} · Aprobado por el juez: ${auditYesNo(auditField(raw, "approved"))}`;
+    case "consistencia_catalogo_sin_llm_suggested":
+      return check.passed
+        ? "Referencias ajenas al catálogo: ninguna"
+        : "Se detectaron referencias no catalogadas en una salida declarada como catálogo";
+    case "traza_entradas_cerradas":
+      return `Pasos sin finalizar: ${auditAgentList(auditField(raw, "abiertas"), "ninguno")}`;
+    case "traza_sin_duraciones_negativas":
+      return `Pasos con duración negativa: ${auditAgentList(raw, "ninguno")}`;
+    case "traza_orden_de_agentes":
+      return `Secuencia observada: ${auditAgentList(auditField(raw, "agentes"), "ninguna", " → ")}`;
+    case "traza_errores_derivados":
+      return `Agentes con error: ${auditAgentList(auditField(raw, "agentes_con_error"), "ninguno")}`;
+    case "leakage_evento_canonico":
+    case "leakage_features_modelos":
+      return formatLeakageEvidence(raw);
+    case "leakage_evento_canonico_presente":
+      return check.passed ? "Ausencia admitida porque el caso no se completó" : "Evento canónico ausente en un caso completado";
+    case "umbral_mapping_confidence_derivado":
+      return `Confianza del mapeo: ${auditPercent(auditField(raw, "mapping_confidence"))}`;
+    case "umbral_zona_gris_abstiene":
+      return `Probabilidad maliciosa: ${probability()}`;
+    case "umbral_confianza_clasificacion_derivada":
+      return `Confianza de clasificación: ${auditPercent(auditField(raw, "confidence"))}`;
+    default:
+      return raw;
+  }
+}
+
 function initEjemplos() {
   const sel = $("#ejemplo");
   Object.keys(EJEMPLOS).forEach(k => sel.add(new Option(k, k)));
@@ -658,7 +829,11 @@ function pintarAuditoria(report) {
     resultadoBadge.textContent = check.passed ? "superado" : "fallo";
     resultado.appendChild(resultadoBadge);
     const detalle = document.createElement("td");
-    detalle.textContent = check.detail == null ? "—" : String(check.detail);
+    detalle.className = "auditoria-check-detalle";
+    detalle.textContent = formatAuditDetail(check);
+    if (check.detail != null && String(check.detail).trim()) {
+      detalle.title = String(check.detail);
+    }
     fila.append(nombre, descripcion, resultado, detalle);
     cuerpo.appendChild(fila);
   });

@@ -101,6 +101,7 @@ class OpenAICompatibleChatAgent:
         extra_headers: dict[str, str] | None = None,
         json_mode_env: str | tuple[str, ...] | None = None,
         rate_limit_retries_env: str | tuple[str, ...] | None = None,
+        connection_retries_env: str | tuple[str, ...] | None = None,
         retry_status_codes_env: str | tuple[str, ...] | None = None,
         retry_wait_seconds_env: str | tuple[str, ...] | None = None,
         reasoning_effort_env: str | tuple[str, ...] | None = None,
@@ -115,6 +116,7 @@ class OpenAICompatibleChatAgent:
         self.max_tokens_env = _as_env_tuple(max_tokens_env)
         self.json_mode_env = _as_env_tuple(json_mode_env)
         self.rate_limit_retries_env = _as_env_tuple(rate_limit_retries_env)
+        self.connection_retries_env = _as_env_tuple(connection_retries_env)
         self.retry_status_codes_env = _as_env_tuple(retry_status_codes_env)
         self.retry_wait_seconds_env = _as_env_tuple(retry_wait_seconds_env)
         self.reasoning_effort_env = _as_env_tuple(reasoning_effort_env)
@@ -127,9 +129,14 @@ class OpenAICompatibleChatAgent:
         self.api_key = api_key or _first_env_value(self.api_key_env)
         self.extra_headers = extra_headers or {}
         self.json_mode = _env_bool(self.json_mode_env, default=True)
-        # Los proveedores remotos aplican limites de tasa. Un 429 puntual no
-        # debe degradar silenciosamente el agente a su ruta de reserva.
+        # Los proveedores remotos aplican limites de tasa y pueden sufrir
+        # fallos transitorios de red. Ninguno debe degradar silenciosamente el
+        # agente a su ruta de reserva sin agotar antes sus propios reintentos.
         self.rate_limit_retries = int(_first_env_value(self.rate_limit_retries_env) or 3)
+        self.connection_retries = max(
+            0,
+            int(_first_env_value(self.connection_retries_env) or 3),
+        )
         self.retry_status_codes = _retry_status_codes(
             _first_env_value(self.retry_status_codes_env),
             default={429},
@@ -178,17 +185,34 @@ class OpenAICompatibleChatAgent:
             **self.extra_headers,
         }
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response: httpx.Response | None = None
-            for attempt in range(self.rate_limit_retries + 1):
-                response = await client.post(f"{self.base_url}/chat/completions", headers=headers, json=body)
+            connection_retries = 0
+            status_retries = 0
+            while True:
+                try:
+                    response = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=body,
+                    )
+                except (httpx.ConnectError, httpx.ConnectTimeout):
+                    if connection_retries >= self.connection_retries:
+                        raise
+                    await asyncio.sleep(
+                        _connection_retry_wait_seconds(
+                            connection_retries,
+                            self.retry_wait_seconds,
+                        )
+                    )
+                    connection_retries += 1
+                    continue
                 if (
                     getattr(response, "status_code", None) in self.retry_status_codes
-                    and attempt < self.rate_limit_retries
+                    and status_retries < self.rate_limit_retries
                 ):
+                    status_retries += 1
                     await asyncio.sleep(_retry_wait_seconds(response, self.retry_wait_seconds))
                     continue
                 break
-            assert response is not None
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -283,6 +307,7 @@ class OpenRouterChatAgent(OpenAICompatibleChatAgent):
             api_key=api_key,
             json_mode_env=("OPENROUTER_JSON_MODE", "OPENAI_COMPATIBLE_JSON_MODE"),
             rate_limit_retries_env=("OPENROUTER_RATE_LIMIT_RETRIES", "OPENAI_COMPATIBLE_RATE_LIMIT_RETRIES"),
+            connection_retries_env=("OPENROUTER_CONNECTION_RETRIES", "OPENAI_COMPATIBLE_CONNECTION_RETRIES"),
             retry_status_codes_env=("OPENROUTER_RETRY_STATUS_CODES", "OPENAI_COMPATIBLE_RETRY_STATUS_CODES"),
             retry_wait_seconds_env=("OPENROUTER_RETRY_WAIT_SECONDS", "OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS"),
             extra_headers={
@@ -311,6 +336,7 @@ class GroqChatAgent(OpenAICompatibleChatAgent):
             api_key=api_key,
             json_mode_env=("GROQ_JSON_MODE", "OPENAI_COMPATIBLE_JSON_MODE"),
             rate_limit_retries_env=("GROQ_RATE_LIMIT_RETRIES", "OPENAI_COMPATIBLE_RATE_LIMIT_RETRIES"),
+            connection_retries_env=("GROQ_CONNECTION_RETRIES", "OPENAI_COMPATIBLE_CONNECTION_RETRIES"),
             retry_status_codes_env=("GROQ_RETRY_STATUS_CODES", "OPENAI_COMPATIBLE_RETRY_STATUS_CODES"),
             retry_wait_seconds_env=("GROQ_RETRY_WAIT_SECONDS", "OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS"),
             reasoning_effort_env=("GROQ_REASONING_EFFORT", "OPENAI_COMPATIBLE_REASONING_EFFORT"),
@@ -338,6 +364,7 @@ class MistralChatAgent(OpenAICompatibleChatAgent):
             api_key=api_key,
             json_mode_env=("MISTRAL_JSON_MODE", "OPENAI_COMPATIBLE_JSON_MODE"),
             rate_limit_retries_env=("MISTRAL_RATE_LIMIT_RETRIES", "OPENAI_COMPATIBLE_RATE_LIMIT_RETRIES"),
+            connection_retries_env=("MISTRAL_CONNECTION_RETRIES", "OPENAI_COMPATIBLE_CONNECTION_RETRIES"),
             retry_status_codes_env=("MISTRAL_RETRY_STATUS_CODES", "OPENAI_COMPATIBLE_RETRY_STATUS_CODES"),
             retry_wait_seconds_env=("MISTRAL_RETRY_WAIT_SECONDS", "OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS"),
         )
@@ -371,6 +398,12 @@ class GoogleAIStudioChatAgent(OpenAICompatibleChatAgent):
                 "GEMINI_RATE_LIMIT_RETRIES",
                 "GOOGLE_RATE_LIMIT_RETRIES",
                 "OPENAI_COMPATIBLE_RATE_LIMIT_RETRIES",
+            ),
+            connection_retries_env=(
+                "GOOGLE_AI_STUDIO_CONNECTION_RETRIES",
+                "GEMINI_CONNECTION_RETRIES",
+                "GOOGLE_CONNECTION_RETRIES",
+                "OPENAI_COMPATIBLE_CONNECTION_RETRIES",
             ),
             retry_status_codes_env=(
                 "GOOGLE_AI_STUDIO_RETRY_STATUS_CODES",
@@ -565,6 +598,15 @@ def _retry_wait_seconds(response: httpx.Response, configured_wait_seconds: float
         candidates.append(10.0)
     wait = max([value for value in candidates if value is not None] or [1.0])
     return min(max(wait + 0.75, 1.0), 120.0)
+
+
+def _connection_retry_wait_seconds(
+    retry_index: int,
+    configured_wait_seconds: float = 0,
+) -> float:
+    """Espera breve y acotada para DNS/conexión, independiente de HTTP."""
+    base_wait = configured_wait_seconds if configured_wait_seconds > 0 else 1.0
+    return min(base_wait * (2 ** max(retry_index, 0)), 10.0)
 
 
 def _duration_to_seconds(value: str | None) -> float | None:

@@ -177,14 +177,160 @@ async def test_openai_compatible_agent_retries_rate_limit(monkeypatch):
     assert sleeps and sleeps[0] >= 2
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    [base.httpx.ConnectError, base.httpx.ConnectTimeout],
+)
+@pytest.mark.asyncio
+async def test_openai_compatible_agent_retries_transient_connection_errors(
+    monkeypatch,
+    error_type,
+):
+    calls = []
+    sleeps = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {"message": {"content": '{"event_id":"after-connect-retry"}'}}
+                ]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            calls.append((url, headers, json))
+            if len(calls) <= 2:
+                request = base.httpx.Request("POST", url)
+                raise error_type("temporary connection failure", request=request)
+            return FakeResponse()
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(base.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(base.asyncio, "sleep", fake_sleep)
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-secret")
+    monkeypatch.setenv("MISTRAL_CONNECTION_RETRIES", "2")
+    monkeypatch.delenv("MISTRAL_RETRY_WAIT_SECONDS", raising=False)
+    monkeypatch.delenv("OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS", raising=False)
+
+    agent = MistralChatAgent(model="ministral-8b-latest", timeout_seconds=7)
+    result = await agent.invoke_json("system", {"row": 1}, {"type": "object"})
+
+    assert result == {"event_id": "after-connect-retry"}
+    assert len(calls) == 3
+    assert sleeps == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_openai_compatible_agent_raises_after_connection_retries(monkeypatch):
+    calls = []
+    sleeps = []
+    raised_errors = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            calls.append((url, headers, json))
+            error = base.httpx.ConnectError(
+                f"dns failure {len(calls)}",
+                request=base.httpx.Request("POST", url),
+            )
+            raised_errors.append(error)
+            raise error
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(base.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(base.asyncio, "sleep", fake_sleep)
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-secret")
+    monkeypatch.setenv("MISTRAL_CONNECTION_RETRIES", "2")
+    monkeypatch.delenv("MISTRAL_RETRY_WAIT_SECONDS", raising=False)
+    monkeypatch.delenv("OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS", raising=False)
+
+    agent = MistralChatAgent(model="ministral-8b-latest", timeout_seconds=7)
+    with pytest.raises(base.httpx.ConnectError, match="dns failure 3") as exc_info:
+        await agent.invoke_json("system", {"row": 1}, {"type": "object"})
+
+    assert exc_info.value is raised_errors[-1]
+    assert len(calls) == 3
+    assert sleeps == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_connection_retries_do_not_retry_unconfigured_http_errors(monkeypatch):
+    calls = []
+    sleeps = []
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers, json):
+            calls.append((url, headers, json))
+            return base.httpx.Response(
+                401,
+                request=base.httpx.Request("POST", url),
+                json={"error": {"message": "invalid key"}},
+            )
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(base.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(base.asyncio, "sleep", fake_sleep)
+    monkeypatch.setenv("MISTRAL_API_KEY", "test-secret")
+    monkeypatch.setenv("MISTRAL_CONNECTION_RETRIES", "3")
+
+    agent = MistralChatAgent(model="ministral-8b-latest", timeout_seconds=7)
+    with pytest.raises(base.httpx.HTTPStatusError):
+        await agent.invoke_json("system", {"row": 1}, {"type": "object"})
+
+    assert len(calls) == 1
+    assert sleeps == []
+
+
 def test_direct_api_agents_use_provider_env_keys(monkeypatch):
     monkeypatch.setenv("MISTRAL_API_KEY", "mistral-secret")
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
+    monkeypatch.delenv("MISTRAL_CONNECTION_RETRIES", raising=False)
+    monkeypatch.delenv("OPENAI_COMPATIBLE_CONNECTION_RETRIES", raising=False)
 
     mistral = MistralChatAgent(model="mistral-small-latest")
     google = GoogleAIStudioChatAgent(model="gemini-2.5-flash")
 
     assert mistral.api_key == "mistral-secret"
     assert mistral.base_url == "https://api.mistral.ai/v1"
+    assert mistral.connection_retries == 3
     assert google.api_key == "gemini-secret"
     assert google.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"

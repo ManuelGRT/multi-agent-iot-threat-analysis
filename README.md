@@ -134,6 +134,10 @@ En el endpoint final, todos los casos se persisten en la memoria SQLite y, si
 el detector confirma un caso malicioso, el mitigador intenta siempre la
 contextualización anclada con Mistral. Si el modelo no está disponible, el
 caso conserva las contramedidas y referencias verificables del catálogo. Este
+cliente reintenta por defecto tres veces los fallos transitorios de conexión
+(incluidos DNS y timeout de conexión), con esperas breves de 1, 2 y 4 segundos.
+`MISTRAL_CONNECTION_RETRIES` permite ajustar o desactivar esos reintentos.
+Después de agotarlos se aplica la ruta de reserva correspondiente. Este
 es el único *fallback* del flujo: la estandarización no dispone de una ruta
 offline ni determinista para sustituir a Mistral en un *cache miss*.
 

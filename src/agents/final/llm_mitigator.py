@@ -83,6 +83,12 @@ MITIGATION_SCHEMA = {
     "required": ["risk_summary", "mitigations", "confidence", "requires_human_review"],
 }
 
+# El juez solo utiliza las cinco primeras recomendaciones contextualizadas para
+# decidir si el contenido generado por el LLM necesita revision humana. Las
+# sugerencias posteriores siguen siendo visibles y conservan su procedencia, pero
+# no invalidan por si solas un prefijo completamente anclado al catalogo.
+MITIGATION_REVIEW_WINDOW = 5
+
 # Campos del evento canonico que el LLM puede ver (anti-leakage: sin origin,
 # provenance ni campos de etiqueta; el evento ya llega libre de targets por
 # precondicion del sistema).
@@ -276,6 +282,7 @@ def anchor_llm_payload(
     base_by_id = {item["id"]: item for item in base_items}
     covered: set[int] = set()
     mitigation_items: list[dict[str, Any]] = []
+    llm_item_sources: list[str] = []
     evidence: list[str] = []
     llm_items = payload.get("mitigations")
     if not isinstance(llm_items, list):
@@ -293,6 +300,7 @@ def anchor_llm_payload(
         smuggled = unknown_reference_ids(text, known_upper)
         if base is not None and base_id not in covered and not smuggled:
             covered.add(base_id)
+            llm_item_sources.append("llm")
             mitigation_items.append(
                 {
                     # La accion auditable permanece inmutable; la redaccion
@@ -312,6 +320,7 @@ def anchor_llm_payload(
                 evidence.append(
                     f"mitigacion_llm_degradada:ids_fuera_de_catalogo={smuggled}"
                 )
+            llm_item_sources.append("llm_suggested")
             mitigation_items.append(
                 {
                     "text": text,
@@ -374,11 +383,40 @@ def anchor_llm_payload(
         )
         llm_context_summary = None
 
+    review_window = llm_item_sources[:MITIGATION_REVIEW_WINDOW]
+    first_five_catalog_anchored = (
+        len(review_window) == MITIGATION_REVIEW_WINDOW
+        and all(source == "llm" for source in review_window)
+    )
+    has_unanchored_mitigation = any(
+        source == "llm_suggested" for source in llm_item_sources
+    )
+    has_unanchored_reference = any(
+        ref.get("source") == "llm_suggested" for ref in references
+    )
     has_unaudited = (
-        any(item["source"] == "llm_suggested" for item in mitigation_items)
-        or any(ref.get("source") == "llm_suggested" for ref in references)
+        has_unanchored_mitigation
+        or has_unanchored_reference
         or bool(summary_smuggled)
     )
+
+    review_reasons: list[str] = []
+    # Una peticion generica del LLM y las sugerencias posteriores a la quinta
+    # no fuerzan revision cuando las cinco primeras recomendaciones estan
+    # correctamente vinculadas con cinco bases distintas del catalogo.
+    if bool(payload.get("requires_human_review", False)) and not first_five_catalog_anchored:
+        review_reasons.append("llm_requested_human_review")
+    if has_unanchored_mitigation and not first_five_catalog_anchored:
+        review_reasons.append("unanchored_mitigation_in_review_window")
+    # Las referencias adicionales y los identificadores inventados en el
+    # resumen quedan fuera de esta excepcion: siguen necesitando supervision.
+    if has_unanchored_reference:
+        review_reasons.append("llm_reference_not_in_catalog")
+    if summary_smuggled:
+        review_reasons.append("llm_summary_reference_not_in_catalog")
+    if first_five_catalog_anchored:
+        evidence.append("mitigation_review_policy:first_five_catalog_anchored")
+
     return {
         "risk_summary": fallback_summary,
         "llm_context_summary": llm_context_summary,
@@ -388,8 +426,9 @@ def anchor_llm_payload(
         "references": references,
         "evidence": evidence,
         "confidence": confidence,
-        "requires_human_review": bool(payload.get("requires_human_review", False))
-        or has_unaudited,
+        "requires_human_review": bool(review_reasons),
         "has_llm_suggested": has_unaudited,
+        "first_five_catalog_anchored": first_five_catalog_anchored,
+        "review_reasons": review_reasons,
         "source": "hybrid",
     }

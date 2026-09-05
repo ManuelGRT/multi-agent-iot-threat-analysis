@@ -118,6 +118,9 @@ class FinalMitigator(FinalAgent):
                 }
             ]
             payload["source"] = "catalog"
+            payload["has_llm_suggested"] = False
+            payload["first_five_catalog_anchored"] = False
+            payload["review_reasons"] = ["catalog_unavailable"]
             return self.record_error(
                 state,
                 entry,
@@ -169,6 +172,9 @@ class FinalMitigator(FinalAgent):
             "references": references,
             "confidence": confidence,
             "requires_human_review": requires_review,
+            "has_llm_suggested": False,
+            "first_five_catalog_anchored": False,
+            "review_reasons": ["unknown_attack"] if requires_review else [],
             "source": "catalog",
         }
         entry.finish(
@@ -206,9 +212,11 @@ class FinalMitigator(FinalAgent):
                     fallback_summary=risk_summary,
                     fallback_confidence=confidence,
                 )
-                anchored["requires_human_review"] = (
-                    requires_review or anchored["requires_human_review"]
-                )
+                review_reasons = list(anchored.get("review_reasons") or [])
+                if requires_review and "unknown_attack" not in review_reasons:
+                    review_reasons.append("unknown_attack")
+                anchored["review_reasons"] = review_reasons
+                anchored["requires_human_review"] = bool(review_reasons)
                 final_payload = anchored
                 model_name = self.llm.model_name
                 suggested = sum(
@@ -221,7 +229,9 @@ class FinalMitigator(FinalAgent):
                     confidence=anchored["confidence"],
                     summary=(
                         f"contextualizadas={sum(1 for i in anchored['mitigation_items'] if i['source'] == 'llm')} "
-                        f"llm_suggested={suggested} modelo={model_name}"
+                        f"llm_suggested={suggested} "
+                        f"primeras_5_ancladas={anchored['first_five_catalog_anchored']} "
+                        f"modelo={model_name}"
                     ),
                 )
             except Exception as exc:  # fallback total: la demo nunca se rompe
@@ -252,6 +262,12 @@ class FinalMitigator(FinalAgent):
             explanation_output["llm_context_trusted"] = False
         if final_payload.get("has_llm_suggested"):
             explanation_output["has_llm_suggested"] = True
+        explanation_output["first_five_catalog_anchored"] = bool(
+            final_payload.get("first_five_catalog_anchored", False)
+        )
+        explanation_output["review_reasons"] = list(
+            final_payload.get("review_reasons") or []
+        )
 
         existing_trace = list(state.get("trace") or [])
         existing_trace.extend(e.model_dump(mode="json") for e in trace_entries)

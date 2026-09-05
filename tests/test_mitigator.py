@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from src.agents.final import FinalMitigator
+from src.agents.final import FinalJudge, FinalMitigator
 from src.agents.final.llm_mitigator import (
     LLMMitigationAgent,
     anchor_llm_payload,
@@ -171,6 +171,18 @@ def hybrid_payload_ok() -> dict:
     }
 
 
+def five_catalog_anchored_payload(*, requires_human_review: bool = False) -> dict:
+    return {
+        "risk_summary": "DDoS contextualizado con cinco medidas del catalogo.",
+        "mitigations": [
+            {"base_id": index, "text": f"contextualizacion catalogada {index}"}
+            for index in range(1, 6)
+        ],
+        "confidence": 0.9,
+        "requires_human_review": requires_human_review,
+    }
+
+
 def test_llm_contextualization_produces_hybrid_anchored_output():
     llm = llm_with_stub(payload=hybrid_payload_ok())
     update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
@@ -194,6 +206,86 @@ def test_llm_contextualization_produces_hybrid_anchored_output():
 
     # referencias: solo catalogo, todas marcadas catalog
     assert all(ref["source"] == "catalog" for ref in output["references"])
+
+
+def test_first_five_catalog_anchored_allow_judge_approval_with_later_suggestion():
+    payload = five_catalog_anchored_payload(requires_human_review=True)
+    payload["mitigations"].append(
+        {"base_id": None, "text": "sexta recomendacion adicional sin respaldo"}
+    )
+    update = FinalMitigator(
+        client=client, llm=llm_with_stub(payload=payload)
+    ).run(malicious_state("ddos"))
+    output = update["explanation_output"]
+
+    assert output["first_five_catalog_anchored"] is True
+    assert output["has_llm_suggested"] is True
+    assert output["requires_human_review"] is False
+    assert output["review_reasons"] == []
+    assert any(
+        item["text"] == "sexta recomendacion adicional sin respaldo"
+        and item["source"] == "llm_suggested"
+        for item in output["mitigation_items"]
+    )
+
+    judge_state = malicious_state("ddos")
+    judge_state["ingest_output"] = {"mapping_confidence": 0.95}
+    judge_state.update(update)
+    judged = FinalJudge(client=client).run(judge_state)
+    assert judged["judge_output"]["action"] == "approve"
+    assert "mitigator_requested_human_review" not in judged["judge_output"]["issues"]
+    assert judged["needs_human_review"] is False
+
+    case = CaseResult.from_orchestrator_state({**judge_state, **judged})
+    assert case.status == "completed"
+    assert case.explanation.first_five_catalog_anchored is True
+    assert case.explanation.has_llm_suggested is True
+    assert case.explanation.review_reasons == []
+
+
+def test_unanchored_fifth_recommendation_still_requires_human_review():
+    payload = five_catalog_anchored_payload()
+    payload["mitigations"][4] = {
+        "base_id": None,
+        "text": "quinta recomendacion sin respaldo",
+    }
+    update = FinalMitigator(
+        client=client, llm=llm_with_stub(payload=payload)
+    ).run(malicious_state("ddos"))
+    output = update["explanation_output"]
+
+    assert output["first_five_catalog_anchored"] is False
+    assert output["requires_human_review"] is True
+    assert "unanchored_mitigation_in_review_window" in output["review_reasons"]
+
+
+def test_fewer_than_five_do_not_override_explicit_llm_review_request():
+    payload = five_catalog_anchored_payload(requires_human_review=True)
+    payload["mitigations"] = payload["mitigations"][:4]
+    update = FinalMitigator(
+        client=client, llm=llm_with_stub(payload=payload)
+    ).run(malicious_state("ddos"))
+    output = update["explanation_output"]
+
+    assert output["first_five_catalog_anchored"] is False
+    assert output["requires_human_review"] is True
+    assert "llm_requested_human_review" in output["review_reasons"]
+
+
+def test_first_five_anchored_do_not_hide_untrusted_additional_reference():
+    payload = five_catalog_anchored_payload(requires_human_review=True)
+    payload["additional_references"] = [
+        {"attack_id": "T9999", "name": "Referencia no catalogada"}
+    ]
+    update = FinalMitigator(
+        client=client, llm=llm_with_stub(payload=payload)
+    ).run(malicious_state("ddos"))
+    output = update["explanation_output"]
+
+    assert output["first_five_catalog_anchored"] is True
+    assert output["requires_human_review"] is True
+    assert "llm_requested_human_review" not in output["review_reasons"]
+    assert "llm_reference_not_in_catalog" in output["review_reasons"]
 
 
 def test_llm_cannot_smuggle_references_outside_catalog():

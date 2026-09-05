@@ -139,6 +139,9 @@ class ExplanationInfo(BaseModel):
     model_name: str | None = None
     llm_context_summary: str | None = None
     llm_context_trusted: bool = False
+    has_llm_suggested: bool = False
+    first_five_catalog_anchored: bool = False
+    review_reasons: list[str] = Field(default_factory=list)
 
 
 class JudgeInfo(BaseModel):
@@ -282,6 +285,11 @@ class CaseResult(BaseModel):
                 source=explanation.get("source") or "rule_based",
                 llm_context_summary=explanation.get("llm_context_summary"),
                 llm_context_trusted=bool(explanation.get("llm_context_trusted", False)),
+                has_llm_suggested=bool(explanation.get("has_llm_suggested", False)),
+                first_five_catalog_anchored=bool(
+                    explanation.get("first_five_catalog_anchored", False)
+                ),
+                review_reasons=list(explanation.get("review_reasons") or []),
             ),
             judge=JudgeInfo(
                 action=judge.get("action") or "approve",

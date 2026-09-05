@@ -51,7 +51,12 @@ Ideas clave del diseño:
   `CaseAuditor` es una comprobación posterior e independiente.
 - **El LLM del mitigador está anclado**: puede redactar y contextualizar, pero
   no puede presentar referencias inventadas como conocimiento auditado; lo no
-  respaldado por el catálogo se marca y el caso se supervisa.
+  respaldado por el catálogo siempre conserva la marca `llm_suggested`. Para la
+  decisión operacional se examinan las cinco primeras recomendaciones del LLM:
+  si las cinco están vinculadas a bases distintas del catálogo, una sugerencia
+  posterior o una petición genérica del LLM no fuerza por sí sola la revisión.
+  Una recomendación no anclada dentro de esas cinco, una referencia adicional
+  desconocida o un identificador inventado en el resumen sí la mantienen.
 
 ## Resultados principales
 

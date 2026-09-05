@@ -381,6 +381,16 @@ class LLMIngestParser:
                 for key, value in payload.items()
                 if key not in AUTHORITATIVE_METADATA_FIELDS
             }
+            # ``network_packet`` es un perfil de esquema válido, pero no una
+            # modalidad canónica. Algunos modelos lo reutilizan como modalidad
+            # para capturas de paquetes. Normalizamos solo los alias técnicos
+            # conocidos antes de validar; cualquier valor desconocido continúa
+            # fallando de forma controlada.
+            if isinstance(payload.get("modality"), str):
+                payload["modality"] = self._normalize_modality(
+                    payload["modality"],
+                    llm_input,
+                )
         if self.strict_output_validation:
             _validate_json_schema(
                 payload,

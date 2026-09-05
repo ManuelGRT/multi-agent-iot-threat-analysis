@@ -51,7 +51,12 @@ Ideas clave del diseño:
   `CaseAuditor` es una comprobación posterior e independiente.
 - **El LLM del mitigador está anclado**: puede redactar y contextualizar, pero
   no puede presentar referencias inventadas como conocimiento auditado; lo no
-  respaldado por el catálogo se marca y el caso se supervisa.
+  respaldado por el catálogo siempre conserva la marca `llm_suggested`. Para la
+  decisión operacional se examinan las cinco primeras recomendaciones del LLM:
+  si las cinco están vinculadas a bases distintas del catálogo, una sugerencia
+  posterior o una petición genérica del LLM no fuerza por sí sola la revisión.
+  Una recomendación no anclada dentro de esas cinco, una referencia adicional
+  desconocida o un identificador inventado en el resumen sí la mantienen.
 
 ## Resultados principales
 
@@ -134,6 +139,10 @@ En el endpoint final, todos los casos se persisten en la memoria SQLite y, si
 el detector confirma un caso malicioso, el mitigador intenta siempre la
 contextualización anclada con Mistral. Si el modelo no está disponible, el
 caso conserva las contramedidas y referencias verificables del catálogo. Este
+cliente reintenta por defecto tres veces los fallos transitorios de conexión
+(incluidos DNS y timeout de conexión), con esperas breves de 1, 2 y 4 segundos.
+`MISTRAL_CONNECTION_RETRIES` permite ajustar o desactivar esos reintentos.
+Después de agotarlos se aplica la ruta de reserva correspondiente. Este
 es el único *fallback* del flujo: la estandarización no dispone de una ruta
 offline ni determinista para sustituir a Mistral en un *cache miss*.
 

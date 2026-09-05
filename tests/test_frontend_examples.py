@@ -24,6 +24,19 @@ AUDITOR_SOURCE = (
 )
 
 
+def test_frontend_uses_requested_centered_title() -> None:
+    html = TestClient(app).get("/").text
+
+    assert (
+        "<h1>Sistema Multiagente para Amenazas de Ciberseguridad "
+        "en Entornos IoT/IIoT</h1>"
+    ) in html
+    assert (
+        "header h1 { margin: 0; font-size: 18px; font-weight: 600; "
+        "text-align: center; }"
+    ) in html
+
+
 class _ExamplesScriptParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
@@ -69,12 +82,24 @@ def _walk_mapping(value: Any, path: str = ""):
             yield from _walk_mapping(item, f"{path}[{index}]")
 
 
-def test_demo_examples_are_strict_json_and_cover_every_final_dataset_profile():
+def test_demo_examples_cover_benign_and_attack_per_dataset_without_subtypes():
     examples = _load_examples()
     profiles_by_dataset: dict[str, set[str]] = defaultdict(set)
+    outcomes_by_dataset: dict[str, set[str]] = defaultdict(set)
+    dataset_labels = {
+        "iot23": "IoT-23",
+        "bot_iot": "BoT-IoT",
+        "edge_iiotset": "Edge-IIoTset",
+        "ton_iot": "TON-IoT",
+        "urban_iot": "Urban-IoT",
+    }
+    outcome_labels = {
+        "benign": "Benigno",
+        "attack": "Ataque",
+    }
 
     for name, spec in examples.items():
-        assert set(spec) == {"expected_profile", "payload"}, name
+        assert set(spec) == {"expected_profile", "expected_outcome", "payload"}, name
         payload = spec["payload"]
         CaseAnalyzeRequest.model_validate(payload)
         assert sum(
@@ -82,18 +107,50 @@ def test_demo_examples_are_strict_json_and_cover_every_final_dataset_profile():
             for key in ("row", "text", "canonical_event")
         ) == 1, name
 
-        if payload["dataset"] != "generic":
-            assert "row" in payload, f"{name} debe probar Mistral con entrada cruda"
-            assert "canonical_event" not in payload, name
-            profiles_by_dataset[payload["dataset"]].add(spec["expected_profile"])
+        if payload["dataset"] == "generic":
+            assert name == "JSON libre"
+            assert spec["expected_outcome"] == "custom"
+            continue
 
+        dataset = payload["dataset"]
+        outcome = spec["expected_outcome"]
+        assert dataset in dataset_labels, name
+        assert outcome in outcome_labels, name
+        assert name == f"[{dataset_labels[dataset]}] {outcome_labels[outcome]}"
+        assert "row" in payload, f"{name} debe contener una entrada cruda"
+        assert payload["row"], name
+        outcomes_by_dataset[dataset].add(outcome)
+        profiles_by_dataset[dataset].add(spec["expected_profile"])
+
+    assert dict(outcomes_by_dataset) == {
+        dataset: {"benign", "attack"}
+        for dataset in dataset_labels
+    }
     assert dict(profiles_by_dataset) == {
         "iot23": {"network_flow"},
         "bot_iot": {"network_flow"},
         "edge_iiotset": {"network_packet"},
-        "ton_iot": {"network_flow", "host_metrics", "iot_telemetry"},
-        "urban_iot": {"iot_telemetry"},
+        "ton_iot": {"network_flow"},
+        "urban_iot": {"iot_telemetry", "network_flow"},
     }
+
+    labels = "\n".join(examples)
+    for forbidden in (
+        "Benigno real",
+        "Ataque real",
+        " · ",
+        "/red",
+        "/host",
+        "/telemetría",
+        "botnet",
+        "reconocimiento",
+        "DDoS",
+        "escaneo",
+        "inyección",
+        "ransomware",
+        "Abstención",
+    ):
+        assert forbidden not in labels
 
 
 def test_demo_payloads_are_target_free_before_entering_the_multiagent_system():
@@ -147,12 +204,29 @@ def test_frontend_sends_only_each_example_payload_to_cases_analyze(monkeypatch):
 def test_frontend_prioritizes_abstention_over_internal_binary_class():
     html = TestClient(app).get("/").text
 
+    assert "Ejemplo precargado" not in html
+    assert '<label for="ejemplo">' not in html
     assert "const verd = det.abstain ?" in html
     assert "SIN VEREDICTO · ABSTENCIÓN" in html
     assert "JSON.stringify(spec.payload" in html
     assert 'type="checkbox"' not in html
     assert "use_llm_mitigator" not in html
     assert 'id="persist"' not in html
+
+
+def test_frontend_simplifies_standardization_cache_information():
+    html = TestClient(app).get("/").text
+
+    assert "Acceso a caché" in html
+    assert "Sí (Estandarizado Previamente)" in html
+    assert "No (Llamada en Vivo)" in html
+    assert "No (Estandarizado Previamente)" not in html
+    assert "Sí (Llamada en Vivo)" not in html
+    assert "Caché Mistral" not in html
+    assert '<span class="k">Fuente</span>' not in html
+    assert '<span class="k">Perfil de esquema</span>' not in html
+    assert "Hash del contenido" not in html
+    assert "cacheHash" not in html
 
 
 def test_frontend_shows_auditor_as_an_independent_post_case_stage():
@@ -180,6 +254,10 @@ def test_frontend_prioritizes_mistral_context_and_shows_every_mitigation():
     )
     assert "Base catalogada:" in html
     assert "Recomendación no respaldada por el catálogo" in html
+    assert "Recomendación adicional no respaldada por el catálogo" in html
+    assert "no fuerza revisión por sí sola" not in html
+    assert "5 primeras respaldadas por catálogo" in html
+    assert "first_five_catalog_anchored" in html
     assert "Mistral + catálogo" not in html  # se compone dinámicamente
     assert 'llm: `${llmName} + catálogo`' in html
     assert ".slice(0, 6)" not in html
@@ -188,15 +266,21 @@ def test_frontend_prioritizes_mistral_context_and_shows_every_mitigation():
     assert "escapeHtml(visibleSummary)" in html
 
 
+def test_frontend_shows_only_the_classifier_top_three():
+    html = TestClient(app).get("/").text
+
+    assert "Distribución top-3" in html
+    assert ".slice(0, 3)" in html
+    assert "Distribución top-5" not in html
+    assert ".slice(0, 5)" not in html
+
+
 def test_frontend_escapes_case_result_values_before_using_inner_html():
     html = TestClient(app).get("/").text
 
     escaped_values = (
         'escapeHtml(std.model ?? "—")',
-        'escapeHtml(std.source ?? "—")',
         'escapeHtml(std.provider ?? "—")',
-        "escapeHtml(cacheHash)",
-        'escapeHtml(std.schema_profile ?? "—")',
         'escapeHtml(std.modality ?? "—")',
         'escapeHtml(std.failure_code ?? "standardization_failed")',
         'escapeHtml(det.model_name ?? "—")',
@@ -259,3 +343,19 @@ def test_frontend_explains_every_auditor_check_without_hard_type():
     assert "Fallos duros" not in html
     assert "<th>Tipo</th>" not in html
     assert "check.hard" not in html
+
+
+def test_frontend_formats_auditor_details_for_people_without_hiding_raw_evidence():
+    html = TestClient(app).get("/").text
+
+    assert "formatAuditDetail(check)" in html
+    assert 'detalle.className = "auditoria-check-detalle"' in html
+    assert 'detalle.title = String(check.detail);' in html
+    assert "Sin incidencias." in html
+    assert "Familia asignada:" in html
+    assert "Probabilidad maliciosa:" in html
+    assert "Secuencia observada:" in html
+    assert "Agentes con error:" in html
+    assert "Variable objetivo recibida por el modelo" in html
+    assert 'new Intl.NumberFormat("es-ES"' in html
+    assert 'detalle.textContent = check.detail == null ? "—"' not in html

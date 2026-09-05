@@ -254,12 +254,25 @@ def test_frontend_prioritizes_mistral_context_and_shows_every_mitigation():
     )
     assert "Base catalogada:" in html
     assert "Recomendación no respaldada por el catálogo" in html
+    assert "Recomendación adicional no respaldada por el catálogo" in html
+    assert "no fuerza revisión por sí sola" not in html
+    assert "5 primeras respaldadas por catálogo" in html
+    assert "first_five_catalog_anchored" in html
     assert "Mistral + catálogo" not in html  # se compone dinámicamente
     assert 'llm: `${llmName} + catálogo`' in html
     assert ".slice(0, 6)" not in html
     assert "mitigationItems.length" in html
     assert "escapeHtml(visibleText)" in html
     assert "escapeHtml(visibleSummary)" in html
+
+
+def test_frontend_shows_only_the_classifier_top_three():
+    html = TestClient(app).get("/").text
+
+    assert "Distribución top-3" in html
+    assert ".slice(0, 3)" in html
+    assert "Distribución top-5" not in html
+    assert ".slice(0, 5)" not in html
 
 
 def test_frontend_escapes_case_result_values_before_using_inner_html():

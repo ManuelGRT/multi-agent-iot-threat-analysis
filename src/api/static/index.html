@@ -13,7 +13,7 @@
   * { box-sizing: border-box; }
   body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--fondo); color: #1c2333; }
   header { background: var(--azul); color: #fff; padding: 14px 24px; }
-  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; text-align: center; }
   header p { margin: 2px 0 0; font-size: 12.5px; opacity: .8; }
   main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
   @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
@@ -94,13 +94,12 @@
 </head>
 <body>
 <header>
-  <h1>Sistema Multiagente de Análisis de Amenazas IoT/IIoT</h1>
+  <h1>Sistema Multiagente para Amenazas de Ciberseguridad en Entornos IoT/IIoT</h1>
 </header>
 <main>
   <!-- ============ ENTRADA ============ -->
   <div class="panel">
     <h2>Entrada</h2>
-    <label for="ejemplo">Ejemplo precargado</label>
     <select id="ejemplo"></select>
     <label for="payload">Evento crudo (petición JSON al Endpoint <code>/cases/analyze</code>)</label>
     <textarea id="payload" spellcheck="false"></textarea>
@@ -154,8 +153,9 @@
 
 <script id="demo-examples" type="application/json">
 {
-  "[IoT-23] Benigno real · NTP": {
+  "[IoT-23] Benigno": {
     "expected_profile": "network_flow",
+    "expected_outcome": "benign",
     "payload": {
       "dataset": "iot23",
       "source_file": "demo_iot23_conn.csv",
@@ -163,8 +163,9 @@
       "row": {"ts":"1540487336.184154","uid":"CPNbNp2gKV9loYbdS","id.orig_h":"192.168.1.132","id.orig_p":"35056","id.resp_h":"216.239.35.8","id.resp_p":"123","proto":"udp","service":"-","duration":"0.016972","orig_bytes":"48","resp_bytes":"48","conn_state":"SF","local_orig":"-","local_resp":"-","missed_bytes":"0","history":"Dd","orig_pkts":"1","orig_ip_bytes":"76","resp_pkts":"1","resp_ip_bytes":"76","tunnel_parents":"-"}
     }
   },
-  "[IoT-23] Ataque real · botnet C&C": {
+  "[IoT-23] Ataque": {
     "expected_profile": "network_flow",
+    "expected_outcome": "attack",
     "payload": {
       "dataset": "iot23",
       "source_file": "demo_iot23_conn.csv",
@@ -172,17 +173,19 @@
       "row": {"ts":"1538520821.627997","uid":"CGLDvm3X8xOnv1Rfwf","id.orig_h":"192.168.100.103","id.orig_p":"38098","id.resp_h":"66.85.157.90","id.resp_p":"443","proto":"tcp","service":"-","duration":"44325.615625","orig_bytes":"19431","resp_bytes":"19431","conn_state":"S1","local_orig":"-","local_resp":"-","missed_bytes":"4500","history":"ShADCaGcgd","orig_pkts":"8872","orig_ip_bytes":"372893","resp_pkts":"9307","resp_ip_bytes":"388975","tunnel_parents":"-"}
     }
   },
-  "[BoT-IoT] Benigno real · NTP": {
+  "[BoT-IoT] Benigno": {
     "expected_profile": "network_flow",
+    "expected_outcome": "benign",
     "payload": {
       "dataset": "bot_iot",
       "source_file": "demo_bot_iot.csv",
-      "row_id": 577156,
-      "row": {"pkSeqID":"3577157","stime":"1526349282.18004","flgs":"e","flgs_number":"1","proto":"udp","proto_number":"3","saddr":"192.168.100.148","sport":"41936","daddr":"27.124.125.250","dport":"123","pkts":"2","bytes":"180","state":"CON","state_number":"2","ltime":"1526349282.22849","seq":"32809","dur":"0.048447","mean":"0.048447","stddev":"0","sum":"0.048447","min":"0.048447","max":"0.048447","spkts":"1","dpkts":"1","sbytes":"90","dbytes":"90","rate":"20.641111","srate":"0","drate":"0","TnBPSrcIP":"2047","TnBPDstIP":"360","TnP_PSrcIP":"24","TnP_PDstIP":"4","TnP_PerProto":"123687","TnP_Per_Dport":"8","AR_P_Proto_P_SrcIP":"2.37931","AR_P_Proto_P_DstIP":"41.204","N_IN_Conn_P_DstIP":"2","N_IN_Conn_P_SrcIP":"14","AR_P_Proto_P_Sport":"41.2822","AR_P_Proto_P_Dport":"24.6715","Pkts_P_State_P_Protocol_P_DestIP":"4","Pkts_P_State_P_Protocol_P_SrcIP":"12"}
+      "row_id": 576931,
+      "row": {"pkSeqID":"3576932","stime":"1526344600.09149","flgs":"e","flgs_number":"1","proto":"udp","proto_number":"3","saddr":"192.168.100.3","sport":"5720","daddr":"205.251.195.97","dport":"53","pkts":"2","bytes":"323","state":"CON","state_number":"2","ltime":"1526344600.38312","seq":"6753","dur":"0.291631","mean":"0.291631","stddev":"0","sum":"0.291631","min":"0.291631","max":"0.291631","spkts":"1","dpkts":"1","sbytes":"93","dbytes":"230","rate":"3.428991","srate":"0","drate":"0","TnBPSrcIP":"116736097","TnBPDstIP":"323","TnP_PSrcIP":"118038","TnP_PDstIP":"2","TnP_PerProto":"200009","TnP_Per_Dport":"68","AR_P_Proto_P_SrcIP":"17.1051","AR_P_Proto_P_DstIP":"6.85798","N_IN_Conn_P_DstIP":"1","N_IN_Conn_P_SrcIP":"20","AR_P_Proto_P_Sport":"6.85798","AR_P_Proto_P_Dport":"3.11157","Pkts_P_State_P_Protocol_P_DestIP":"2","Pkts_P_State_P_Protocol_P_SrcIP":"26"}
     }
   },
-  "[BoT-IoT] Ataque real · reconocimiento": {
+  "[BoT-IoT] Ataque": {
     "expected_profile": "network_flow",
+    "expected_outcome": "attack",
     "payload": {
       "dataset": "bot_iot",
       "source_file": "demo_bot_iot.csv",
@@ -190,8 +193,9 @@
       "row": {"pkSeqID":"3578051","stime":"1526876123.69904","flgs":"e","flgs_number":"1","proto":"tcp","proto_number":"1","saddr":"192.168.100.150","sport":"46997","daddr":"192.168.100.3","dport":"19801","pkts":"2","bytes":"120","state":"RST","state_number":"1","ltime":"1526876123.69912","seq":"772","dur":"0.000073","mean":"0.000073","stddev":"0","sum":"0.000073","min":"0.000073","max":"0.000073","spkts":"1","dpkts":"1","sbytes":"60","dbytes":"60","rate":"13698.629883","srate":"0","drate":"0","TnBPSrcIP":"12000","TnBPDstIP":"12000","TnP_PSrcIP":"200","TnP_PDstIP":"200","TnP_PerProto":"200","TnP_Per_Dport":"2","AR_P_Proto_P_SrcIP":"15256.7","AR_P_Proto_P_DstIP":"15256.7","N_IN_Conn_P_DstIP":"100","N_IN_Conn_P_SrcIP":"100","AR_P_Proto_P_Sport":"15256.7","AR_P_Proto_P_Dport":"27397.3","Pkts_P_State_P_Protocol_P_DestIP":"200","Pkts_P_State_P_Protocol_P_SrcIP":"200"}
     }
   },
-  "[Edge-IIoTset] Benigno real · MQTT": {
+  "[Edge-IIoTset] Benigno": {
     "expected_profile": "network_packet",
+    "expected_outcome": "benign",
     "payload": {
       "dataset": "edge_iiotset",
       "source_file": "demo_edge_iiot.csv",
@@ -199,8 +203,9 @@
       "row": {"frame.time":" 2021 17:03:01.881333000 ","ip.src_host":"192.168.0.101","ip.dst_host":"192.168.0.128","arp.dst.proto_ipv4":"0","arp.opcode":"0.0","arp.hw.size":"0.0","arp.src.proto_ipv4":"0","icmp.checksum":"0.0","icmp.seq_le":"0.0","icmp.transmit_timestamp":"0.0","icmp.unused":"0.0","http.file_data":"0.0","http.content_length":"0.0","http.request.uri.query":"0.0","http.request.method":"0.0","http.referer":"0.0","http.request.full_uri":"0.0","http.request.version":"0.0","http.response":"0.0","http.tls_port":"0.0","tcp.ack":"5.0","tcp.ack_raw":"33541935.0","tcp.checksum":"8631.0","tcp.connection.fin":"0.0","tcp.connection.rst":"0.0","tcp.connection.syn":"0.0","tcp.connection.synack":"0.0","tcp.dstport":"1883.0","tcp.flags":"16.0","tcp.flags.ack":"1.0","tcp.len":"0.0","tcp.options":"0","tcp.payload":"0","tcp.seq":"59.0","tcp.srcport":"49197.0","udp.port":"0.0","udp.stream":"0.0","udp.time_delta":"0.0","dns.qry.name":"0.0","dns.qry.name.len":"0","dns.qry.qu":"0.0","dns.qry.type":"0.0","dns.retransmission":"0.0","dns.retransmit_request":"0.0","dns.retransmit_request_in":"0.0","mqtt.conack.flags":"0","mqtt.conflag.cleansess":"0.0","mqtt.conflags":"0.0","mqtt.hdrflags":"0.0","mqtt.len":"0.0","mqtt.msg_decoded_as":"0.0","mqtt.msg":"0","mqtt.msgtype":"0.0","mqtt.proto_len":"0.0","mqtt.protoname":"0","mqtt.topic":"0","mqtt.topic_len":"0.0","mqtt.ver":"0.0","mbtcp.len":"0.0","mbtcp.trans_id":"0.0","mbtcp.unit_id":"0.0"}
     }
   },
-  "[Edge-IIoTset] Ataque real · DDoS TCP": {
+  "[Edge-IIoTset] Ataque": {
     "expected_profile": "network_packet",
+    "expected_outcome": "attack",
     "payload": {
       "dataset": "edge_iiotset",
       "source_file": "demo_edge_iiot.csv",
@@ -208,8 +213,9 @@
       "row": {"frame.time":" 2021 19:07:57.904459000 ","ip.src_host":"192.168.0.128","ip.dst_host":"31.172.176.71","arp.dst.proto_ipv4":"0","arp.opcode":"0.0","arp.hw.size":"0.0","arp.src.proto_ipv4":"0","icmp.checksum":"0.0","icmp.seq_le":"0.0","icmp.transmit_timestamp":"0.0","icmp.unused":"0.0","http.file_data":"0.0","http.content_length":"0.0","http.request.uri.query":"0.0","http.request.method":"0.0","http.referer":"0.0","http.request.full_uri":"0.0","http.request.version":"0.0","http.response":"0.0","http.tls_port":"0.0","tcp.ack":"121.0","tcp.ack_raw":"1548597051.0","tcp.checksum":"46871.0","tcp.connection.fin":"0.0","tcp.connection.rst":"1.0","tcp.connection.syn":"0.0","tcp.connection.synack":"0.0","tcp.dstport":"21444.0","tcp.flags":"20.0","tcp.flags.ack":"1.0","tcp.len":"0.0","tcp.options":"0.0","tcp.payload":"0","tcp.seq":"1.0","tcp.srcport":"80.0","udp.port":"0.0","udp.stream":"0.0","udp.time_delta":"0.0","dns.qry.name":"0.0","dns.qry.name.len":"0.0","dns.qry.qu":"0.0","dns.qry.type":"0.0","dns.retransmission":"0.0","dns.retransmit_request":"0.0","dns.retransmit_request_in":"0.0","mqtt.conack.flags":"0.0","mqtt.conflag.cleansess":"0.0","mqtt.conflags":"0.0","mqtt.hdrflags":"0.0","mqtt.len":"0.0","mqtt.msg_decoded_as":"0.0","mqtt.msg":"0.0","mqtt.msgtype":"0.0","mqtt.proto_len":"0.0","mqtt.protoname":"0.0","mqtt.topic":"0.0","mqtt.topic_len":"0.0","mqtt.ver":"0.0","mbtcp.len":"0.0","mbtcp.trans_id":"0.0","mbtcp.unit_id":"0.0"}
     }
   },
-  "[TON-IoT/red] Benigno real · DNS": {
+  "[TON-IoT] Benigno": {
     "expected_profile": "network_flow",
+    "expected_outcome": "benign",
     "payload": {
       "dataset": "ton_iot",
       "source_file": "demo_ton_network.csv",
@@ -217,8 +223,9 @@
       "row": {"src_ip":"192.168.1.180","src_port":"54248","dst_ip":"192.168.1.190","dst_port":"53","proto":"udp","service":"dns","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"59","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"elasticsearch","dns_qclass":"1","dns_qtype":"1","dns_rcode":"0","dns_AA":"F","dns_RD":"T","dns_RA":"F","dns_rejected":"F","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
     }
   },
-  "[TON-IoT/red] Ataque real · escaneo": {
+  "[TON-IoT] Ataque": {
     "expected_profile": "network_flow",
+    "expected_outcome": "attack",
     "payload": {
       "dataset": "ton_iot",
       "source_file": "demo_ton_network.csv",
@@ -226,35 +233,9 @@
       "row": {"src_ip":"192.168.1.32","src_port":"53921","dst_ip":"192.168.1.103","dst_port":"1236","proto":"tcp","service":"-","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"44","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"-","dns_qclass":"0","dns_qtype":"0","dns_rcode":"0","dns_AA":"-","dns_RD":"-","dns_RA":"-","dns_rejected":"-","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
     }
   },
-  "[TON-IoT/host] Ataque real · inyección": {
-    "expected_profile": "host_metrics",
-    "payload": {
-      "dataset": "ton_iot",
-      "source_file": "demo_ton_linux_process.csv",
-      "row_id": 21599,
-      "row": {"PID":"6497","TRUN":"0","TSLPI":"53","TSLPU":"0","POLI":"norm","NICE":"0","PRI":"120","RTPR":"0","CPUNR":"1","Status":"0","EXC":"0","State":"S","CPU":"0.04","CMD":"firefox"}
-    }
-  },
-  "[TON-IoT/telemetría] Benigno real · estación meteorológica": {
+  "[Urban-IoT] Benigno": {
     "expected_profile": "iot_telemetry",
-    "payload": {
-      "dataset": "ton_iot",
-      "source_file": "demo_ton_weather.csv",
-      "row_id": 8601,
-      "row": {"date":"31-Mar-19","time":"12:41:13","temperature":"23.61985261","pressure":"1.741141085","humidity":"79.13571638"}
-    }
-  },
-  "[TON-IoT/telemetría] Ataque real · ransomware": {
-    "expected_profile": "iot_telemetry",
-    "payload": {
-      "dataset": "ton_iot",
-      "source_file": "demo_ton_weather.csv",
-      "row_id": 36927,
-      "row": {"date":"28-Apr-19","time":"4:26:35","temperature":"48.58343945","pressure":"2.408192654","humidity":"38.42336781"}
-    }
-  },
-  "[Urban-IoT] Sin etiqueta · solo estandarización": {
-    "expected_profile": "iot_telemetry",
+    "expected_outcome": "benign",
     "payload": {
       "dataset": "urban_iot",
       "source_file": "demo_urban_iot.csv",
@@ -262,8 +243,19 @@
       "row": {"NODE":"4850","LAT":"8.631275995855345","LNG":"1.989256301705459","TIME":"2021-01-02 07:28:11","ACTIVE":"1"}
     }
   },
+  "[Urban-IoT] Ataque": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "attack",
+    "payload": {
+      "dataset": "urban_iot",
+      "source_file": "demo_urban_iot_synthetic.json",
+      "row_id": "synthetic_attack_1",
+      "row": {"NODE":"25555","LAT":"33.86438017340356","LNG":"41.1185851482803","TIME":"2021-01-10 12:21:15","ACTIVE":"0","src_ip":"192.168.100.103","src_port":"38098","dst_ip":"66.85.157.90","dst_port":"443","proto":"tcp","duration":"44325.615625","orig_bytes":"19431","resp_bytes":"19431","conn_state":"S1","missed_bytes":"4500","orig_pkts":"8872","resp_pkts":"9307"}
+    }
+  },
   "JSON libre": {
     "expected_profile": "unknown",
+    "expected_outcome": "custom",
     "payload": {"dataset":"generic","source_file":"demo_free_input.json","row_id":0,"row":{}}
   }
 }
@@ -490,14 +482,10 @@ function pintarTarjetas(caso) {
   const std = caso.standardization || {}, det = caso.detection || {},
         cls = caso.classification || {}, exp = caso.explanation || {}, juez = caso.judge || {};
 
-  const cacheHash = String(std.cache_content_hash || "");
   $("#t-std .cuerpo").innerHTML = `
     <div class="kv"><span class="k">Modelo</span><span>${escapeHtml(std.model ?? "—")}</span></div>
-    <div class="kv"><span class="k">Fuente</span><span>${escapeHtml(std.source ?? "—")}</span></div>
     <div class="kv"><span class="k">Proveedor</span><span>${escapeHtml(std.provider ?? "—")}</span></div>
-    <div class="kv"><span class="k">Caché Mistral</span><span>${std.from_cache ? "sí (duplicado exacto)" : "no (llamada en vivo o preestandarizado)"}</span></div>
-    ${cacheHash ? `<div class="kv"><span class="k">Hash del contenido</span><span title="${escapeHtml(cacheHash)}" style="font-size:11px">${escapeHtml(cacheHash.slice(0, 16))}…</span></div>` : ""}
-    <div class="kv"><span class="k">Perfil de esquema</span><span>${escapeHtml(std.schema_profile ?? "—")}</span></div>
+    <div class="kv"><span class="k">Acceso a caché</span><span>${std.from_cache ? "Sí (Estandarizado Previamente)" : "No (Llamada en Vivo)"}</span></div>
     <div class="kv"><span class="k">Modalidad</span><span>${escapeHtml(std.modality ?? "—")}</span></div>
     <div class="kv"><span class="k">Confianza de mapeo</span><span>${pct(std.mapping_confidence)}</span></div>
     <div class="barra"><div class="relleno" style="width:${ratioWidth(std.mapping_confidence)}%"></div></div>

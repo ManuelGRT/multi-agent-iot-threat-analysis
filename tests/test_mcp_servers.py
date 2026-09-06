@@ -792,7 +792,7 @@ def test_detect_and_classify_with_prepared_models():
         classification["attack_subtype"]
     )
     assert 0.0 <= classification["confidence"] <= 1.0
-    assert classification["decision_threshold"] == pytest.approx(0.8)
+    assert classification["decision_threshold"] == pytest.approx(0.65)
     assert len(classification["top_scores"]) == 3
 
 

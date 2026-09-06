@@ -12,7 +12,7 @@ REPO = Path(__file__).resolve().parents[1]
 DETECTION_MODEL = "xgboost_detection_validation_2026_20260822.joblib"
 CLASSIFIER_MODEL = "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
 CLASSIFIER_MODEL_SHA256 = (
-    "f49b2a50920b3fa260a999f34696e86a92068786f386bae866b02a5faaa7b185"
+    "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5"
 )
 
 

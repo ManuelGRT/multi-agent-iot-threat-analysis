@@ -66,6 +66,7 @@ from src.eval.validation_campaign import (  # noqa: E402
 DEFAULT_PROVIDER = "mistral"
 DEFAULT_MODEL = "mistral-small-2603"
 MODEL_NAME = "xgboost_attack_subtype_multidataset16_balanced500_20260906"
+DEFAULT_CONFIDENCE_THRESHOLD = 0.65
 
 
 def utc_now() -> str:
@@ -791,7 +792,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--provider", default=DEFAULT_PROVIDER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--confidence-threshold", type=float, default=None)
+    parser.add_argument(
+        "--confidence-threshold",
+        type=float,
+        default=DEFAULT_CONFIDENCE_THRESHOLD,
+        help=(
+            "Umbral operativo fijado a priori. Confianzas inferiores solicitan "
+            "revision humana (por defecto: 0.65)."
+        ),
+    )
     parser.add_argument("--maximum-validation-risk", type=float, default=0.05)
     parser.add_argument("--minimum-validation-coverage", type=float, default=0.50)
     parser.add_argument("--per-class-total", type=int, default=None)

@@ -983,6 +983,30 @@ def test_judge_uses_persisted_subtype_threshold_and_contract():
     assert update["judge_output"]["final_label"] == "DDoS_TCP"
 
 
+@pytest.mark.parametrize(
+    ("confidence", "expected_action"),
+    [(0.6499, "human_interrupt"), (0.65, "approve")],
+)
+def test_judge_applies_operational_classifier_threshold_boundary(
+    confidence, expected_action
+):
+    state = configure_typed_mitigation(clean_state())
+    state["classification_output"].update(
+        {
+            "decision_threshold": 0.65,
+            "confidence": confidence,
+        }
+    )
+
+    update = FinalJudge().run(state)
+
+    assert update["judge_output"]["action"] == expected_action
+    assert (
+        "classification_confidence_below_review_threshold"
+        in update["judge_output"]["issues"]
+    ) is (confidence < 0.65)
+
+
 def test_judge_rejects_incomplete_subtype_model_contract():
     state = clean_state()
     state["classification_output"].update(

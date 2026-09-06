@@ -2,7 +2,9 @@
 
 ## Estado y objetivo
 
-Este documento describe la campaña `classifier_multidataset16_balanced500_20260906`.
+Este documento describe la reevaluación
+`classifier_multidataset16_balanced500_threshold065_20260907` de la campaña
+balanceada base.
 Sustituye como resultado principal a la campaña anterior de 480 casos por
 clase. El cambio metodológico es importante: primero se construye el corpus
 balanceado usando todos los ataques mapeables y, solo después, se crea una
@@ -102,7 +104,7 @@ clasificador se entrena desde cero con esta nueva asignación.
 La selección y la asignación se calculan únicamente a partir de etiquetas,
 procedencia, identificadores y semilla; no consultan las predicciones ni las
 métricas. Una vez construida la nueva partición, esta queda congelada antes de
-ajustar el modelo y de seleccionar el umbral.
+ajustar el modelo y de aplicar el umbral operativo fijado a priori.
 
 | Partición | Casos por clase | Casos totales |
 |---|---:|---:|
@@ -169,7 +171,7 @@ Las pequeñas diferencias de una fila entre validación y prueba son el efecto
 esperado del redondeo entero. No existe solapamiento de huellas entre las
 particiones finales.
 
-## Modelo y selección del umbral
+## Modelo y umbral operativo
 
 Se entrenó un XGBoost multiclase de 300 árboles, profundidad máxima 6, tasa
 de aprendizaje 0,1, `subsample=0.8`, `colsample_bytree=0.8` y objetivo
@@ -177,10 +179,13 @@ de aprendizaje 0,1, `subsample=0.8`, `colsample_bytree=0.8` y objetivo
 único hilo de entrenamiento (`n_jobs=1`). El vectorizador generó 2.742
 características. Tanto el muestreo como el entrenamiento usan la semilla 42.
 
-El umbral de confianza se eligió exclusivamente sobre validación. El valor
-seleccionado fue 0,80: cobertura 0,8458, riesgo selectivo 0,0493 y 1.015
-decisiones sobre 1.200 casos. La accuracy forzada de validación fue 0,8800, la
-macro-F1 0,8792 y la top-3 accuracy 0,9750.
+El umbral operativo de confianza se fijó a priori en 0,65, de acuerdo con la
+política común del sistema: una confianza inferior solicita revisión humana y
+una confianza igual o superior permite emitir la clasificación. En validación
+produce una cobertura de 0,9100, un riesgo selectivo de 0,0769 y 1.092
+decisiones sobre 1.200 casos; la accuracy y la macro-F1 entre esas decisiones
+son 0,9231 y 0,9139, respectivamente. La accuracy forzada de validación fue
+0,8800, la macro-F1 0,8792 y la top-3 accuracy 0,9750.
 
 ## Resultados globales en prueba
 
@@ -195,12 +200,12 @@ macro-F1 0,8792 y la top-3 accuracy 0,9750.
 | Recall ponderado | 0,8908 |
 | F1 ponderada | 0,8917 |
 | Top-3 accuracy | 0,9800 |
-| Cobertura con umbral 0,80 | 0,8383 |
-| Casos decididos | 1.006 |
-| Casos con abstención | 194 |
-| Accuracy entre decisiones | 0,9622 |
-| Macro-F1 entre decisiones | 0,9507 |
-| Riesgo selectivo | 0,0378 |
+| Cobertura con umbral 0,65 | 0,9067 |
+| Casos decididos | 1.088 |
+| Casos con abstención | 112 |
+| Accuracy entre decisiones | 0,9329 |
+| Macro-F1 entre decisiones | 0,9237 |
+| Riesgo selectivo | 0,0671 |
 
 El desglose por clase se calcula sobre 75 casos de prueba por etiqueta:
 
@@ -240,14 +245,15 @@ en el desarrollo del modelo para medir su rendimiento dentro de cada fuente.
 
 La primera vista parte exclusivamente de las 1.200 filas del nuevo test. Para
 cada dataset conserva las clases con al menos diez casos y las balancea a la
-clase elegible menos representada:
+clase elegible menos representada. La cobertura y el riesgo aplican también el
+umbral operativo 0,65:
 
 | Dataset | Pool de test | Clases evaluadas | Cuota por clase | Filas | Accuracy | Macro-F1 | Top-3 | Cobertura | Riesgo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | Bot-IoT | 112 | 5 | 15 | 75 | 0,9867 | 0,9867 | 0,9867 | 0,9733 | 0,0000 |
-| Edge-IIoTset | 684 | 14 | 25 | 350 | 0,9029 | 0,9005 | 0,9971 | 0,8400 | 0,0340 |
+| Edge-IIoTset | 684 | 14 | 25 | 350 | 0,9029 | 0,9005 | 0,9971 | 0,9029 | 0,0506 |
 | IoT-23 | 96 | 2 | 15 | 30 | 1,0000 | 1,0000 | 1,0000 | 1,0000 | 0,0000 |
-| TON-IoT | 308 | 8 | 25 | 200 | 0,8250 | 0,8274 | 0,9350 | 0,7300 | 0,0548 |
+| TON-IoT | 308 | 8 | 25 | 200 | 0,8250 | 0,8274 | 0,9350 | 0,8250 | 0,1030 |
 
 La segunda vista responde a la evaluación ampliada solicitada. Para cada
 origen se construye:
@@ -268,10 +274,10 @@ balancea cada dataset de forma independiente.
 
 | Dataset | Pool ampliado | Clases evaluadas | Cuota por clase | Filas | Accuracy | Macro-F1 | Top-3 | Cobertura | Riesgo |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Bot-IoT | 868 | 5 | 38 | 190 | 0,9947 | 0,9947 | 0,9947 | 0,9789 | 0,0000 |
-| Edge-IIoTset | 3.020 | 14 | 75 | 1.050 | 0,8905 | 0,8865 | 0,9971 | 0,8419 | 0,0362 |
-| IoT-23 | 333 | 3 | 83 | 249 | 0,9920 | 0,7455 | 0,9960 | 0,9598 | 0,0000 |
-| TON-IoT | 2.457 | 10 | 25 | 250 | 0,8600 | 0,8596 | 0,9440 | 0,7760 | 0,0567 |
+| Bot-IoT | 868 | 5 | 38 | 190 | 0,9947 | 0,9947 | 0,9947 | 0,9842 | 0,0000 |
+| Edge-IIoTset | 3.020 | 14 | 75 | 1.050 | 0,8905 | 0,8865 | 0,9971 | 0,9143 | 0,0698 |
+| IoT-23 | 333 | 3 | 83 | 249 | 0,9920 | 0,7455 | 0,9960 | 0,9759 | 0,0041 |
+| TON-IoT | 2.457 | 10 | 25 | 250 | 0,8600 | 0,8596 | 0,9440 | 0,8440 | 0,0853 |
 
 En IoT-23 hubo una predicción `DDoS_UDP` fuera de las tres clases presentes.
 El cálculo macro incorpora esa etiqueta predicha con soporte real cero; por
@@ -290,22 +296,29 @@ usan como comparación principal por su inestabilidad.
 - Hash de validación: `bd62dd524b7804fe24d89b22ce57ee5d69b89717f319d48cb8161cef7826fefa`.
 - Hash de test: `644ce38284d1853b38691eb12aba42f58270ec4217ed074357fec14a2268320c`.
 - Hash de los nombres de características: `7562752da27242801d14455990f38e7b1e32771a35f96196fb499b52c0a289cd`.
-- Hash del modelo candidato: `f49b2a50920b3fa260a999f34696e86a92068786f386bae866b02a5faaa7b185`.
+- Hash del modelo candidato: `9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5`.
 - Llamadas de red durante la campaña: 0.
-- Una segunda ejecución completa con la misma semilla reprodujo exactamente
-  los hashes de selección y de modelo, el umbral y todas las métricas de test.
+- La nueva ejecución con la misma semilla reprodujo los hashes de selección,
+  las predicciones y todas las métricas forzadas. Solo cambiaron las métricas
+  selectivas y el hash del artefacto, porque el umbral persistido pasó a 0,65.
 
 El entrenamiento reutiliza exclusivamente respuestas de Mistral ya
 materializadas; no llama al LLM ni reconstruye determinísticamente la
 estandarización. El modelo generado ocupa 2.018.126 bytes. Tras revisar sus
 métricas, su contrato y su reproducción determinista, el artefacto con hash
-`f49b2a50920b3fa260a999f34696e86a92068786f386bae866b02a5faaa7b185`
+`9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5`
 se promocionó como clasificador predeterminado del paquete. La variable
 `TFM_FAMILY_MODEL` conserva la posibilidad de seleccionar explícitamente otro
 artefacto compatible.
 
+Con 0,65, el riesgo selectivo de test es 0,0671 y la aceptación del conjunto
+ambiguo/excluido es 0,6990. Ambos superan los límites conservadores de 0,05 y
+0,50 usados por el *quality gate* experimental, por lo que el runner no activa
+automáticamente el candidato. La promoción responde aquí a la política
+operativa explícita de mantener 0,65; no a una mejora de calidad predictiva.
+
 Los artefactos completos se encuentran bajo
-`artifacts/validation_2026/classifier_multidataset16_balanced500_20260906/`:
+`artifacts/validation_2026/classifier_multidataset16_balanced500_threshold065_20260907/`:
 informe JSON, resumen, selección global, sidecar de targets y modelo candidato.
 El runner reproducible es
 `scripts/train_balanced_multidataset16_classifier.py`.

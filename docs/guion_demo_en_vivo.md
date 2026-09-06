@@ -81,7 +81,7 @@ Qué señalar:
 - El detector muestra probabilidad y la zona gris `[0.4, 0.6]`; dentro de ella
   se abstiene y el juez solicita revisión humana.
 - El clasificador muestra el tipo, su familia agregada, la confianza y la
-  distribución top-3. Una confianza inferior a `0.80` también deriva el caso.
+  distribución top-3. Una confianza inferior a `0.65` también deriva el caso.
 - El mitigador muestra primero la contextualización de Mistral y mantiene
   visibles las recomendaciones y referencias del catálogo. Los elementos
   `llm_suggested` aparecen marcados como no respaldados.

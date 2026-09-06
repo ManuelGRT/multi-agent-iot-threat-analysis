@@ -61,7 +61,7 @@ importa módulos de evaluación. Sus métricas proceden de la campaña final
 | Modelo desplegado | Test (multi-dataset) | Métrica |
 |---|---:|---|
 | Detección binaria (`xgboost_detection_validation_2026_20260822`) | n=5.064 | F1 0.9676; F1 0.977 sobre casos decididos |
-| Tipos de ataque (`xgboost_attack_subtype_multidataset16_balanced500_20260906`) | n=1.200 balanceado | macro-F1 0.8917; 0.9507 sobre casos decididos |
+| Tipos de ataque (`xgboost_attack_subtype_multidataset16_balanced500_20260906`) | n=1.200 balanceado | macro-F1 0.8917; 0.9237 sobre casos decididos con umbral 0.65 |
 
 Punto para la memoria: ambos modelos operacionales comparten una representación
 canónica multi-dataset y aplican abstención o revisión humana en las regiones

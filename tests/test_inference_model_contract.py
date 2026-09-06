@@ -89,6 +89,8 @@ def test_active_model_loads_from_runtime_contract_and_predicts(
     assert type(model).__module__ == "src.contracts.inference"
     assert model.task == expected_task
     assert model.classes == expected_classes
+    if name == "classifier":
+        assert model.confidence_threshold == pytest.approx(0.65)
     assert model.predict(PROBE_ROWS) == expected_predictions
     probabilities = model.predict_proba(PROBE_ROWS)
     assert probabilities.shape == (len(PROBE_ROWS), len(expected_classes))

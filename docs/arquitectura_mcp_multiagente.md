@@ -60,7 +60,7 @@ controlada sin convertir una excepción en un resultado benigno.
 |---|---|---|
 | `FinalStandardizer` | Entrada limpia `row` o `text`; busca un éxito Mistral por hash exacto y, ante un *miss*, llama obligatoriamente a Mistral | Evento canónico, procedencia y confianza; cualquier fallo o confianza menor de 0,5 deriva al juez |
 | `FinalDetector` | Modelo XGBoost binario empaquetado | Veredicto y probabilidad; zona gris `[0.4, 0.6]` implica abstención |
-| `FinalClassifier` | Modelo XGBoost multiclase balanceado y empaquetado | Uno de 16 tipos, familia agregada, confianza y top-3; confianza menor de 0,80 solicita revisión |
+| `FinalClassifier` | Modelo XGBoost multiclase balanceado y empaquetado | Uno de 16 tipos, familia agregada, confianza y top-3; confianza menor de 0,65 solicita revisión |
 | `FinalMitigator` | Base del catálogo y contextualización Mistral por defecto | Explicación, recomendaciones y referencias con procedencia explícita |
 | `FinalJudge` | Reglas sobre todas las salidas y errores | `approve` o `human_interrupt` |
 | `CaseAuditor` | Revisión posterior del caso persistido | `approve`, `review` o `reject` por coherencia, trazabilidad, umbrales y fugas |

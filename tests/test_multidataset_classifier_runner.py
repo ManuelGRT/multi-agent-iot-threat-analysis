@@ -23,6 +23,22 @@ def test_training_taxonomy_report_declares_exact_multidataset_contract():
     assert len(report["sha256"]) == 64
 
 
+def test_runner_uses_operational_confidence_threshold_by_default(tmp_path):
+    args = runner.parse_args(
+        [
+            "--manifest-dir",
+            str(tmp_path / "manifests"),
+            "--results-dir",
+            str(tmp_path / "results"),
+            "--data-repository-root",
+            str(tmp_path / "data"),
+            "--out-dir",
+            str(tmp_path / "output"),
+        ]
+    )
+
+    assert args.confidence_threshold == 0.65
+
 
 def test_mapping_sidecar_preserves_forced_quality_and_raw_context():
     record = SimpleNamespace(

@@ -32,6 +32,10 @@ con semilla 42 se empleó únicamente para desempatar. La confianza mínima del
 clasificador entre los casos finalmente seleccionados fue 0,9947 y la
 probabilidad mínima del detector fue 0,9646.
 
+El valor 0,80 de este párrafo es exclusivamente un criterio de selección de
+casos de alta confianza para la campaña del mitigador. No es el umbral
+operativo de revisión del clasificador, que se mantiene fijo en 0,65.
+
 Antes del \emph{replay} se volvió a aplicar el saneamiento contra fuga del
 objetivo. Los 16 eventos superaron el contrato que exige que
 \texttt{label\_raw}, \texttt{attack\_family} y

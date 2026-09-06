@@ -96,7 +96,7 @@ def malicious_subtype_state(
             "attack_family": broad_family_for_attack_type(attack_type),
             "attack_subtype": attack_type,
             "confidence": confidence,
-            "decision_threshold": 0.8,
+            "decision_threshold": 0.65,
             "model_task": "attack_subtype",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
             "top_scores": {attack_type: confidence},

@@ -14,6 +14,8 @@ from src.eval.production_models import (
     deduplicate_labelled_records,
     family_mapping_report,
     map_attack_family,
+    persist_candidate_model,
+    train_labelled_attack_subtype_classifier,
     train_global_detector,
     train_production_candidates,
 )
@@ -237,6 +239,56 @@ def test_explicit_path_is_atomic_joblib_candidate_compatible_with_registry(tmp_p
     assert loaded.classes == [False, True]
     assert loaded.predict([{"a_signal": 0.0}, {"a_signal": 1.0}]) == [False, True]
     assert loaded.predict_proba([{"a_signal": 0.0}]).shape == (1, 2)
+
+
+def test_subtype_training_validates_declared_classes_and_persists_after_review(tmp_path):
+    labelled = []
+    for split in ("train", "val", "test"):
+        labelled.extend(
+            [
+                (_record(f"{split}-a", split=split, signal=0.0), "A"),
+                (_record(f"{split}-b", split=split, signal=1.0), "B"),
+            ]
+        )
+    factory = _CapturingFactory()
+    result = train_labelled_attack_subtype_classifier(
+        labelled,
+        taxonomy_mapping={"version": "test-v1", "training_classes": ["A", "B"]},
+        estimator_factory=factory,
+        seed=17,
+    )
+    assert result.model.task == "attack_subtype"
+    assert result.report["parameters"]["random_state"] == 17
+    assert factory.calls[-1]["parameters"]["random_state"] == 17
+    assert result.artifact_path is None
+    target = tmp_path / "reviewed.joblib"
+    persist_candidate_model(
+        result,
+        target,
+        confidence_threshold=0.81,
+        model_name="xgboost_attack_subtype_jorge14_balanced_20260906",
+    )
+    assert result.artifact_path == target.resolve()
+    assert result.model.confidence_threshold == pytest.approx(0.81)
+    assert (
+        result.model.model_name
+        == "xgboost_attack_subtype_jorge14_balanced_20260906"
+    )
+    assert result.report["operational_contract"] == {
+        "confidence_threshold": pytest.approx(0.81),
+        "model_name": "xgboost_attack_subtype_jorge14_balanced_20260906",
+        "task": "attack_subtype",
+        "taxonomy_version": "test-v1",
+    }
+    with pytest.raises(ValueError, match="ya fue persistido"):
+        persist_candidate_model(result, tmp_path / "second.joblib")
+
+    with pytest.raises(ValueError, match="no coinciden"):
+        train_labelled_attack_subtype_classifier(
+            labelled,
+            taxonomy_mapping={"version": "test-v1", "training_classes": ["A"]},
+            estimator_factory=factory,
+        )
 
 
 def test_small_real_xgboost_smoke_trains_and_serializes_both_candidates(tmp_path):

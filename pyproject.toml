@@ -42,6 +42,7 @@ llm-training = [
     "peft>=0.12",
 ]
 evaluation = [
+    "jsonschema>=4.0",
     "lightgbm==4.7.0",
     "torch>=2.2",
 ]

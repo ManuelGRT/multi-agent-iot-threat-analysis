@@ -23,6 +23,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from src.contracts.attack_taxonomy import (
+    MULTIDATASET_TAXONOMY_VERSION,
+    SUPPORTED_ATTACK_TAXONOMY_VERSIONS,
+    attack_classes_for_taxonomy,
+    broad_family_for_attack_type,
+)
 from src.contracts.leakage import (
     contains_predictive_target_text,
     is_allowed_canonical_target_path,
@@ -240,6 +246,181 @@ class CaseAuditor:
                 classification.attack_family.strip().lower() not in {"benign", "normal"},
                 detail=f"familia={classification.attack_family}",
             )
+        if detection.is_malicious and classification.model_task == "attack_family":
+            add(
+                "consistencia_modelo_familia_sin_subtipo",
+                classification.attack_subtype is None,
+                detail=f"subtipo={classification.attack_subtype}",
+            )
+        subtype_classes: tuple[str, ...] = ()
+        taxonomy_supported = False
+        if detection.is_malicious and classification.model_task == "attack_subtype":
+            try:
+                subtype_classes = attack_classes_for_taxonomy(
+                    classification.taxonomy_version
+                )
+            except ValueError:
+                pass
+            else:
+                taxonomy_supported = True
+            add(
+                "consistencia_subtipo_presente",
+                classification.attack_subtype is not None,
+                detail=f"subtipo={classification.attack_subtype}",
+            )
+            add(
+                "consistencia_version_taxonomia",
+                taxonomy_supported,
+                detail=(
+                    f"recibida={classification.taxonomy_version} "
+                    f"soportadas={list(SUPPORTED_ATTACK_TAXONOMY_VERSIONS)}"
+                ),
+            )
+            invalid_scores = {
+                str(label): score
+                for label, score in classification.top_scores.items()
+                if label not in subtype_classes
+                or isinstance(score, bool)
+                or not 0.0 <= float(score) <= 1.0
+            }
+            add(
+                "consistencia_top_scores_subtipos",
+                len(classification.top_scores) == 3
+                and classification.attack_subtype in classification.top_scores
+                and not invalid_scores,
+                detail=(
+                    f"cantidad={len(classification.top_scores)} "
+                    f"incluye_elegido={classification.attack_subtype in classification.top_scores} "
+                    f"valores_invalidos={invalid_scores}"
+                ),
+            )
+            family_score = classification.family_scores.get(
+                classification.attack_family or ""
+            )
+            invalid_family_scores = {
+                str(label): score
+                for label, score in classification.family_scores.items()
+                if isinstance(score, bool) or not 0.0 <= float(score) <= 1.0
+            }
+            add(
+                "consistencia_puntuacion_familia",
+                bool(classification.family_scores)
+                and not invalid_family_scores
+                and family_score is not None
+                and classification.family_confidence is not None
+                and abs(float(family_score) - classification.family_confidence)
+                <= 1e-6
+                and abs(sum(classification.family_scores.values()) - 1.0) <= 1e-5,
+                detail=(
+                    f"familia={classification.attack_family} "
+                    f"score={family_score} "
+                    f"confidence={classification.family_confidence} "
+                    f"suma={sum(classification.family_scores.values())}"
+                ),
+            )
+        if detection.is_malicious and classification.attack_subtype is not None:
+            if classification.attack_subtype not in subtype_classes:
+                add(
+                    "consistencia_subtipo_en_taxonomia",
+                    False,
+                    detail=f"subtipo={classification.attack_subtype}",
+                )
+            else:
+                expected_family = broad_family_for_attack_type(
+                    classification.attack_subtype
+                )
+                add(
+                    "consistencia_subtipo_en_taxonomia",
+                    True,
+                    detail=f"subtipo={classification.attack_subtype}",
+                )
+                add(
+                    "consistencia_subtipo_vs_familia",
+                    classification.attack_family == expected_family,
+                    detail=(
+                        f"subtipo={classification.attack_subtype} "
+                        f"familia={classification.attack_family} "
+                        f"esperada={expected_family}"
+                    ),
+                )
+                if classification.top_scores:
+                    top_label, top_score = max(
+                        classification.top_scores.items(), key=lambda item: item[1]
+                    )
+                else:
+                    top_label, top_score = None, None
+                add(
+                    "consistencia_subtipo_vs_top_scores",
+                    top_label == classification.attack_subtype
+                    and top_score is not None
+                    and abs(float(top_score) - classification.confidence) <= 1e-6,
+                    detail=(
+                        f"subtipo={classification.attack_subtype} "
+                        f"top={top_label} score={top_score} "
+                        f"confidence={classification.confidence}"
+                    ),
+                )
+        if (
+            detection.is_malicious
+            and classification.model_task == "attack_subtype"
+            and classification.attack_subtype is not None
+        ):
+            add(
+                "consistencia_mitigacion_subtipo",
+                case.explanation.attack_subtype == classification.attack_subtype,
+                detail=(
+                    f"mitigador={case.explanation.attack_subtype} "
+                    f"clasificador={classification.attack_subtype}"
+                ),
+            )
+            add(
+                "consistencia_mitigacion_familia",
+                case.explanation.attack_family == classification.attack_family,
+                detail=(
+                    f"mitigador={case.explanation.attack_family} "
+                    f"clasificador={classification.attack_family}"
+                ),
+            )
+            add(
+                "consistencia_mitigacion_taxonomia",
+                case.explanation.taxonomy_version
+                == classification.taxonomy_version,
+                detail=(
+                    f"mitigador={case.explanation.taxonomy_version} "
+                    f"clasificador={classification.taxonomy_version}"
+                ),
+            )
+            add(
+                "consistencia_mitigacion_catalogo_tipado",
+                case.explanation.catalog_scope == "attack_type"
+                and bool(case.explanation.catalog_version)
+                and case.explanation.catalog_taxonomy_version
+                == MULTIDATASET_TAXONOMY_VERSION
+                and classification.taxonomy_version
+                in case.explanation.catalog_compatible_taxonomy_versions,
+                detail=(
+                    f"scope={case.explanation.catalog_scope} "
+                    f"version={case.explanation.catalog_version} "
+                    f"taxonomia_catalogo={case.explanation.catalog_taxonomy_version} "
+                    "taxonomias_compatibles="
+                    f"{case.explanation.catalog_compatible_taxonomy_versions} "
+                    f"taxonomia_clasificador={classification.taxonomy_version}"
+                ),
+            )
+            add(
+                "consistencia_veredicto_juez_subtipo",
+                case.judge.final_label == classification.attack_subtype
+                and abs(
+                    float(case.judge.final_confidence)
+                    - float(classification.confidence)
+                )
+                <= 1e-6,
+                detail=(
+                    f"juez={case.judge.final_label}/{case.judge.final_confidence} "
+                    f"clasificador={classification.attack_subtype}/"
+                    f"{classification.confidence}"
+                ),
+            )
         add(
             "consistencia_estado_vs_juez",
             case.status != "completed" or (case.judge.approved and not case.judge.requires_human_review),
@@ -351,13 +532,16 @@ class CaseAuditor:
             )
         if (
             classification.attack_family is not None
-            and classification.confidence < REVIEW_CLASSIFICATION_CONFIDENCE
+            and classification.confidence < classification.decision_threshold
         ):
             add(
                 "umbral_confianza_clasificacion_derivada",
                 flagged_for_review,
                 hard=False,
-                detail=f"confidence={classification.confidence}",
+                detail=(
+                    f"confidence={classification.confidence} "
+                    f"threshold={classification.decision_threshold}"
+                ),
             )
 
         hard_failed = any(check.hard and not check.passed for check in checks)

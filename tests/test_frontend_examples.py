@@ -329,7 +329,7 @@ def test_frontend_explains_every_auditor_check_without_hard_type():
     auditor_source = AUDITOR_SOURCE.read_text(encoding="utf-8")
     check_ids = set(re.findall(r'add\(\s*"([^"]+)"', auditor_source))
 
-    assert len(check_ids) == 30
+    assert len(check_ids) == 43
     for check_id in check_ids:
         entry = re.compile(
             rf'"{re.escape(check_id)}":\s*\{{\s*'

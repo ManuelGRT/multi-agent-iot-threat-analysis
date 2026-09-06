@@ -11,6 +11,11 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from src.contracts.attack_taxonomy import (
+    MULTIDATASET_ATTACK_CLASSES,
+    MULTIDATASET_TAXONOMY_VERSION,
+    broad_family_for_attack_type,
+)
 from src.contracts.canonical import CanonicalEvent
 from src.mcp.client import (
     DEFAULT_STDIO_TIMEOUT_SECONDS,
@@ -21,6 +26,29 @@ from src.mcp.client import (
 )
 
 client = MCPToolClient(mode="inprocess")
+
+EXPECTED_TYPE_REFERENCES = {
+    "Backdoor": ({"T1105", "T1204"}, {"CAPEC-523"}, {"M1049"}),
+    "DDoS_HTTP": ({"T1498"}, {"CAPEC-125", "CAPEC-488"}, {"M1037"}),
+    "DDoS_ICMP": ({"T1498"}, {"CAPEC-125", "CAPEC-487"}, {"M1037"}),
+    "DDoS_TCP": ({"T1498"}, {"CAPEC-125", "CAPEC-482"}, {"M1037"}),
+    "DDoS_UDP": ({"T1498"}, {"CAPEC-125", "CAPEC-486"}, {"M1037"}),
+    "Fingerprinting": ({"T1595"}, {"CAPEC-224"}, {"M1042"}),
+    "MITM": ({"T1557"}, {"CAPEC-94"}, {"M1041"}),
+    "Password": (
+        {"T1110"},
+        {"CAPEC-112", "CAPEC-49"},
+        {"M1032", "M1027"},
+    ),
+    "Port_Scanning": ({"T1046"}, {"CAPEC-300"}, {"M1042"}),
+    "Ransomware": ({"T1105", "T1204"}, {"CAPEC-542"}, {"M1049"}),
+    "SQL_injection": ({"T1190"}, {"CAPEC-66"}, {"M1051"}),
+    "Uploading": ({"T1190"}, {"CAPEC-242"}, {"M1051"}),
+    "Vulnerability_scanner": ({"T1595"}, {"CAPEC-310"}, {"M1042"}),
+    "XSS": ({"T1190"}, {"CAPEC-63"}, {"M1051"}),
+    "DoS": ({"T1499"}, {"CAPEC-125"}, {"M1037"}),
+    "Command_and_Control": ({"T1071"}, {"CAPEC-542"}, {"M1031"}),
+}
 
 CANONICAL_EVENT = {
     "event_id": "evt-test-1",
@@ -48,7 +76,13 @@ def test_all_servers_expose_tools():
     expected = {
         "inference": {"standardize_event", "detect_event", "classify_event", "get_family_scores"},
         "case_memory": {"create_case", "append_trace", "get_case", "retrieve_similar_cases"},
-        "threat_intel": {"map_family_to_attack", "map_family_to_capec", "suggest_mitigations"},
+        "threat_intel": {
+            "list_attack_types",
+            "map_family_to_attack",
+            "map_family_to_capec",
+            "suggest_mitigations",
+            "get_multidataset_attack_type_coverage",
+        },
     }
     assert set(SERVER_MODULES) == set(expected)
     for server, tools in expected.items():
@@ -78,6 +112,174 @@ def test_threat_intel_covers_all_corpus_families():
     listed = client.call("threat_intel", "list_families")["families"]
     for family in corpus_families:
         assert family in listed
+
+
+def test_threat_intel_lists_exactly_the_16_operational_attack_types():
+    result = client.call("threat_intel", "list_attack_types")
+
+    assert result["ok"] is True
+    assert tuple(result["attack_types"]) == MULTIDATASET_ATTACK_CLASSES
+    assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
+    assert result["families_by_attack_type"] == {
+        attack_type: broad_family_for_attack_type(attack_type)
+        for attack_type in MULTIDATASET_ATTACK_CLASSES
+    }
+
+
+@pytest.mark.parametrize("attack_type", MULTIDATASET_ATTACK_CLASSES)
+def test_threat_intel_resolves_specific_non_crossed_catalog_for_all_16_types(
+    attack_type,
+):
+    family = broad_family_for_attack_type(attack_type)
+    expected_attack, expected_capec, expected_mitigations = (
+        EXPECTED_TYPE_REFERENCES[attack_type]
+    )
+
+    attack = client.call(
+        "threat_intel",
+        "map_family_to_attack",
+        family=family,
+        attack_type=attack_type,
+    )
+    capec = client.call(
+        "threat_intel",
+        "map_family_to_capec",
+        family=family,
+        attack_type=attack_type,
+    )
+    result = client.call(
+        "threat_intel",
+        "suggest_mitigations",
+        family=family,
+        attack_type=attack_type,
+        schema_profile="network_flow",
+    )
+
+    for response in (attack, capec, result):
+        assert response["ok"] is True
+        assert response["family"] == family
+        assert response["attack_type"] == attack_type
+        assert response["catalog_scope"] == "attack_type"
+
+    assert {item["id"] for item in attack["attack_techniques"]} == expected_attack
+    assert {
+        item["id"] for item in attack["attack_mitigation_refs"]
+    } == expected_mitigations
+    assert {item["id"] for item in capec["capec_patterns"]} == expected_capec
+
+    references = result["references"]
+    assert {
+        item["id"] for item in references["attack_techniques"]
+    } == expected_attack
+    assert {
+        item["id"] for item in references["capec_patterns"]
+    } == expected_capec
+    assert {
+        item["id"] for item in references["attack_mitigation_refs"]
+    } == expected_mitigations
+    assert result["family_consistent"] is True
+    assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
+
+    by_phase = result["mitigations_by_phase"]
+    assert all(by_phase[phase] for phase in ("containment", "eradication", "prevention"))
+    ordered = [
+        *by_phase["containment"],
+        *by_phase["eradication"],
+        *by_phase["prevention"],
+    ]
+    assert result["mitigations_ordered"] == ordered
+    assert len(ordered) >= 5
+    assert len(ordered) == len(set(ordered))
+    assert result["profile_actions"]
+
+
+def test_threat_intel_reports_complete_multidataset_catalog_coverage():
+    result = client.call(
+        "threat_intel", "get_multidataset_attack_type_coverage"
+    )
+
+    assert result["ok"] is True
+    assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
+    assert result["total"] == len(MULTIDATASET_ATTACK_CLASSES) == 16
+    assert result["covered"] == 16
+    assert {row["attack_type"] for row in result["mappings"]} == set(
+        MULTIDATASET_ATTACK_CLASSES
+    )
+    for row in result["mappings"]:
+        assert row["family"] == broad_family_for_attack_type(row["attack_type"])
+        assert row["catalog_scope"] == "attack_type"
+        assert row["mitigations"] >= 5
+        assert row["attack_techniques"] > 0
+        assert row["capec_patterns"] > 0
+        assert row["attack_mitigation_refs"] > 0
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "Command_and_Control",
+        "command-and-control",
+        "command and control",
+        "command_control",
+        "C&C",
+        "C2",
+    ],
+)
+def test_command_and_control_attack_type_aliases_keep_specific_scope(alias):
+    result = client.call(
+        "threat_intel",
+        "suggest_mitigations",
+        family="botnet",
+        attack_type=alias,
+    )
+
+    assert result["ok"] is True
+    assert result["attack_type"] == "Command_and_Control"
+    assert result["family"] == "botnet"
+    assert result["catalog_scope"] == "attack_type"
+    assert result["family_consistent"] is True
+    assert {item["id"] for item in result["references"]["attack_techniques"]} == {
+        "T1071"
+    }
+
+
+def test_native_c_and_c_family_alias_preserves_legacy_family_scope():
+    result = client.call("threat_intel", "suggest_mitigations", family="C&C")
+
+    assert result["ok"] is True
+    assert result["attack_type"] is None
+    assert result["family"] == "botnet"
+    assert result["catalog_scope"] == "family"
+    assert result["family_consistent"] is True
+
+
+def test_specific_catalog_exposes_family_mismatch_instead_of_hiding_it():
+    result = client.call(
+        "threat_intel",
+        "suggest_mitigations",
+        family="malware",
+        attack_type="DDoS_TCP",
+    )
+
+    assert result["attack_type"] == "DDoS_TCP"
+    assert result["family"] == "ddos"
+    assert result["catalog_scope"] == "attack_type"
+    assert result["family_consistent"] is False
+
+
+def test_unknown_explicit_attack_type_does_not_fall_back_to_requested_family():
+    result = client.call(
+        "threat_intel",
+        "suggest_mitigations",
+        family="ddos",
+        attack_type="DDoS_QUIC",
+    )
+
+    assert result["family"] == "unknown_attack"
+    assert result["attack_type"] is None
+    assert result["catalog_scope"] == "family"
+    assert result["family_consistent"] is False
+    assert not any(result["references"].values())
 
 
 def test_threat_intel_mappings_ddos():
@@ -583,9 +785,15 @@ def test_detect_and_classify_with_prepared_models():
 
     classification = client.call("inference", "classify_event", canonical_event=CANONICAL_EVENT)
     assert classification["ok"], classification.get("error")
-    assert classification["attack_family"]
+    assert classification["model_task"] == "attack_subtype"
+    assert classification["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
+    assert classification["attack_subtype"] in MULTIDATASET_ATTACK_CLASSES
+    assert classification["attack_family"] == broad_family_for_attack_type(
+        classification["attack_subtype"]
+    )
     assert 0.0 <= classification["confidence"] <= 1.0
-    assert len(classification["top_scores"]) >= 1
+    assert classification["decision_threshold"] == pytest.approx(0.8)
+    assert len(classification["top_scores"]) == 3
 
 
 # ---------------------------------------------------------------------------

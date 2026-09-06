@@ -6,7 +6,8 @@ Expone los modelos preparados del TFM:
   validado; en cache miss, Mistral en vivo es obligatorio. Nunca usa
   adaptadores. Un fallo produce una abstencion para revision humana.
 - Deteccion: ``xgboost_detection_validation_2026_20260822.joblib``.
-- Clasificacion: ``xgboost_attack_family_validation_2026_20260822.joblib``.
+- Clasificacion:
+  ``xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib``.
 """
 from __future__ import annotations
 
@@ -477,7 +478,7 @@ def detect_batch(canonical_events: list[dict[str, Any]]) -> dict[str, Any]:
 
 @tool_result
 def classify_event(canonical_event: dict[str, Any], top_k: int = 3) -> dict[str, Any]:
-    """Clasificacion de familia de ataque sobre un CanonicalEvent."""
+    """Clasificacion de tipo y familia de ataque sobre un CanonicalEvent."""
     return model_registry.classify(
         _validated_canonical_payload(canonical_event),
         top_k=top_k,
@@ -498,11 +499,27 @@ def classify_batch(canonical_events: list[dict[str, Any]], top_k: int = 3) -> di
 
 @tool_result
 def get_family_scores(canonical_event: dict[str, Any]) -> dict[str, Any]:
-    """Puntuaciones completas por familia (todas las clases del modelo)."""
-    return model_registry.classify(
+    """Puntuaciones completas y agregadas por familia amplia."""
+    result = model_registry.classify(
         _validated_canonical_payload(canonical_event),
         top_k=100,
     )
+    family_scores = dict(result.get("family_scores") or result.get("top_scores") or {})
+    if not family_scores:
+        raise ValueError("El clasificador no devolvio puntuaciones de familia")
+    family, confidence = max(family_scores.items(), key=lambda item: item[1])
+    return {
+        **result,
+        # Este tool conserva una semantica estable aunque el modelo activo
+        # estime familias directamente o prediga los 16 tipos multidataset.
+        "attack_subtype": None,
+        "attack_family": str(family),
+        "confidence": float(confidence),
+        "family_confidence": float(confidence),
+        "top_scores": family_scores,
+        "family_scores": family_scores,
+        "score_type": "attack_family",
+    }
 
 
 TOOLS = {

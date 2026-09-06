@@ -101,7 +101,7 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         os.getenv("TFM_FAMILY_MODEL")
         or package_data_dir()
         / "models"
-        / "xgboost_attack_family_validation_2026_20260822.joblib"
+        / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
     ),
     "baselines": lambda: Path(
         os.getenv("TFM_BASELINES")

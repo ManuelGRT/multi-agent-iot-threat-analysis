@@ -2,9 +2,11 @@
 """Agente final de mitigacion (Fase 4): catalogo determinista + LLM anclado.
 
 Flujo en dos pasos:
-1. Determinista: ``threat_intel.suggest_mitigations(family, schema_profile)``
-   devuelve la base auditable (mitigaciones por fase + referencias MITRE
-   ATT&CK/CAPEC del catalogo). Este paso SIEMPRE se ejecuta.
+1. Determinista: ``threat_intel.suggest_mitigations(family, attack_type, ...)``
+   devuelve la base auditable especifica para una de las 16 clases operativas
+   (mitigaciones por fase + referencias MITRE ATT&CK/CAPEC). Los modelos
+   historicos sin subtipo conservan el fallback compatible por familia. Este
+   paso SIEMPRE se ejecuta.
 2. LLM (opcional, ``llm=LLMMitigationAgent``): contextualiza las mitigaciones
    del catalogo al evento concreto (puertos, protocolo, telemetria). Regla
    dura: no puede inventar tecnicas ni referencias fuera del catalogo; toda
@@ -77,6 +79,15 @@ class FinalMitigator(FinalAgent):
         classification = state.get("classification_output") or {}
         event_id = str(canonical.get("event_id") or state.get("event_id") or "unknown")
 
+        model_task = str(
+            classification.get("model_task")
+            or classification.get("score_type")
+            or "attack_family"
+        )
+        raw_attack_type = classification.get("attack_subtype")
+        attack_type = str(raw_attack_type) if raw_attack_type else None
+        taxonomy_version = classification.get("taxonomy_version")
+
         if classification.get("attack_family"):
             family = str(classification["attack_family"])
         elif detection.get("is_malicious"):
@@ -89,13 +100,17 @@ class FinalMitigator(FinalAgent):
         # Paso 1 (siempre): base determinista del catalogo threat intel
         # ------------------------------------------------------------------
         entry = self.start_entry(
-            tool="suggest_mitigations", event_id=event_id, family=family
+            tool="suggest_mitigations",
+            event_id=event_id,
+            family=family,
+            attack_type=attack_type,
         )
         result = self.call_tool(
             "threat_intel",
             "suggest_mitigations",
             family=family,
             schema_profile=schema_profile,
+            attack_type=attack_type,
         )
         if not result.get("ok", False):
             error = str(result.get("error") or "suggest_mitigations sin resultado")
@@ -121,6 +136,14 @@ class FinalMitigator(FinalAgent):
             payload["has_llm_suggested"] = False
             payload["first_five_catalog_anchored"] = False
             payload["review_reasons"] = ["catalog_unavailable"]
+            payload["attack_family"] = family
+            payload["attack_subtype"] = attack_type
+            payload["taxonomy_version"] = taxonomy_version
+            payload["catalog_scope"] = None
+            payload["catalog_version"] = None
+            payload["catalog_taxonomy_version"] = None
+            payload["catalog_compatible_taxonomy_versions"] = []
+            payload["reference_quality"] = {}
             return self.record_error(
                 state,
                 entry,
@@ -133,6 +156,26 @@ class FinalMitigator(FinalAgent):
             )
 
         normalized_family = str(result.get("family") or family)
+        normalized_attack_type = (
+            str(result["attack_type"])
+            if result.get("attack_type") is not None
+            else None
+        )
+        catalog_scope = str(result.get("catalog_scope") or "family")
+        catalog_version = (
+            str(result["catalog_version"])
+            if result.get("catalog_version") is not None
+            else None
+        )
+        catalog_taxonomy_version = (
+            str(result["taxonomy_version"])
+            if result.get("taxonomy_version") is not None
+            else None
+        )
+        catalog_compatible_taxonomy_versions = [
+            str(version)
+            for version in (result.get("compatible_taxonomy_versions") or [])
+        ]
         base_items = build_base_items(result)
         references = catalog_references(result.get("references") or {})
         known_ids = catalog_reference_ids(result.get("references") or {})
@@ -140,15 +183,28 @@ class FinalMitigator(FinalAgent):
             {"text": item["text"], "phase": item["phase"], "source": "catalog", "base": None}
             for item in base_items
         ]
-        confidence = float(
-            classification.get("confidence")
-            or (1.0 - float(detection.get("probability", 0.0) or 0.0)
-                if not detection.get("is_malicious")
-                else detection.get("probability", 0.0))
-            or 0.0
-        )
+        if classification.get("confidence") is not None:
+            confidence = float(classification["confidence"])
+        elif not detection.get("is_malicious"):
+            confidence = 1.0 - float(detection.get("probability", 0.0) or 0.0)
+        else:
+            confidence = float(detection.get("probability", 0.0) or 0.0)
         confidence = min(max(confidence, 0.0), 1.0)
-        requires_review = normalized_family == "unknown_attack"
+        review_reasons: list[str] = []
+        if normalized_family == "unknown_attack":
+            review_reasons.append("unknown_attack")
+        if model_task == "attack_subtype" and attack_type is None:
+            review_reasons.append("classification_attack_subtype_missing")
+        if attack_type is not None:
+            if normalized_attack_type != attack_type:
+                review_reasons.append("catalog_attack_type_mismatch")
+            if catalog_scope != "attack_type":
+                review_reasons.append("catalog_attack_type_scope_missing")
+            if not bool(result.get("family_consistent", False)):
+                review_reasons.append("catalog_attack_family_mismatch")
+            if taxonomy_version not in catalog_compatible_taxonomy_versions:
+                review_reasons.append("catalog_taxonomy_version_mismatch")
+        requires_review = bool(review_reasons)
 
         if normalized_family == "benign":
             risk_summary = (
@@ -158,8 +214,13 @@ class FinalMitigator(FinalAgent):
             )
         else:
             attack_ids = [ref["attack_id"] for ref in references if ref.get("attack_id")]
+            classified_label = normalized_attack_type or normalized_family
+            family_context = (
+                f" (familia {normalized_family})" if normalized_attack_type else ""
+            )
             risk_summary = (
-                f"Evento {event_id} clasificado como {normalized_family} "
+                f"Evento {event_id} clasificado como {classified_label}"
+                f"{family_context} "
                 f"(confianza {float(classification.get('confidence', 0.0) or 0.0):.4f}) "
                 f"sobre perfil {schema_profile or 'unknown'}. "
                 f"Referencias ATT&CK: {', '.join(attack_ids[:3]) or 'n/a'}."
@@ -174,13 +235,24 @@ class FinalMitigator(FinalAgent):
             "requires_human_review": requires_review,
             "has_llm_suggested": False,
             "first_five_catalog_anchored": False,
-            "review_reasons": ["unknown_attack"] if requires_review else [],
+            "review_reasons": review_reasons,
             "source": "catalog",
+            "attack_family": normalized_family,
+            "attack_subtype": normalized_attack_type,
+            "taxonomy_version": taxonomy_version,
+            "catalog_scope": catalog_scope,
+            "catalog_version": catalog_version,
+            "catalog_taxonomy_version": catalog_taxonomy_version,
+            "catalog_compatible_taxonomy_versions": (
+                catalog_compatible_taxonomy_versions
+            ),
+            "reference_quality": dict(result.get("reference_quality") or {}),
         }
         entry.finish(
             status="ok",
             confidence=confidence,
             summary=(
+                f"tipo={normalized_attack_type or 'n/a'} "
                 f"familia={normalized_family} mitigaciones={len(mitigation_items)} "
                 f"referencias={len(references)}"
             ),
@@ -213,10 +285,22 @@ class FinalMitigator(FinalAgent):
                     fallback_confidence=confidence,
                 )
                 review_reasons = list(anchored.get("review_reasons") or [])
-                if requires_review and "unknown_attack" not in review_reasons:
-                    review_reasons.append("unknown_attack")
+                for reason in catalog_payload["review_reasons"]:
+                    if reason not in review_reasons:
+                        review_reasons.append(reason)
                 anchored["review_reasons"] = review_reasons
                 anchored["requires_human_review"] = bool(review_reasons)
+                for key in (
+                    "attack_family",
+                    "attack_subtype",
+                    "taxonomy_version",
+                    "catalog_scope",
+                    "catalog_version",
+                    "catalog_taxonomy_version",
+                    "catalog_compatible_taxonomy_versions",
+                    "reference_quality",
+                ):
+                    anchored[key] = catalog_payload[key]
                 final_payload = anchored
                 model_name = self.llm.model_name
                 suggested = sum(
@@ -267,6 +351,20 @@ class FinalMitigator(FinalAgent):
         )
         explanation_output["review_reasons"] = list(
             final_payload.get("review_reasons") or []
+        )
+        explanation_output["attack_family"] = final_payload.get("attack_family")
+        explanation_output["attack_subtype"] = final_payload.get("attack_subtype")
+        explanation_output["taxonomy_version"] = final_payload.get("taxonomy_version")
+        explanation_output["catalog_scope"] = final_payload.get("catalog_scope")
+        explanation_output["catalog_version"] = final_payload.get("catalog_version")
+        explanation_output["catalog_taxonomy_version"] = final_payload.get(
+            "catalog_taxonomy_version"
+        )
+        explanation_output["catalog_compatible_taxonomy_versions"] = list(
+            final_payload.get("catalog_compatible_taxonomy_versions") or []
+        )
+        explanation_output["reference_quality"] = dict(
+            final_payload.get("reference_quality") or {}
         )
 
         existing_trace = list(state.get("trace") or [])

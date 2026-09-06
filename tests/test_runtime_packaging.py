@@ -1,6 +1,7 @@
 """Regresiones del paquete desplegable y de su frontera de escritura."""
 from __future__ import annotations
 
+import hashlib
 import tomllib
 from pathlib import Path
 
@@ -9,17 +10,28 @@ from src.mcp.common import package_data_dir, resolve_path
 
 REPO = Path(__file__).resolve().parents[1]
 DETECTION_MODEL = "xgboost_detection_validation_2026_20260822.joblib"
-FAMILY_MODEL = "xgboost_attack_family_validation_2026_20260822.joblib"
+CLASSIFIER_MODEL = "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
+CLASSIFIER_MODEL_SHA256 = (
+    "f49b2a50920b3fa260a999f34696e86a92068786f386bae866b02a5faaa7b185"
+)
 
 
 def test_read_only_runtime_resources_live_inside_package():
     data = package_data_dir()
 
     assert resolve_path("detection_model") == data / "models" / DETECTION_MODEL
-    assert resolve_path("family_model") == data / "models" / FAMILY_MODEL
+    assert resolve_path("family_model") == data / "models" / CLASSIFIER_MODEL
     assert resolve_path("detection_model").is_file()
     assert resolve_path("family_model").is_file()
     assert (data / "threat_intel_catalog.json").is_file()
+
+
+def test_packaged_classifier_is_the_reviewed_balanced_16_type_artifact():
+    model_path = resolve_path("family_model")
+
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        CLASSIFIER_MODEL_SHA256
+    )
 
 
 def test_operational_state_uses_configurable_writable_directory(tmp_path, monkeypatch):
@@ -44,7 +56,7 @@ def test_wheel_declares_only_online_packages_and_resources():
     assert set(package_data["src.mcp"]) == {
         "data/threat_intel_catalog.json",
         f"data/models/{DETECTION_MODEL}",
-        f"data/models/{FAMILY_MODEL}",
+        f"data/models/{CLASSIFIER_MODEL}",
     }
 
 

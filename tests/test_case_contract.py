@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import json
 
+from src.contracts.attack_taxonomy import (
+    JORGE_TAXONOMY_VERSION,
+    MULTIDATASET_TAXONOMY_VERSION,
+)
 from src.contracts.case import (
     CaseResult,
     ClassificationInfo,
@@ -45,15 +49,37 @@ def test_case_result_full_serialization_roundtrip():
             model="mistral-small-latest", mapping_confidence=0.92, from_cache=True
         ),
         detection=DetectionInfo(is_malicious=True, probability=0.97, model_name="xgb_std_edge"),
-        classification=ClassificationInfo(attack_family="ddos", confidence=0.88),
+        classification=ClassificationInfo(
+            attack_family="ddos",
+            attack_subtype="DDoS_TCP",
+            confidence=0.88,
+            model_task="attack_subtype",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+        ),
         explanation=ExplanationInfo(
-            summary="Trafico DDoS",
+            summary="Trafico DDoS TCP",
             mitigations=["rate_limit_traffic"],
             references=[ThreatReference(attack_id="T1498", name="Network DoS")],
             confidence=0.85,
+            attack_family="ddos",
+            attack_subtype="DDoS_TCP",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            catalog_scope="attack_type",
+            catalog_version="2.0",
+            catalog_taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            catalog_compatible_taxonomy_versions=[
+                MULTIDATASET_TAXONOMY_VERSION,
+                JORGE_TAXONOMY_VERSION,
+            ],
+            reference_quality={"capec": "exact"},
             source="hybrid",
         ),
-        judge=JudgeInfo(action="approve", approved=True, final_label="ddos", final_confidence=0.88),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.88,
+        ),
     )
     case.start_step("standardizer", tool="standardize_event").finish("ok", confidence=0.92)
     case.start_step("detector", tool="detect_event").finish("ok", confidence=0.97)
@@ -66,11 +92,32 @@ def test_case_result_full_serialization_roundtrip():
     payload = json.loads(case.model_dump_json())
     assert payload["case_id"].startswith("case-")
     assert payload["explanation"]["references"][0]["attack_id"] == "T1498"
+    assert payload["explanation"]["attack_subtype"] == "DDoS_TCP"
+    assert payload["explanation"]["catalog_scope"] == "attack_type"
+    assert payload["explanation"]["catalog_version"] == "2.0"
+    assert (
+        payload["explanation"]["catalog_taxonomy_version"]
+        == MULTIDATASET_TAXONOMY_VERSION
+    )
+    assert set(payload["explanation"]["catalog_compatible_taxonomy_versions"]) == {
+        JORGE_TAXONOMY_VERSION,
+        MULTIDATASET_TAXONOMY_VERSION,
+    }
 
     restored = CaseResult(**payload)
     assert restored.case_id == case.case_id
     assert restored.trace[0].agent == "standardizer"
     assert restored.detection.probability == 0.97
+    assert restored.explanation.attack_family == "ddos"
+    assert restored.explanation.attack_subtype == "DDoS_TCP"
+    assert restored.explanation.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
+    assert restored.explanation.catalog_scope == "attack_type"
+    assert restored.explanation.catalog_version == "2.0"
+    assert set(restored.explanation.catalog_compatible_taxonomy_versions) == {
+        JORGE_TAXONOMY_VERSION,
+        MULTIDATASET_TAXONOMY_VERSION,
+    }
+    assert restored.explanation.reference_quality == {"capec": "exact"}
 
 
 def test_case_result_needs_human_review_when_judge_interrupts():
@@ -161,6 +208,90 @@ def test_from_orchestrator_state_benign_case_without_classification():
     assert case.classification.attack_family is None
     assert case.status == "completed"
     assert case.case_id.startswith("case-")
+
+
+def test_from_orchestrator_state_preserves_classifier_operational_contract():
+    state = {
+        "classification_output": {
+            "attack_family": "ddos",
+            "attack_subtype": "DDoS_TCP",
+            "confidence": 0.88,
+            "family_confidence": 0.94,
+            "decision_threshold": 0.81,
+            "model_name": "xgboost_attack_subtype_jorge14_balanced_20260906",
+            "model_task": "attack_subtype",
+            "taxonomy_version": JORGE_TAXONOMY_VERSION,
+            "top_scores": {"DDoS_TCP": 0.88, "DDoS_UDP": 0.06},
+            "family_scores": {"ddos": 0.94},
+        }
+    }
+    classification = CaseResult.from_orchestrator_state(state).classification
+    assert classification.model_task == "attack_subtype"
+    assert classification.taxonomy_version == JORGE_TAXONOMY_VERSION
+    assert classification.decision_threshold == 0.81
+    assert classification.model_name.endswith("_20260906")
+    assert classification.family_confidence == 0.94
+    assert classification.family_scores == {"ddos": 0.94}
+
+
+def test_from_orchestrator_state_preserves_typed_mitigation_contract():
+    state = {
+        "classification_output": {
+            "attack_family": "botnet",
+            "attack_subtype": "Command_and_Control",
+            "confidence": 0.93,
+            "model_task": "attack_subtype",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        },
+        "explanation_output": {
+            "risk_summary": "Canal de mando y control observado",
+            "mitigations": ["aislar el dispositivo"],
+            "confidence": 0.93,
+            "attack_family": "botnet",
+            "attack_subtype": "Command_and_Control",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "catalog_scope": "attack_type",
+            "catalog_version": "2.0",
+            "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "catalog_compatible_taxonomy_versions": [
+                MULTIDATASET_TAXONOMY_VERSION,
+                JORGE_TAXONOMY_VERSION,
+            ],
+            "reference_quality": {"capec": "generic_malware"},
+            "source": "catalog",
+        },
+        "judge_output": {
+            "action": "approve",
+            "approved": True,
+            "final_label": "Command_and_Control",
+            "final_confidence": 0.93,
+        },
+    }
+
+    case = CaseResult.from_orchestrator_state(state)
+
+    assert case.classification.attack_subtype == "Command_and_Control"
+    assert case.explanation.attack_family == "botnet"
+    assert case.explanation.attack_subtype == "Command_and_Control"
+    assert case.explanation.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
+    assert case.explanation.catalog_scope == "attack_type"
+    assert case.explanation.catalog_version == "2.0"
+    assert (
+        case.explanation.catalog_taxonomy_version
+        == MULTIDATASET_TAXONOMY_VERSION
+    )
+    assert set(case.explanation.catalog_compatible_taxonomy_versions) == {
+        JORGE_TAXONOMY_VERSION,
+        MULTIDATASET_TAXONOMY_VERSION,
+    }
+    assert (
+        case.classification.taxonomy_version
+        in case.explanation.catalog_compatible_taxonomy_versions
+    )
+    assert case.explanation.reference_quality == {"capec": "generic_malware"}
+
+    restored = CaseResult.model_validate_json(case.model_dump_json())
+    assert restored.explanation == case.explanation
 
 
 def test_append_trace_state_helper_does_not_mutate():

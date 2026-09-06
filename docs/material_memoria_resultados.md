@@ -61,7 +61,7 @@ importa módulos de evaluación. Sus métricas proceden de la campaña final
 | Modelo desplegado | Test (multi-dataset) | Métrica |
 |---|---:|---|
 | Detección binaria (`xgboost_detection_validation_2026_20260822`) | n=5.064 | F1 0.9676; F1 0.977 sobre casos decididos |
-| Familia (`xgboost_attack_family_validation_2026_20260822`) | n=2.088 | weighted-F1 0.9107; 0.953 sobre casos decididos |
+| Tipos de ataque (`xgboost_attack_subtype_multidataset16_balanced500_20260906`) | n=1.200 balanceado | macro-F1 0.8917; 0.9507 sobre casos decididos |
 
 Punto para la memoria: ambos modelos operacionales comparten una representación
 canónica multi-dataset y aplican abstención o revisión humana en las regiones
@@ -71,12 +71,12 @@ de menor confianza; no deben confundirse con los modelos históricos de julio.
 
 Procedencia: lectura de `TFM_Jorge_Juan_Tejero-Threat_IoT.pdf` (Tabla 3.4)
 y su versión artículo (arXiv:2507.02390, Tabla 3); catálogo
-`src/mcp/data/threat_intel_catalog.json` v1.1; tool MCP
+`src/mcp/data/threat_intel_catalog.json` v2.0; tool MCP
 `get_jorge_capec_coverage` (verificado 14/14 por test y por el auditor).
 
 | Dimensión | TFM previo (Jorge) | Este TFM |
 |---|---|---|
-| Documentación | Solo MITRE CAPEC (mapeo manual de 14 clases) | Superset del mapeo CAPEC de Jorge (14/14) + técnicas ATT&CK + mitigaciones ATT&CK M-* |
+| Documentación | Solo MITRE CAPEC (mapeo manual de 14 clases) | Catálogo específico para 16 tipos, que conserva el mapeo CAPEC de Jorge (14/14) y añade técnicas y mitigaciones ATT&CK |
 | Generación | LLM libre (DeepSeek, temp 0.7) sobre contramedidas genéricas | LLM **anclado al catálogo**: solo contextualiza; todo lo no respaldado queda marcado `llm_suggested` |
 | Priorización | No | Fases contención / erradicación / prevención + acciones por `schema_profile` |
 | Trazabilidad | No (texto plano) | Procedencia por ítem (`MitigationItem.source`) y referencias con URL |

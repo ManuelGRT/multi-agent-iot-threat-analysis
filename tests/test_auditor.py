@@ -8,10 +8,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from src.agents.final.auditor import (
     CaseAuditor,
     canonical_leakage_issues,
     feature_leakage_issues,
+)
+from src.contracts.attack_taxonomy import (
+    JORGE_TAXONOMY_VERSION,
+    MULTIDATASET_TAXONOMY_VERSION,
 )
 from src.contracts.leakage import contains_predictive_target_text
 from src.contracts.case import (
@@ -79,6 +85,31 @@ def clean_attack_case(**overrides) -> CaseResult:
     return case.close()
 
 
+def typed_explanation(
+    *,
+    attack_subtype: str = "DDoS_TCP",
+    attack_family: str = "ddos",
+    taxonomy_version: str = JORGE_TAXONOMY_VERSION,
+) -> ExplanationInfo:
+    return ExplanationInfo(
+        summary=attack_subtype,
+        mitigations=["rate_limit"],
+        references=[ThreatReference(attack_id="T1498", source="catalog")],
+        confidence=0.95,
+        attack_family=attack_family,
+        attack_subtype=attack_subtype,
+        taxonomy_version=taxonomy_version,
+        catalog_scope="attack_type",
+        catalog_version="2.0",
+        catalog_taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+        catalog_compatible_taxonomy_versions=[
+            MULTIDATASET_TAXONOMY_VERSION,
+            JORGE_TAXONOMY_VERSION,
+        ],
+        source="catalog",
+    )
+
+
 def clean_benign_case(**overrides) -> CaseResult:
     defaults = dict(
         canonical_event=dict(CANONICAL_EVENT),
@@ -106,6 +137,188 @@ def test_clean_attack_case_is_approved():
         if check.check == "consistencia_catalogo_sin_llm_suggested"
     )
     assert catalog_check.detail is None
+
+
+def test_auditor_validates_subtype_family_and_top_score_coherence():
+    coherent = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_family="ddos",
+            attack_subtype="DDoS_TCP",
+            confidence=0.91,
+            family_confidence=0.97,
+            model_task="attack_subtype",
+            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
+            family_scores={"ddos": 0.97, "injection": 0.03},
+        ),
+        explanation=typed_explanation(),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.91,
+        ),
+    )
+    assert auditor.audit(coherent).verdict == "approve"
+
+    mismatch = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_family="malware",
+            attack_subtype="DDoS_TCP",
+            confidence=0.91,
+            family_confidence=0.97,
+            model_task="attack_subtype",
+            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
+            family_scores={"ddos": 0.97, "injection": 0.03},
+        ),
+        explanation=typed_explanation(attack_family="malware"),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.91,
+        ),
+    )
+    report = auditor.audit(mismatch)
+    assert report.verdict == "reject"
+    assert any("consistencia_subtipo_vs_familia" in issue for issue in report.issues)
+
+
+def test_auditor_accepts_multidataset_subtype_contract():
+    case = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_family="ddos",
+            attack_subtype="DoS",
+            confidence=0.88,
+            family_confidence=0.95,
+            model_task="attack_subtype",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            top_scores={"DoS": 0.88, "DDoS_TCP": 0.07, "Command_and_Control": 0.05},
+            family_scores={"ddos": 0.95, "botnet": 0.05},
+        ),
+        explanation=typed_explanation(
+            attack_subtype="DoS",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+        ),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DoS",
+            final_confidence=0.88,
+        ),
+    )
+
+    assert auditor.audit(case).verdict == "approve"
+
+
+def test_auditor_validates_full_subtype_contract_and_dynamic_threshold():
+    case = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_family="ddos",
+            attack_subtype="DDoS_TCP",
+            confidence=0.80,
+            family_confidence=0.92,
+            decision_threshold=0.81,
+            model_name="xgboost_attack_subtype_jorge14_balanced_20260906",
+            model_task="attack_subtype",
+            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.80, "DDoS_UDP": 0.12, "XSS": 0.08},
+            family_scores={"ddos": 0.92, "injection": 0.08},
+        ),
+        explanation=typed_explanation(),
+        judge=JudgeInfo(
+            action="human_interrupt",
+            approved=False,
+            requires_human_review=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.80,
+        ),
+    )
+    report = auditor.audit(case)
+    assert report.verdict == "review", report.issues
+    threshold_check = next(
+        check
+        for check in report.checks
+        if check.check == "umbral_confianza_clasificacion_derivada"
+    )
+    assert threshold_check.passed
+    assert "threshold=0.81" in (threshold_check.detail or "")
+
+
+def test_auditor_rejects_wrong_subtype_taxonomy_and_invalid_top_score():
+    case = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_family="ddos",
+            attack_subtype="DDoS_TCP",
+            confidence=0.91,
+            model_task="attack_subtype",
+            taxonomy_version="obsolete",
+            top_scores={"DDoS_TCP": 0.91, "Novel_Attack": 0.09},
+        ),
+        explanation=typed_explanation(taxonomy_version="obsolete"),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.91,
+        ),
+    )
+    report = auditor.audit(case)
+    assert report.verdict == "reject"
+    assert any("consistencia_version_taxonomia" in issue for issue in report.issues)
+    assert any("consistencia_top_scores_subtipos" in issue for issue in report.issues)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_check"),
+    [
+        ("attack_subtype", "DDoS_UDP", "consistencia_mitigacion_subtipo"),
+        ("attack_family", "malware", "consistencia_mitigacion_familia"),
+        (
+            "taxonomy_version",
+            MULTIDATASET_TAXONOMY_VERSION,
+            "consistencia_mitigacion_taxonomia",
+        ),
+        ("catalog_scope", "family", "consistencia_mitigacion_catalogo_tipado"),
+        ("catalog_version", None, "consistencia_mitigacion_catalogo_tipado"),
+        (
+            "catalog_compatible_taxonomy_versions",
+            [MULTIDATASET_TAXONOMY_VERSION],
+            "consistencia_mitigacion_catalogo_tipado",
+        ),
+    ],
+)
+def test_auditor_rejects_typed_mitigation_contract_mismatch(
+    field, value, expected_check
+):
+    explanation = typed_explanation()
+    setattr(explanation, field, value)
+    case = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_family="ddos",
+            attack_subtype="DDoS_TCP",
+            confidence=0.91,
+            family_confidence=0.97,
+            model_task="attack_subtype",
+            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
+            family_scores={"ddos": 0.97, "injection": 0.03},
+        ),
+        explanation=explanation,
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.91,
+        ),
+    )
+
+    report = auditor.audit(case)
+
+    assert report.verdict == "reject"
+    failed = next(check for check in report.checks if check.check == expected_check)
+    assert failed.passed is False
 
 
 def test_clean_benign_case_is_approved():

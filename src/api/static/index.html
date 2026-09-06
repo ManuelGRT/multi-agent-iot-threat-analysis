@@ -314,6 +314,58 @@ const AUDIT_CHECK_INFO = {
     label: "Familia realmente maliciosa",
     description: "Comprueba que un ataque no esté clasificado como benigno o normal.",
   },
+  "consistencia_modelo_familia_sin_subtipo": {
+    label: "Salida de familia sin tipo",
+    description: "Comprueba que el modelo antiguo no mezcle una familia con un tipo no producido por él.",
+  },
+  "consistencia_subtipo_en_taxonomia": {
+    label: "Tipo de ataque reconocido",
+    description: "Comprueba que el tipo predicho pertenezca a las clases admitidas por la taxonomía declarada.",
+  },
+  "consistencia_subtipo_presente": {
+    label: "Tipo de ataque presente",
+    description: "Comprueba que el clasificador por tipos haya devuelto un tipo de ataque.",
+  },
+  "consistencia_version_taxonomia": {
+    label: "Taxonomía vigente",
+    description: "Comprueba que el modelo use una versión de taxonomía reconocida por el sistema.",
+  },
+  "consistencia_top_scores_subtipos": {
+    label: "Top-3 de tipos válido",
+    description: "Comprueba que sus etiquetas sean admitidas y sus puntuaciones estén entre 0 y 1.",
+  },
+  "consistencia_puntuacion_familia": {
+    label: "Puntuación familiar coherente",
+    description: "Comprueba que la confianza de la familia coincida con la suma de sus tipos de ataque.",
+  },
+  "consistencia_subtipo_vs_familia": {
+    label: "Tipo y familia coherentes",
+    description: "Comprueba que la familia amplia corresponda al tipo de ataque predicho.",
+  },
+  "consistencia_subtipo_vs_top_scores": {
+    label: "Tipo coherente con el top-3",
+    description: "Comprueba que el tipo elegido tenga la mayor puntuación y coincida con la confianza.",
+  },
+  "consistencia_mitigacion_subtipo": {
+    label: "Mitigación para el tipo correcto",
+    description: "Comprueba que el mitigador conserve el tipo de ataque predicho.",
+  },
+  "consistencia_mitigacion_familia": {
+    label: "Mitigación para la familia correcta",
+    description: "Comprueba que el mitigador conserve la familia amplia del ataque.",
+  },
+  "consistencia_mitigacion_taxonomia": {
+    label: "Taxonomía de mitigación coherente",
+    description: "Comprueba que clasificador y mitigador identifiquen la misma versión de clases.",
+  },
+  "consistencia_mitigacion_catalogo_tipado": {
+    label: "Catálogo específico válido",
+    description: "Comprueba que las medidas procedan del catálogo versionado del tipo predicho.",
+  },
+  "consistencia_veredicto_juez_subtipo": {
+    label: "Veredicto conserva el tipo",
+    description: "Comprueba que la etiqueta y la confianza finales correspondan al tipo predicho.",
+  },
   "consistencia_estado_vs_juez": {
     label: "Estado coherente con el juez",
     description: "Comprueba que un caso completado haya sido aprobado sin revisión pendiente.",
@@ -538,6 +590,31 @@ function formatAuditDetail(check) {
     case "consistencia_benigno_sin_familia":
     case "consistencia_malicioso_no_benigno":
       return `Familia asignada: ${auditFamily(auditField(raw, "familia"))}`;
+    case "consistencia_subtipo_en_taxonomia":
+    case "consistencia_subtipo_presente":
+      return `Tipo de ataque: ${auditField(raw, "subtipo") || "no disponible"}`;
+    case "consistencia_modelo_familia_sin_subtipo":
+      return `Tipo de ataque inesperado: ${auditField(raw, "subtipo") || "ninguno"}`;
+    case "consistencia_version_taxonomia":
+      return `Versión recibida: ${auditField(raw, "recibida") || "no disponible"} · Versión esperada: ${auditField(raw, "esperada") || "no disponible"}`;
+    case "consistencia_top_scores_subtipos":
+      return `Puntuaciones recibidas: ${auditField(raw, "cantidad") || "0"} · Incluye el tipo elegido: ${auditYesNo(auditField(raw, "incluye_elegido"))}`;
+    case "consistencia_puntuacion_familia":
+      return `Familia: ${auditFamily(auditField(raw, "familia"))} · Confianza agregada: ${auditPercent(auditField(raw, "confidence"))}`;
+    case "consistencia_subtipo_vs_familia":
+      return `Tipo: ${auditField(raw, "subtipo") || "no disponible"} · Familia: ${auditFamily(auditField(raw, "familia"))} · Familia esperada: ${auditFamily(auditField(raw, "esperada"))}`;
+    case "consistencia_subtipo_vs_top_scores":
+      return `Tipo elegido: ${auditField(raw, "subtipo") || "no disponible"} · Primero del top-3: ${auditField(raw, "top") || "no disponible"} · Confianza: ${auditPercent(auditField(raw, "confidence"))}`;
+    case "consistencia_mitigacion_subtipo":
+      return `Tipo del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Tipo del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
+    case "consistencia_mitigacion_familia":
+      return `Familia del mitigador: ${auditFamily(auditField(raw, "mitigador"))} · Familia del clasificador: ${auditFamily(auditField(raw, "clasificador"))}`;
+    case "consistencia_mitigacion_taxonomia":
+      return `Taxonomía del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Taxonomía del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
+    case "consistencia_mitigacion_catalogo_tipado":
+      return `Ámbito del catálogo: ${auditField(raw, "scope") || "no disponible"} · Versión: ${auditField(raw, "version") || "no disponible"} · Taxonomía: ${auditField(raw, "taxonomia_catalogo") || "no disponible"}`;
+    case "consistencia_veredicto_juez_subtipo":
+      return `Veredicto del juez: ${auditField(raw, "juez") || "no disponible"} · Resultado del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
     case "consistencia_abstencion_flaggeada":
       return `Estado: ${status()} · Acción del juez: ${auditAction(auditField(raw, "action"))}`;
     case "consistencia_abstencion_estandarizador_flaggeada": {
@@ -571,7 +648,7 @@ function formatAuditDetail(check) {
     case "umbral_zona_gris_abstiene":
       return `Probabilidad maliciosa: ${probability()}`;
     case "umbral_confianza_clasificacion_derivada":
-      return `Confianza de clasificación: ${auditPercent(auditField(raw, "confidence"))}`;
+      return `Confianza de clasificación: ${auditPercent(auditField(raw, "confidence"))} · Umbral aplicado: ${auditPercent(auditField(raw, "threshold"))}`;
     default:
       return raw;
   }
@@ -676,15 +753,18 @@ function pintarTarjetas(caso) {
     <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${escapeHtml(det.model_name ?? "—")}</span></div>`;
 
   if (cls.attack_family) {
+    const decisionThreshold = Number.isFinite(Number(cls.decision_threshold))
+      ? Number(cls.decision_threshold) : 0.65;
     const filas = Object.entries(cls.top_scores || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
       .map(([f, s]) => `<div class="scorefila"><span>${escapeHtml(f)}</span>
         <div class="barra"><div class="relleno" style="width:${ratioWidth(s)}%"></div></div>
         <span>${pct(s)}</span></div>`).join("");
     $("#t-cls .cuerpo").innerHTML = `
+      ${cls.attack_subtype ? `<div class="kv"><span class="k">Tipo de ataque</span><span><b>${escapeHtml(cls.attack_subtype)}</b></span></div>` : ""}
       <div class="kv"><span class="k">Familia</span><span><b>${escapeHtml(cls.attack_family)}</b></span></div>
       <div class="kv"><span class="k">Confianza</span><span>${pct(cls.confidence)}
-        ${cls.confidence < 0.65 ? ' <span class="badge warn">&lt; 0,65 → revisión</span>' : ""}</span></div>
-      <p style="margin:6px 0 2px;color:var(--gris);font-size:11.5px">Distribución top-3</p>${filas}`;
+        ${cls.confidence < decisionThreshold ? ` <span class="badge warn">&lt; ${pct(decisionThreshold)} → revisión</span>` : ""}</span></div>
+      <p style="margin:6px 0 2px;color:var(--gris);font-size:11.5px">Distribución top-3${cls.attack_subtype ? " de tipos de ataque" : ""}</p>${filas}`;
   } else {
     $("#t-cls .cuerpo").innerHTML = '<p style="color:var(--gris)">No ejecutado (evento benigno o abstención del detector).</p>';
   }

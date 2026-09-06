@@ -60,7 +60,7 @@ controlada sin convertir una excepción en un resultado benigno.
 |---|---|---|
 | `FinalStandardizer` | Entrada limpia `row` o `text`; busca un éxito Mistral por hash exacto y, ante un *miss*, llama obligatoriamente a Mistral | Evento canónico, procedencia y confianza; cualquier fallo o confianza menor de 0,5 deriva al juez |
 | `FinalDetector` | Modelo XGBoost binario empaquetado | Veredicto y probabilidad; zona gris `[0.4, 0.6]` implica abstención |
-| `FinalClassifier` | Modelo XGBoost multiclase empaquetado | Familia, confianza y puntuaciones principales; confianza menor de 0,65 solicita revisión |
+| `FinalClassifier` | Modelo XGBoost multiclase balanceado y empaquetado | Uno de 16 tipos, familia agregada, confianza y top-3; confianza menor de 0,80 solicita revisión |
 | `FinalMitigator` | Base del catálogo y contextualización Mistral por defecto | Explicación, recomendaciones y referencias con procedencia explícita |
 | `FinalJudge` | Reglas sobre todas las salidas y errores | `approve` o `human_interrupt` |
 | `CaseAuditor` | Revisión posterior del caso persistido | `approve`, `review` o `reject` por coherencia, trazabilidad, umbrales y fugas |
@@ -99,7 +99,7 @@ Los dos artefactos activos están incluidos como recursos del paquete y se
 deserializan mediante el contrato estable `src/contracts/inference.py`:
 
 - `xgboost_detection_validation_2026_20260822.joblib`;
-- `xgboost_attack_family_validation_2026_20260822.joblib`.
+- `xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib`.
 
 El registro de modelos los carga de forma perezosa una sola vez por proceso.
 El contrato de inferencia no importa módulos de evaluación ni agentes de

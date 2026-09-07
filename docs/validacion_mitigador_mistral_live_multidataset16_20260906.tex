@@ -164,14 +164,92 @@ catálogo exacto autorizado para ese tipo. El juez generó
 resultado no es un fallo del auditor, sino la confirmación de que la derivación
 se realizó de acuerdo con la política.
 
-Como medida léxica auxiliar se comparó cada uno de los 111 campos
-\texttt{context} anclados con la medida base a la que el propio modelo los
-asoció. La media de ROUGE-L fue 0,2057 y la similitud coseno TF--IDF fue 0,2813;
-ningún contexto fue idéntico a su base tras la normalización. Estos valores
-indican que hubo una ampliación textual, pero no miden corrección técnica ni
-fidelidad semántica. La base catalogada no es una referencia independiente y
-la asociación mediante \texttt{base\_id} procede de la propia respuesta del
-modelo.
+\subsection*{Similitud léxica de las contextualizaciones}
+
+Como análisis auxiliar se compararon los 111 campos \texttt{context} anclados
+con dos textos distintos. El primero fue la medida base del catálogo a la que
+Mistral asoció cada contexto mediante \texttt{base\_id}. El segundo fue una
+referencia contextualizada redactada para cada medida con apoyo de OpenAI
+Codex. Para reducir la contaminación entre evaluado y referencia, durante esta
+redacción solo se proporcionaron la evidencia del evento canónico y la medida
+catalogada; el texto candidato de Mistral permaneció oculto. Las 111
+referencias se congelaron antes de calcular las métricas.
+
+Se emplearon ROUGE-L, calculado como la F1 de la subsecuencia común más larga
+tras normalización por tokens, y la similitud coseno de vectores TF--IDF. Para
+el coseno se ajustó por separado el espacio candidato--catálogo y el espacio
+candidato--referencia. La Tabla~\ref{tab:mitigador_similitud_tipo} presenta las
+medias por tipo; la fila global es una media ponderada por los 111 contextos.
+
+\begin{table}[H]
+    \centering
+    \scriptsize
+    \caption{Similitud de los contextos de Mistral con el catálogo y con la
+    referencia contextualizada asistida por IA}
+    \label{tab:mitigador_similitud_tipo}
+    \begin{tabular}{P{3.05cm} r r r r r}
+        \hline
+        \textbf{Tipo} & \textbf{$n$} &
+        \shortstack{\textbf{ROUGE-L}\\\textbf{catálogo}} &
+        \shortstack{\textbf{Coseno}\\\textbf{catálogo}} &
+        \shortstack{\textbf{ROUGE-L}\\\textbf{referencia}} &
+        \shortstack{\textbf{Coseno}\\\textbf{referencia}} \\
+        \hline
+        \texttt{Backdoor} & 7 & 0,1983 & 0,2613 & 0,2733 & 0,2124 \\
+        \hline
+        \texttt{Command\_and\_Control} & 8 & 0,1854 & 0,2409 & 0,1782 & 0,1784 \\
+        \hline
+        \texttt{DDoS\_HTTP} & 7 & 0,2699 & 0,3425 & 0,2595 & 0,2299 \\
+        \hline
+        \texttt{DDoS\_ICMP} & 7 & 0,2026 & 0,2754 & 0,1701 & 0,1620 \\
+        \hline
+        \texttt{DDoS\_TCP} & 7 & 0,1998 & 0,3012 & 0,2216 & 0,2643 \\
+        \hline
+        \texttt{DDoS\_UDP} & 5 & 0,2105 & 0,3150 & 0,1432 & 0,1851 \\
+        \hline
+        \texttt{DoS} & 7 & 0,1855 & 0,2619 & 0,2104 & 0,2374 \\
+        \hline
+        \texttt{Fingerprinting} & 7 & 0,1534 & 0,1937 & 0,2024 & 0,1561 \\
+        \hline
+        \texttt{MITM} & 7 & 0,2420 & 0,3329 & 0,3017 & 0,2799 \\
+        \hline
+        \texttt{Password} & 7 & 0,1658 & 0,2597 & 0,2386 & 0,2168 \\
+        \hline
+        \texttt{Port\_Scanning} & 7 & 0,2488 & 0,2821 & 0,2683 & 0,2514 \\
+        \hline
+        \texttt{Ransomware} & 7 & 0,2474 & 0,3159 & 0,2328 & 0,2079 \\
+        \hline
+        \texttt{SQL\_injection} & 7 & 0,1813 & 0,3023 & 0,1725 & 0,1689 \\
+        \hline
+        \texttt{Uploading} & 7 & 0,1893 & 0,2744 & 0,1797 & 0,1772 \\
+        \hline
+        \texttt{Vulnerability\_scanner} & 7 & 0,2395 & 0,3057 & 0,1923 & 0,2149 \\
+        \hline
+        \texttt{XSS} & 7 & 0,1756 & 0,2505 & 0,1643 & 0,1692 \\
+        \hline
+        \textbf{Media ponderada} & \textbf{111} & \textbf{0,2057} &
+        \textbf{0,2813} & \textbf{0,2140} & \textbf{0,2071} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+Frente a la referencia contextualizada, la media de ROUGE-L fue 0,2140 y la
+del coseno TF--IDF, 0,2071. Frente al catálogo fueron 0,2057 y 0,2813,
+respectivamente. La diferencia entre métricas no constituye una contradicción:
+ROUGE-L premia el orden de subsecuencias compartidas, mientras que el coseno
+TF--IDF pondera el vocabulario discriminativo del conjunto. Tampoco debe
+interpretarse una similitud mayor como mayor corrección técnica. Las
+referencias asistidas introducen detalles del evento y cautelas ante evidencia
+insuficiente, por lo que pueden expresar una acción compatible con palabras
+distintas de las utilizadas por Mistral.
+
+Las 111 referencias, redactadas con apoyo de IA, fueron revisadas manualmente
+una a una por el autor. La aprobación individual, la identidad del revisor y la
+fecha de revisión quedaron registradas en el artefacto utilizado para repetir
+el cálculo (111/111 aprobadas). Esta revisión permite descartar errores
+observables respecto del evento y del catálogo, pero no convierte el conjunto
+en un patrón oro experto independiente: la referencia sigue siendo asistida
+por IA y validada por el propio autor del trabajo.
 
 \subsection*{Inspección cualitativa asistida de las contextualizaciones}
 

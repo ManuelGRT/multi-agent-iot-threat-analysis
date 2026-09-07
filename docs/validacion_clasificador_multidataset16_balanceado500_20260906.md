@@ -308,8 +308,8 @@ estandarización. El modelo generado ocupa 2.018.126 bytes. Tras revisar sus
 métricas, su contrato y su reproducción determinista, el artefacto con hash
 `9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5`
 se promocionó como clasificador predeterminado del paquete. La variable
-`TFM_FAMILY_MODEL` conserva la posibilidad de seleccionar explícitamente otro
-artefacto compatible.
+`TFM_ATTACK_TYPE_MODEL` conserva la posibilidad de seleccionar explícitamente
+otro artefacto compatible.
 
 Con 0,65, el riesgo selectivo de test es 0,0671 y la aceptación del conjunto
 ambiguo/excluido es 0,6990. Ambos superan los límites conservadores de 0,05 y

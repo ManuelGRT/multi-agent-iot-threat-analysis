@@ -217,6 +217,87 @@ def train_global_family_classifier(
     return result
 
 
+def train_labelled_attack_subtype_classifier(
+    labelled_records: Sequence[tuple[PreparedRecord, str]]
+    | Iterable[tuple[PreparedRecord, str]],
+    *,
+    taxonomy_mapping: Mapping[str, Any],
+    model_path: str | Path | None = None,
+    estimator_factory: EstimatorFactoryProtocol | None = None,
+    parameter_overrides: Mapping[str, Any] | None = None,
+    seed: int = 42,
+) -> CandidateTrainingResult:
+    """Entrena un clasificador de subtipos sobre filas ya mapeadas/balanceadas.
+
+    La preparacion de la taxonomia y el balanceo se mantienen fuera de esta
+    funcion para que puedan auditarse antes de ajustar el estimador. Aqui se
+    vuelven a aplicar las invariantes de deduplicacion y split como defensa en
+    profundidad.
+    """
+
+    labelled = tuple(labelled_records)
+    if not taxonomy_mapping.get("version"):
+        raise ProductionModelError("taxonomy_mapping requiere una version")
+    declared_classes = taxonomy_mapping.get(
+        "training_classes", taxonomy_mapping.get("attack_classes")
+    )
+    if declared_classes is not None:
+        declared = {str(label) for label in declared_classes}
+        observed = {str(label) for _record, label in labelled}
+        if observed != declared:
+            raise ProductionModelError(
+                "Las etiquetas observadas no coinciden con training_classes: "
+                f"missing={sorted(declared - observed)}, "
+                f"unexpected={sorted(observed - declared)}"
+            )
+    result = _train_candidate(
+        labelled,
+        task="attack_subtype",
+        skipped={},
+        estimator_factory=estimator_factory,
+        parameter_overrides=parameter_overrides,
+        family_mapping=taxonomy_mapping,
+        random_state=seed,
+    )
+    if model_path is not None:
+        _persist_result(result, model_path)
+    return result
+
+
+def persist_candidate_model(
+    result: CandidateTrainingResult,
+    path: str | Path,
+    *,
+    confidence_threshold: float | None = None,
+    model_name: str | None = None,
+) -> CandidateTrainingResult:
+    """Persiste atómicamente un candidato evaluado y su contrato operativo."""
+
+    if result.artifact_path is not None:
+        raise ProductionModelError("El candidato ya fue persistido")
+    if confidence_threshold is not None:
+        if isinstance(confidence_threshold, bool) or not isinstance(
+            confidence_threshold, (int, float)
+        ):
+            raise ProductionModelError("confidence_threshold debe ser numérico")
+        if not 0.0 <= float(confidence_threshold) <= 1.0:
+            raise ProductionModelError("confidence_threshold debe estar entre 0 y 1")
+        result.model.confidence_threshold = float(confidence_threshold)
+    if model_name is not None:
+        normalised_name = str(model_name).strip()
+        if not normalised_name:
+            raise ProductionModelError("model_name no puede estar vacío")
+        result.model.model_name = normalised_name
+    result.report["operational_contract"] = {
+        "confidence_threshold": result.model.confidence_threshold,
+        "model_name": result.model.model_name,
+        "task": result.model.task,
+        "taxonomy_version": result.model.family_mapping_version,
+    }
+    _persist_result(result, path)
+    return result
+
+
 def deduplicate_labelled_records(
     labelled_records: Sequence[tuple[PreparedRecord, bool | str]]
     | Iterable[tuple[PreparedRecord, bool | str]],
@@ -342,6 +423,7 @@ def _train_candidate(
     estimator_factory: EstimatorFactoryProtocol | None,
     parameter_overrides: Mapping[str, Any] | None,
     family_mapping: Mapping[str, Any] | None,
+    random_state: int = 42,
 ) -> CandidateTrainingResult:
     deduplicated, dedup_report = deduplicate_labelled_records(labelled)
     by_split: dict[str, list[tuple[PreparedRecord, bool | str]]] = {
@@ -372,7 +454,7 @@ def _train_candidate(
         classes = tuple(sorted({str(label) for label in train_labels}))
         if len(classes) < 2:
             raise ProductionModelError(
-                "attack_family requiere al menos dos familias en train tras deduplicar"
+                f"{task} requiere al menos dos clases en train tras deduplicar"
             )
 
     class_to_index = {label: index for index, label in enumerate(classes)}
@@ -400,7 +482,10 @@ def _train_candidate(
     )
 
     parameters = _effective_parameters(
-        task, len(classes), parameter_overrides=parameter_overrides
+        task,
+        len(classes),
+        parameter_overrides=parameter_overrides,
+        random_state=random_state,
     )
     factory = estimator_factory or _default_estimator_factory
     estimator = factory(task=task, n_classes=len(classes), parameters=dict(parameters))
@@ -421,7 +506,9 @@ def _train_candidate(
         task=task,
         feature_schema_sha256=feature_schema_sha256,
         family_mapping_version=(
-            FAMILY_MAPPING_VERSION if task == "attack_family" else None
+            str(family_mapping["version"])
+            if family_mapping is not None and family_mapping.get("version")
+            else None
         ),
     )
 
@@ -481,7 +568,8 @@ def _train_candidate(
         "artifact": None,
     }
     if family_mapping is not None:
-        report["family_mapping"] = dict(family_mapping)
+        mapping_key = "taxonomy_mapping" if task == "attack_subtype" else "family_mapping"
+        report[mapping_key] = dict(family_mapping)
     return CandidateTrainingResult(model=model, report=report)
 
 
@@ -539,8 +627,12 @@ def _effective_parameters(
     n_classes: int,
     *,
     parameter_overrides: Mapping[str, Any] | None,
+    random_state: int = 42,
 ) -> dict[str, Any]:
+    if isinstance(random_state, bool) or not isinstance(random_state, int):
+        raise ProductionModelError("random_state debe ser un entero")
     parameters = dict(BASE_XGBOOST_PARAMETERS)
+    parameters["random_state"] = random_state
     uses_binary_objective = n_classes == 2
     parameters.update(
         {
@@ -740,7 +832,9 @@ __all__ = [
     "deduplicate_labelled_records",
     "family_mapping_report",
     "map_attack_family",
+    "persist_candidate_model",
     "train_global_detector",
     "train_global_family_classifier",
+    "train_labelled_attack_subtype_classifier",
     "train_production_candidates",
 ]

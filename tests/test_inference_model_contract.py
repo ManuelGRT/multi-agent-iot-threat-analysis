@@ -16,8 +16,8 @@ MODEL_DIR = REPO_ROOT / "src" / "mcp" / "data" / "models"
 ACTIVE_MODELS = {
     "detection": MODEL_DIR
     / "xgboost_detection_validation_2026_20260822.joblib",
-    "family": MODEL_DIR
-    / "xgboost_attack_family_validation_2026_20260822.joblib",
+    "classifier": MODEL_DIR
+    / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
 }
 PROBE_ROWS = [
     {},
@@ -50,20 +50,27 @@ PROBE_ROWS = [
             [False, False, False],
         ),
         (
-            "family",
-            "attack_family",
+            "classifier",
+            "attack_subtype",
             [
-                "botnet",
-                "bruteforce",
-                "ddos",
-                "exfiltration",
-                "injection",
-                "malware",
-                "mitm",
-                "scanning",
-                "unknown_attack",
+                "Backdoor",
+                "Command_and_Control",
+                "DDoS_HTTP",
+                "DDoS_ICMP",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "Fingerprinting",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "Uploading",
+                "Vulnerability_scanner",
+                "XSS",
             ],
-            ["injection", "injection", "injection"],
+            ["Password", "Password", "Password"],
         ),
     ],
 )
@@ -82,6 +89,8 @@ def test_active_model_loads_from_runtime_contract_and_predicts(
     assert type(model).__module__ == "src.contracts.inference"
     assert model.task == expected_task
     assert model.classes == expected_classes
+    if name == "classifier":
+        assert model.confidence_threshold == pytest.approx(0.65)
     assert model.predict(PROBE_ROWS) == expected_predictions
     probabilities = model.predict_proba(PROBE_ROWS)
     assert probabilities.shape == (len(PROBE_ROWS), len(expected_classes))
@@ -144,5 +153,5 @@ print(json.dumps({"loaded": loaded, "forbidden": forbidden}, sort_keys=True))
     assert payload["forbidden"] == []
     assert {item["task"] for item in payload["loaded"]} == {
         "binary_detection",
-        "attack_family",
+        "attack_subtype",
     }

@@ -12,7 +12,7 @@ from typing import Any, Literal, Mapping, Sequence
 import numpy as np
 
 
-ProductionTask = Literal["binary_detection", "attack_family"]
+ProductionTask = Literal["binary_detection", "attack_family", "attack_subtype"]
 
 
 class ProductionModelError(ValueError):
@@ -34,6 +34,8 @@ class ProductionXGBoostModel:
     task: ProductionTask
     feature_schema_sha256: str
     family_mapping_version: str | None = None
+    confidence_threshold: float | None = None
+    model_name: str | None = None
 
     @property
     def classes(self) -> list[bool | str]:

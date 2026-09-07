@@ -25,7 +25,7 @@
         <mxCell id="ag2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_detector&lt;/b&gt;&lt;br&gt;detect_event (XGBoost)&lt;br&gt;zona gris 0.4&#8211;0.6&lt;br&gt;&#8594; abstenci&#243;n" vertex="1">
           <mxGeometry height="92" width="220" x="410" y="308" as="geometry" />
         </mxCell>
-        <mxCell id="ag3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_classifier&lt;/b&gt;&lt;br&gt;classify_event&lt;br&gt;familia + confianza&lt;br&gt;+ top-k scores" vertex="1">
+        <mxCell id="ag3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_classifier&lt;/b&gt;&lt;br&gt;classify_event&lt;br&gt;tipo + familia + confianza&lt;br&gt;+ top-3" vertex="1">
           <mxGeometry height="92" width="210" x="670" y="308" as="geometry" />
         </mxCell>
         <mxCell id="ag4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_mitigator&lt;/b&gt;&lt;br&gt;suggest_mitigations + LLM&lt;br&gt;anclado al cat&#225;logo&lt;br&gt;source: catalog | hybrid" vertex="1">
@@ -61,7 +61,7 @@
         <mxCell id="rc3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="SQLite&lt;br&gt;artifacts/case_memory.db" vertex="1">
           <mxGeometry height="52" width="250" x="710" y="688" as="geometry" />
         </mxCell>
-        <mxCell id="rc4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="cat&#225;logo ATT&amp;amp;CK/CAPEC v1.1&lt;br&gt;(superset Tabla 3.4 de Jorge, 14/14)" vertex="1">
+        <mxCell id="rc4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="cat&#225;logo ATT&amp;amp;CK/CAPEC v2.0&lt;br&gt;(16 tipos; conserva Jorge 14/14)" vertex="1">
           <mxGeometry height="52" width="250" x="990" y="688" as="geometry" />
         </mxCell>
         <mxCell id="rc5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="baselines congelados&lt;br&gt;0.9363 vs 0.7479" vertex="1">

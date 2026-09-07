@@ -42,6 +42,7 @@ llm-training = [
     "peft>=0.12",
 ]
 evaluation = [
+    "jsonschema>=4.0",
     "lightgbm==4.7.0",
     "torch>=2.2",
 ]
@@ -58,7 +59,7 @@ exclude = ["src.eval*"]
 "src.mcp" = [
     "data/threat_intel_catalog.json",
     "data/models/xgboost_detection_validation_2026_20260822.joblib",
-    "data/models/xgboost_attack_family_validation_2026_20260822.joblib",
+    "data/models/xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
 ]
 
 [tool.pytest.ini_options]

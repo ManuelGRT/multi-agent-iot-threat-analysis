@@ -1,7 +1,32 @@
 {
-  "version": "1.1",
-  "generated_at": "2026-08-02",
-  "description": "Catalogo determinista de threat intel para el agente de mitigacion. Mapea cada familia de ataque del corpus a tecnicas MITRE ATT&CK, patrones CAPEC y mitigaciones priorizadas. El LLM contextualiza pero no puede salirse del catalogo sin marcarlo como llm_suggested. v1.1: superset del mapeo CAPEC del TFM de Jorge (Tabla 3.4) + tecnicas ATT&CK y mitigaciones M-* que aquel no usaba.",
+  "version": "2.0",
+  "generated_at": "2026-09-06",
+  "description": "Catalogo determinista de threat intel para el agente de mitigacion. La version 2.0 conserva las familias amplias por compatibilidad y anade una entrada operativa especifica para cada uno de los 16 tipos de la taxonomia multidataset. El LLM contextualiza las acciones seleccionadas, pero no puede presentar como auditada ninguna aportacion ajena al catalogo.",
+  "attack_taxonomy": {
+    "version": "multidataset_attack_type_v1_2026-09-06",
+    "compatible_versions": [
+      "multidataset_attack_type_v1_2026-09-06",
+      "jorge_edge_attack_type_v1_2026-09-06"
+    ],
+    "classes": [
+      "Backdoor",
+      "DDoS_HTTP",
+      "DDoS_ICMP",
+      "DDoS_TCP",
+      "DDoS_UDP",
+      "Fingerprinting",
+      "MITM",
+      "Password",
+      "Port_Scanning",
+      "Ransomware",
+      "SQL_injection",
+      "Uploading",
+      "Vulnerability_scanner",
+      "XSS",
+      "DoS",
+      "Command_and_Control"
+    ]
+  },
   "families": {
     "benign": {
       "attack_techniques": [],
@@ -154,6 +179,331 @@
         "prevention": ["escalar a analista con el contexto capturado", "capturar evidencia adicional (pcap/logs) para clasificacion posterior"]
       },
       "note": "Familia no clasificada: priorizar captura de contexto y escalado."
+    }
+  },
+  "attack_types": {
+    "Backdoor": {
+      "family": "malware",
+      "attack_technique_ids": ["T1105", "T1204"],
+      "capec_pattern_ids": ["CAPEC-523"],
+      "attack_mitigation_ref_ids": ["M1049"],
+      "mitigations": {
+        "containment": [
+          "aislar el dispositivo con indicios de backdoor de la red operativa",
+          "bloquear las comunicaciones salientes y transferencias asociadas con la puerta trasera"
+        ],
+        "eradication": [
+          "eliminar la persistencia y reflashear o restaurar el firmware desde una imagen confiable"
+        ],
+        "prevention": [
+          "verificar firma e integridad del firmware antes de cada despliegue",
+          "aplicar antimalware o listas de aplicaciones permitidas en los equipos compatibles"
+        ]
+      },
+      "note": "Respuesta especifica para persistencia o acceso remoto mediante backdoor."
+    },
+    "DDoS_HTTP": {
+      "family": "ddos",
+      "attack_technique_ids": ["T1498"],
+      "capec_pattern_ids": ["CAPEC-125", "CAPEC-488"],
+      "attack_mitigation_ref_ids": ["M1037"],
+      "mitigations": {
+        "containment": [
+          "aplicar rate limiting de peticiones HTTP por origen, ruta y cliente",
+          "activar proteccion DDoS, WAF o proxy inverso delante del servicio HTTP afectado"
+        ],
+        "eradication": [
+          "bloquear temporalmente los origenes persistentes confirmados por la evidencia del flujo"
+        ],
+        "prevention": [
+          "definir limites de conexiones y solicitudes concurrentes en el servicio web",
+          "usar cache, balanceo y capacidad upstream para absorber picos de peticiones HTTP"
+        ]
+      },
+      "note": "Mitigacion de inundacion distribuida en la capa HTTP."
+    },
+    "DDoS_ICMP": {
+      "family": "ddos",
+      "attack_technique_ids": ["T1498"],
+      "capec_pattern_ids": ["CAPEC-125", "CAPEC-487"],
+      "attack_mitigation_ref_ids": ["M1037"],
+      "mitigations": {
+        "containment": [
+          "limitar la tasa de trafico ICMP en el perimetro y en el segmento afectado",
+          "filtrar upstream los tipos ICMP no necesarios durante la inundacion"
+        ],
+        "eradication": [
+          "bloquear los origenes persistentes y retirar reglas temporales cuando finalice el incidente"
+        ],
+        "prevention": [
+          "permitir unicamente los tipos y tasas ICMP necesarios para la operacion",
+          "establecer alertas de volumen ICMP por dispositivo y segmento"
+        ]
+      },
+      "note": "Mitigacion de inundacion distribuida mediante ICMP."
+    },
+    "DDoS_TCP": {
+      "family": "ddos",
+      "attack_technique_ids": ["T1498"],
+      "capec_pattern_ids": ["CAPEC-125", "CAPEC-482"],
+      "attack_mitigation_ref_ids": ["M1037"],
+      "mitigations": {
+        "containment": [
+          "activar SYN cookies y limitar nuevas conexiones TCP por origen",
+          "derivar el trafico TCP anomalo a filtrado o scrubbing upstream"
+        ],
+        "eradication": [
+          "bloquear los origenes persistentes confirmados y eliminar sesiones TCP incompletas"
+        ],
+        "prevention": [
+          "ajustar colas y tiempos de espera de conexion para evitar agotamiento de recursos",
+          "monitorizar tasas SYN, conexiones incompletas y reinicios por servicio"
+        ]
+      },
+      "note": "Mitigacion de inundacion distribuida basada en TCP."
+    },
+    "DDoS_UDP": {
+      "family": "ddos",
+      "attack_technique_ids": ["T1498"],
+      "capec_pattern_ids": ["CAPEC-125", "CAPEC-486"],
+      "attack_mitigation_ref_ids": ["M1037"],
+      "mitigations": {
+        "containment": [
+          "limitar o descartar el trafico UDP dirigido al servicio afectado",
+          "solicitar filtrado anti-spoofing y mitigacion upstream durante la inundacion"
+        ],
+        "eradication": [
+          "bloquear los origenes persistentes y revisar posibles servicios usados para amplificacion"
+        ],
+        "prevention": [
+          "cerrar servicios UDP innecesarios y restringir los restantes mediante listas de control",
+          "establecer baselines y alertas de volumen UDP por puerto y dispositivo"
+        ]
+      },
+      "note": "Mitigacion de inundacion distribuida basada en UDP."
+    },
+    "Fingerprinting": {
+      "family": "scanning",
+      "attack_technique_ids": ["T1595"],
+      "capec_pattern_ids": ["CAPEC-224"],
+      "attack_mitigation_ref_ids": ["M1042"],
+      "mitigations": {
+        "containment": [
+          "limitar o bloquear el origen que realiza fingerprinting repetitivo",
+          "segmentar temporalmente el activo cuya plataforma esta siendo identificada"
+        ],
+        "eradication": [
+          "revisar y retirar banners, respuestas y servicios que revelen informacion innecesaria"
+        ],
+        "prevention": [
+          "reducir la exposicion de versiones y caracteristicas del sistema",
+          "crear reglas IDS para secuencias de sondeo y huellas conocidas"
+        ]
+      },
+      "note": "Respuesta especifica ante identificacion activa de sistema, servicio o dispositivo."
+    },
+    "MITM": {
+      "family": "mitm",
+      "attack_technique_ids": ["T1557"],
+      "capec_pattern_ids": ["CAPEC-94"],
+      "attack_mitigation_ref_ids": ["M1041"],
+      "mitigations": {
+        "containment": [
+          "aislar el segmento en el que se observa la intermediacion maliciosa",
+          "forzar canales cifrados y detener temporalmente comunicaciones no autenticadas"
+        ],
+        "eradication": [
+          "eliminar el nodo intruso y corregir entradas ARP o DNS manipuladas"
+        ],
+        "prevention": [
+          "usar TLS con validacion estricta de certificados para la informacion sensible",
+          "habilitar inspeccion ARP dinamica, DHCP snooping y segmentacion de red"
+        ]
+      },
+      "note": "Respuesta especifica ante adversario en el medio."
+    },
+    "Password": {
+      "family": "bruteforce",
+      "attack_technique_ids": ["T1110"],
+      "capec_pattern_ids": ["CAPEC-112", "CAPEC-49"],
+      "attack_mitigation_ref_ids": ["M1032", "M1027"],
+      "mitigations": {
+        "containment": [
+          "aplicar bloqueo temporal o rate limiting tras intentos de autenticacion fallidos",
+          "bloquear el origen del ataque contra el servicio de autenticacion"
+        ],
+        "eradication": [
+          "rotar las credenciales afectadas e invalidar las sesiones activas asociadas"
+        ],
+        "prevention": [
+          "habilitar autenticacion multifactor donde el dispositivo o servicio lo permita",
+          "eliminar credenciales por defecto y aplicar una politica de contrasenas robustas"
+        ]
+      },
+      "note": "Respuesta especifica ante ataques contra credenciales o contrasenas."
+    },
+    "Port_Scanning": {
+      "family": "scanning",
+      "attack_technique_ids": ["T1046"],
+      "capec_pattern_ids": ["CAPEC-300"],
+      "attack_mitigation_ref_ids": ["M1042"],
+      "mitigations": {
+        "containment": [
+          "bloquear o limitar el origen que recorre puertos de forma automatizada",
+          "aislar el segmento escaneado si el reconocimiento precede a intentos de explotacion"
+        ],
+        "eradication": [
+          "cerrar puertos y servicios expuestos que no sean necesarios para la operacion"
+        ],
+        "prevention": [
+          "aplicar listas de control que permitan solo los puertos y origenes autorizados",
+          "configurar IDS o IPS para detectar barridos horizontales y verticales"
+        ]
+      },
+      "note": "Respuesta especifica ante escaneo de puertos."
+    },
+    "Ransomware": {
+      "family": "malware",
+      "attack_technique_ids": ["T1105", "T1204"],
+      "capec_pattern_ids": ["CAPEC-542"],
+      "attack_mitigation_ref_ids": ["M1049"],
+      "reference_quality": {"capec": "generic_malware"},
+      "mitigations": {
+        "containment": [
+          "aislar inmediatamente el equipo afectado para detener la propagacion",
+          "desconectar recursos compartidos y almacenamiento accesible desde el equipo"
+        ],
+        "eradication": [
+          "preservar evidencias y reconstruir el sistema desde una imagen limpia verificada"
+        ],
+        "prevention": [
+          "mantener copias de seguridad desconectadas y probar periodicamente su restauracion",
+          "reducir privilegios y mantener actualizados firmware, sistema y aplicaciones"
+        ]
+      },
+      "note": "CAPEC-542 se conserva como referencia generica de malware; no identifica por si solo cifrado de datos."
+    },
+    "SQL_injection": {
+      "family": "injection",
+      "attack_technique_ids": ["T1190"],
+      "capec_pattern_ids": ["CAPEC-66"],
+      "attack_mitigation_ref_ids": ["M1051"],
+      "mitigations": {
+        "containment": [
+          "bloquear el payload y el origen observados mediante WAF o reglas equivalentes",
+          "retirar temporalmente el endpoint vulnerable si no puede protegerse de inmediato"
+        ],
+        "eradication": [
+          "revisar logs, eliminar persistencia y rotar credenciales de base de datos expuestas"
+        ],
+        "prevention": [
+          "usar consultas parametrizadas y evitar la concatenacion de entradas en SQL",
+          "validar entradas y actualizar la aplicacion y sus dependencias"
+        ]
+      },
+      "note": "Respuesta especifica ante inyeccion SQL."
+    },
+    "Uploading": {
+      "family": "injection",
+      "attack_technique_ids": ["T1190"],
+      "capec_pattern_ids": ["CAPEC-242"],
+      "attack_mitigation_ref_ids": ["M1051"],
+      "mitigations": {
+        "containment": [
+          "deshabilitar temporalmente la subida vulnerable y poner en cuarentena los ficheros recibidos",
+          "bloquear el origen y los indicadores asociados con la carga maliciosa"
+        ],
+        "eradication": [
+          "eliminar los artefactos subidos y buscar ejecucion o persistencia derivada"
+        ],
+        "prevention": [
+          "aplicar listas permitidas de tipo, tamano y contenido y analizar cada fichero",
+          "almacenar las cargas fuera de rutas ejecutables y actualizar el componente de subida"
+        ]
+      },
+      "note": "Respuesta especifica ante carga de contenido o codigo malicioso."
+    },
+    "Vulnerability_scanner": {
+      "family": "scanning",
+      "attack_technique_ids": ["T1595"],
+      "capec_pattern_ids": ["CAPEC-310"],
+      "attack_mitigation_ref_ids": ["M1042"],
+      "mitigations": {
+        "containment": [
+          "bloquear o limitar el escaner si su actividad no esta autorizada",
+          "aislar el servicio expuesto cuando el escaneo vaya acompanado de intentos de explotacion"
+        ],
+        "eradication": [
+          "validar los hallazgos y corregir las vulnerabilidades confirmadas"
+        ],
+        "prevention": [
+          "mantener inventario y ejecutar escaneos autorizados dentro del ciclo de parcheo",
+          "retirar componentes obsoletos y reducir la superficie publicada"
+        ]
+      },
+      "note": "Respuesta especifica ante busqueda automatizada de vulnerabilidades."
+    },
+    "XSS": {
+      "family": "injection",
+      "attack_technique_ids": ["T1190"],
+      "capec_pattern_ids": ["CAPEC-63"],
+      "attack_mitigation_ref_ids": ["M1051"],
+      "mitigations": {
+        "containment": [
+          "bloquear el payload y el origen XSS mediante WAF o reglas de aplicacion",
+          "deshabilitar temporalmente el formulario o endpoint vulnerable"
+        ],
+        "eradication": [
+          "eliminar contenido persistente inyectado y revocar las sesiones potencialmente afectadas"
+        ],
+        "prevention": [
+          "aplicar codificacion contextual de salida y saneamiento de entradas",
+          "implantar Content Security Policy y actualizar los componentes web"
+        ]
+      },
+      "note": "Respuesta especifica ante cross-site scripting."
+    },
+    "DoS": {
+      "family": "ddos",
+      "attack_technique_ids": ["T1499"],
+      "capec_pattern_ids": ["CAPEC-125"],
+      "attack_mitigation_ref_ids": ["M1037"],
+      "mitigations": {
+        "containment": [
+          "aislar el servicio o dispositivo afectado y aplicar limites de consumo por origen",
+          "activar degradacion controlada, cola o failover para mantener las funciones esenciales"
+        ],
+        "eradication": [
+          "bloquear la causa confirmada y corregir el fallo que permite agotar recursos"
+        ],
+        "prevention": [
+          "configurar cuotas, timeouts, watchdogs y mecanismos de backpressure",
+          "probar recuperacion y capacidad del servicio frente a agotamiento sostenido"
+        ]
+      },
+      "note": "DoS se trata de forma separada de DDoS; no presupone multiples origenes ni scrubbing distribuido."
+    },
+    "Command_and_Control": {
+      "family": "botnet",
+      "attack_technique_ids": ["T1071"],
+      "capec_pattern_ids": ["CAPEC-542"],
+      "attack_mitigation_ref_ids": ["M1031"],
+      "reference_quality": {"capec": "generic_malware"},
+      "mitigations": {
+        "containment": [
+          "aislar el dispositivo que mantiene comunicaciones de mando y control",
+          "bloquear los dominios, direcciones, puertos y protocolos C2 observados"
+        ],
+        "eradication": [
+          "eliminar la persistencia y reflashear el dispositivo desde firmware confiable",
+          "rotar credenciales y claves potencialmente expuestas por el canal C2"
+        ],
+        "prevention": [
+          "aplicar listas permitidas de salida y prevencion de intrusiones para trafico C2",
+          "segmentar los dispositivos y eliminar servicios y credenciales por defecto"
+        ]
+      },
+      "note": "CAPEC-542 se usa como referencia generica de malware; T1071 constituye el anclaje especifico del canal C2."
     }
   },
   "jorge_tfm_capec_table": {

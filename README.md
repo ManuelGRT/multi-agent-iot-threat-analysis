@@ -23,7 +23,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 |---|---|---|
 | **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Una caché SQLite por hash exacto reutiliza únicamente éxitos previos de Mistral para contenido duplicado y reconstruye la identidad y procedencia del caso actual. En un *cache miss*, Mistral selecciona las columnas y genera el evento canónico | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
-| **Clasificador** | Modelo XGBoost multiclase: ¿qué familia de ataque? | Familia y confianza; si < 0,65, el caso va a revisión |
+| **Clasificador** | Modelo XGBoost multiclase balanceado: identifica uno de 16 tipos de ataque y agrega su familia amplia | Tipo, familia, confianza y top-3; si la confianza es < 0,65, el caso va a revisión |
 | **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarlas con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; todo añadido sin respaldo queda marcado `llm_suggested` |
 | **Juez** | Reglas deterministas sobre el caso completo | Aprobar o derivar a revisión humana |
 | **Auditor** | Revisa a posteriori el caso cerrado (coherencia, traza, umbrales, fugas) | Aprobar, revisar o rechazar |
@@ -70,8 +70,8 @@ repetidas en alguna clase de IoT-23):
 | Multiclase Edge-IIoTset (15 clases, protocolo del TFM previo) | **F1 0,9144** frente a 0,7479 (mejor LLM *fine-tuned* del TFM previo) y 0,4987 (su mejor modelo clásico) |
 | Réplica del baseline previo (garantía de reproducción) | 0,4993 frente a 0,4987 ✓ |
 | Detector global (test congelado, n=5.064) | F1 0,9676; con abstención: **0,977 sobre lo decidido**, derivando el 4,8 % a revisión |
-| Clasificador de familia (n=2.088) | F1 0,9107; con umbral de confianza: 0,953 sobre lo decidido |
-| Mitigador | 100 % de ítems con procedencia de catálogo; anclaje verificado también con Mistral en vivo |
+| Clasificador de 16 tipos (test balanceado, n=1.200) | Accuracy 0,8908; macro-F1 0,8917; top-3 0,9800; con umbral 0,65: F1 0,9237 sobre 1.088 decisiones |
+| Mitigador (16 llamadas Mistral en vivo) | 111/113 medidas base contextualizadas; cinco primeras ancladas en 16/16 casos; 15 aprobaciones estructurales y 1 revisión |
 | Auditor | 16/16 defectos inyectados detectados; 0 falsos rechazos |
 
 **Límite declarado:** el control *leave-one-dataset-out* muestra que los

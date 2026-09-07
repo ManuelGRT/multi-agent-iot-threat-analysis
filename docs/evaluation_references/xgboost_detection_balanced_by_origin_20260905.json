@@ -1,0 +1,120 @@
+{
+  "schema_version": "deployed-detector-evaluation-v1",
+  "created_at": "2026-09-05T15:49:16+00:00",
+  "artifact": {
+    "filename": "xgboost_detection_balanced_by_origin_20260905.joblib",
+    "bytes": 300242,
+    "sha256": "f2d7d3dbe9c90fbd7f3d1f134d91e77f855dde134119eced812646e285524393",
+    "task": "binary_detection",
+    "classes": [false, true]
+  },
+  "inputs": {
+    "provider": "mistral",
+    "model": "mistral-small-2603",
+    "successful_standardizations": 35637,
+    "binary_eligible_rows": 33637,
+    "snapshot_sha256": "e2117f938b9f8551f567b6f5ca1dcb9710913c760c597f70101ce15f46823666",
+    "files": {
+      "manifests": {
+        "bot_iot_manifest.jsonl": "ec924573aad6af6a9c5e335f74f21e1064002430309aa2e4aa0c018aaa2fac14",
+        "edge_iiotset_manifest.jsonl": "e447e8f5ab77cd49e91da7442a04cf8eb37e5d105958ede7ad7eadbc557738b4",
+        "iot23_manifest.jsonl": "caef7fa8ed9a8ce9c7f28720abf88c3aad6a801aa58f1a2c5234c579906298f1",
+        "ton_iot_manifest.jsonl": "348616fd60ab0025e2df6aa3a4f546528cab4b04b0e217c86a668a65a7d67bd8",
+        "urban_iot_manifest.jsonl": "3a818734d4194dbec50b263a95abd06c66760b2d9eb6bcb7a7ba0c506c62ee13"
+      },
+      "standardized": {
+        "bot_iot_standardized.jsonl": "c9d036945c33a43825e4586510c470df811174ce76547a6cd69bedd926cbf037",
+        "edge_iiotset_standardized.jsonl": "f307c81e48352a78ccb1862f61ed3a5894a6a84384940066e123993aed31dbf3",
+        "iot23_standardized.jsonl": "837ffaa5ab0985d197ca5a0dd1b1e6135f38c2f41e8ddb134190ad427f95cc02",
+        "ton_iot_standardized.jsonl": "e49d98803309b75d185efe95d92945ac994bd52d3a66f9598ff7d7d5f43793f8",
+        "urban_iot_standardized.jsonl": "f343914fee3119bcc2266d1048e474d5e710616a7575085e2288536f632b7a29"
+      }
+    }
+  },
+  "deduplication": {
+    "input_rows": 33637,
+    "output_rows": 33635,
+    "cross_split_rows_removed": 2,
+    "final_cross_split_overlap_count": 0
+  },
+  "balancing": {
+    "policy_version": "binary_split_origin_1to1_v1_2026-09-05",
+    "seed": 42,
+    "grouping": "split x logical_origin x binary_label",
+    "selection": "seeded_sha256_without_replacement",
+    "selected_manifest_ids_sha256": "b97f53b2cea2efbf7174e7a3b49295f130d2f812f9b9f81fcbc99fe31e1246b9",
+    "rows": 23604,
+    "removed_rows": 10031,
+    "class_counts": {"benign": 11802, "attack": 11802},
+    "splits": {
+      "train": {"rows": 16496, "per_class": 8248},
+      "validation": {"rows": 3536, "per_class": 1768},
+      "test": {"rows": 3572, "per_class": 1786}
+    },
+    "per_origin_per_class": {
+      "bot_iot": {"train": 333, "validation": 71, "test": 73, "total": 477},
+      "edge_iiotset": {"train": 4116, "validation": 885, "test": 885, "total": 5886},
+      "iot23": {"train": 825, "validation": 175, "test": 181, "total": 1181},
+      "ton_iot_linux": {"train": 539, "validation": 132, "test": 116, "total": 787},
+      "ton_iot_network": {"train": 1359, "validation": 290, "test": 305, "total": 1954},
+      "ton_iot_telemetry": {"train": 875, "validation": 175, "test": 184, "total": 1234},
+      "ton_iot_windows": {"train": 201, "validation": 40, "test": 42, "total": 283}
+    }
+  },
+  "model": {
+    "algorithm": "XGBoost",
+    "parameters": {
+      "n_estimators": 300,
+      "max_depth": 6,
+      "learning_rate": 0.1,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "random_state": 42,
+      "objective": "binary:logistic"
+    },
+    "feature_count": 5264,
+    "feature_schema_sha256": "de41afdd00f73945f34c071b99752d75339b88b7af1cb813439b383cca7c9c1b",
+    "booster_raw_sha256": "26fa71ff717bc36a9305556095a989a660a5d2f596097b1abe424e385d886463"
+  },
+  "metrics": {
+    "validation": {
+      "rows": 3536,
+      "accuracy": 0.9629524886877828,
+      "attack_precision": 0.9611267605633803,
+      "attack_recall": 0.9649321266968326,
+      "attack_f1": 0.9630256844482077,
+      "confusion_matrix": [[1699, 69], [62, 1706]]
+    },
+    "test": {
+      "rows": 3572,
+      "accuracy": 0.95996640537514,
+      "attack_precision": 0.9586823003908431,
+      "attack_recall": 0.9613661814109743,
+      "attack_f1": 0.9600223651104277,
+      "confusion_matrix": [[1712, 74], [69, 1717]]
+    },
+    "operational_test": {
+      "gray_zone_inclusive": [0.4, 0.6],
+      "decided_rows": 3464,
+      "abstained_rows": 108,
+      "coverage": 0.9697648376259799,
+      "attack_f1_decided": 0.972318339100346
+    },
+    "test_by_origin": {
+      "bot_iot": {"rows": 146, "attack_f1": 1.0, "coverage": 1.0, "attack_f1_decided": 1.0},
+      "edge_iiotset": {"rows": 1770, "attack_f1": 1.0, "coverage": 0.9994350282485875, "attack_f1_decided": 1.0},
+      "iot23": {"rows": 362, "attack_f1": 0.9836956521739131, "coverage": 0.9972375690607734, "attack_f1_decided": 0.9836956521739131},
+      "ton_iot_linux": {"rows": 232, "attack_f1": 0.8782608695652173, "coverage": 0.9353448275862069, "attack_f1_decided": 0.9},
+      "ton_iot_network": {"rows": 610, "attack_f1": 0.9885433715220949, "coverage": 0.9983606557377049, "attack_f1_decided": 0.9885057471264368},
+      "ton_iot_telemetry": {"rows": 368, "attack_f1": 0.742382271468144, "coverage": 0.7744565217391305, "attack_f1_decided": 0.7941176470588236},
+      "ton_iot_windows": {"rows": 84, "attack_f1": 0.9010989010989012, "coverage": 0.9166666666666666, "attack_f1_decided": 0.9411764705882352}
+    }
+  },
+  "scope_notes": [
+    "23604 is the complete balanced corpus; fit uses only the 16496 train rows.",
+    "Balance is 1:1 inside each split and origin, not equal weight across origins.",
+    "Urban-IoT is excluded because it does not declare a binary target.",
+    "TON-IoT telemetry is the weakest evaluated origin and Windows has a small test support.",
+    "The joblib SHA identifies the deployed wrapper; reproducibility across contract revisions is verified with selection, feature-schema and raw-booster hashes."
+  ]
+}

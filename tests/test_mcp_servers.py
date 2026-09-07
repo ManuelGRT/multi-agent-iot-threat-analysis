@@ -1075,46 +1075,6 @@ def test_detect_and_classify_with_prepared_models():
 
 
 # ---------------------------------------------------------------------------
-# paridad de features con el script de entrenamiento
-# ---------------------------------------------------------------------------
-
-def test_feature_parity_with_training_script():
-    import importlib.util
-
-    script = Path(__file__).resolve().parents[1] / "scripts" / "train_xgboost_detection_standardized_datasets.py"
-    spec = importlib.util.spec_from_file_location("_train_det_script", script)
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except ImportError as exc:  # dependencia de entrenamiento ausente
-        pytest.skip(f"script de entrenamiento no importable aqui: {exc}")
-
-    from src.mcp.features import event_features
-    from src.eval.data_sanitization import sanitize_canonical_event
-
-    parity_event = {
-        **CANONICAL_EVENT,
-        "behavior_tags": ["Mirai"],
-        "uncertainty": ["DDoS"],
-        "asset_context": "malware",
-        "service_context": {
-            "protocol_family": "icmp",
-            "risk": "DDoS",
-            "family_hint": "Mirai",
-            "role": "botnet",
-        },
-        "telemetry": {"temperature": 21.5, "risk": "Mirai"},
-        "host": {"cpu": 12.0, "family_hint": "DDoS"},
-    }
-    # La sanitizacion pertenece al preprocesamiento de entrenamiento/evaluacion,
-    # no a ``event_features`` ni al runtime.
-    prepared_event = sanitize_canonical_event(parity_event)
-    ours = event_features(prepared_event)
-    theirs = module.event_features(parity_event)
-    assert ours == theirs
-
-
-# ---------------------------------------------------------------------------
 # protocolo MCP real (stdio)
 # ---------------------------------------------------------------------------
 

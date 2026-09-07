@@ -118,18 +118,52 @@ def test_sample_rows_mixes_attack_and_benign():
 
 
 # ---------------------------------------------------------------------------
-# semaforos batch sin artefacto congelado
+# semaforo y contrato del detector desplegado
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(
-    not (_models_loadable() and _corpus_available() and _edge_available()),
-    reason="modelos o datasets no disponibles",
-)
-def test_batch_detection_red_without_frozen_artifact(monkeypatch):
-    monkeypatch.setattr(audit_script, "latest_training_artifact", lambda prefix: None)
+def test_batch_detection_red_without_frozen_evaluation(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        audit_script,
+        "DETECTION_EVALUATION",
+        tmp_path / "missing-detector-evaluation.json",
+    )
     result = audit_script.batch_detection(tolerance=0.02)
     assert result["artefacto_congelado_encontrado"] is False
-    assert result["semaforo"] == audit_script.RED  # sin referencia no hay verde
+    assert result["semaforo"] == audit_script.RED
+
+
+@pytest.mark.skipif(not _models_loadable(), reason="modelos no disponibles")
+def test_batch_detection_verifies_the_deployed_balanced_artifact():
+    result = audit_script.batch_detection(tolerance=0.02)
+
+    assert result["modo_evaluacion"] == "metricas_congeladas_hash_verificado"
+    assert result["metricas_recalculadas"] is False
+    assert result["ficha_valida"] is True
+    assert result["hash_modelo_coincide"] is True
+    assert result["contrato_modelo_valido"] is True
+    assert result["corpus_balanceado"] == 23604
+    assert result["n_train"] == 16496
+    assert result["n_validation"] == 3536
+    assert result["n_test"] == 3572
+    assert result["f1_ataque_congelado"] == pytest.approx(0.9600223651104277)
+    assert result["semaforo"] == audit_script.GREEN
+
+
+@pytest.mark.skipif(not _models_loadable(), reason="modelos no disponibles")
+def test_batch_detection_rejects_internally_inconsistent_metadata(
+    tmp_path, monkeypatch
+):
+    payload = json.loads(audit_script.DETECTION_EVALUATION.read_text(encoding="utf-8"))
+    payload["balancing"]["rows"] = 23602
+    corrupted = tmp_path / "corrupted-detector-evaluation.json"
+    corrupted.write_text(json.dumps(payload), encoding="utf-8")
+    monkeypatch.setattr(audit_script, "DETECTION_EVALUATION", corrupted)
+
+    result = audit_script.batch_detection(tolerance=0.02)
+
+    assert result["ficha_valida"] is False
+    assert "balanced_rows" in result["incidencias_ficha"]
+    assert result["semaforo"] == audit_script.RED
 
 
 @pytest.mark.skipif(

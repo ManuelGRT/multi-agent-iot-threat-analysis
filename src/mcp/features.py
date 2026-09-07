@@ -1,11 +1,9 @@
 # src/mcp/features.py
-"""Featurizacion de eventos canonicos para los modelos preparados.
+"""Featurizacion unica de eventos canonicos para entrenamiento e inferencia.
 
-Reproduce EXACTAMENTE ``event_features`` de
-``scripts/train_xgboost_detection_standardized_datasets.py`` (usada tambien por
-el entrenamiento del clasificador multiclase). Cualquier cambio aqui rompe la
-paridad entrenamiento/inferencia; el test ``test_mcp_servers.py::
-test_feature_parity_with_training_script`` la vigila.
+La campana validada y los servidores MCP consumen directamente esta funcion.
+Cualquier cambio rompe la paridad entre entrenamiento e inferencia; las
+pruebas de contrato y del servidor MCP la vigilan.
 """
 from __future__ import annotations
 

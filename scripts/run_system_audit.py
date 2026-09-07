@@ -6,10 +6,10 @@ Ejecuta, sin APIs externas (100% local y determinista):
 1. Smoke E2E: N casos por dataset (Edge-IIoTset, TON-IoT host, TON-IoT
    telemetry, IoT-23) recorren el grafo final completo -> % de CaseResult
    validos + auditoria por caso (CaseAuditor, Fase 5a).
-2. Metricas batch de los MODELOS DESPLEGADOS (.joblib). Para el clasificador
-   se reconstruye el test exacto de 16 tipos mediante su seleccion congelada;
-   si los inputs originales no estan disponibles, solo se informa la metrica
-   congelada tras verificar la seleccion, el sidecar y el hash del modelo.
+2. Verificacion de los MODELOS DESPLEGADOS (.joblib). El detector se certifica
+   contra su ficha portable (contrato, esquema y SHA-256); para el clasificador
+   se reconstruye el test exacto de 16 tipos cuando estan sus inputs y, en caso
+   contrario, se verifican la seleccion, el sidecar y el hash del modelo.
 3. Certificacion de los baselines congelados (Fase 0): Edge canonico
    multiclase 0.9363 >= 0.93 y > 0.7479 (Jorge LLM FT), binario >= 0.99,
    artefactos de respaldo presentes. Regla dura del proyecto: los resultados
@@ -32,12 +32,10 @@ import argparse
 from collections import Counter
 import hashlib
 import json
-import random
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +47,7 @@ from src.agents.final.auditor import (
     canonical_leakage_issues,
     feature_leakage_issues,
 )
-from src.eval.reporting import compare_with_baseline, export_report, load_baselines, score_run
+from src.eval.reporting import compare_with_baseline, export_report, load_baselines
 from src.mcp.client import MCPToolClient
 from src.mcp.common import artifacts_dir, resolve_confined_path, resolve_path
 from src.orchestration.mcp_graph import default_final_agents, run_case
@@ -71,6 +69,12 @@ ATTACK_TYPE_REPORT = ATTACK_TYPE_AUDIT_DIR / "classifier_multidataset16_report.j
 ATTACK_TYPE_SELECTION = ATTACK_TYPE_AUDIT_DIR / "global_selection.jsonl"
 ATTACK_TYPE_SIDECAR = ATTACK_TYPE_AUDIT_DIR / "taxonomy_mapping_sidecar.jsonl"
 ATTACK_TYPE_REPRODUCTION_EPSILON = 1e-9
+DETECTION_EVALUATION = (
+    PROJECT_ROOT
+    / "docs"
+    / "evaluation_references"
+    / "xgboost_detection_balanced_by_origin_20260905.json"
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -194,57 +198,286 @@ def run_smoke(
 
 
 # ---------------------------------------------------------------------------
-# 2. Metricas batch de los modelos desplegados (split de test reproducido)
+# 2. Verificacion de los modelos desplegados
 # ---------------------------------------------------------------------------
 
-def latest_training_artifact(prefix: str) -> dict[str, Any] | None:
-    candidates = sorted((PROJECT_ROOT / "artifacts").glob(f"{prefix}_*.json"))
-    if not candidates:
-        return None
-    with candidates[-1].open("r", encoding="utf-8") as fh:
-        return json.load(fh)
-
-
 def batch_detection(tolerance: float) -> dict[str, Any]:
-    from scripts.train_xgboost_detection_standardized_datasets import (
-        load_edge_binary,
-        load_prebalanced_binary,
-        split_records,
-    )
     from src.mcp import model_registry
-    from src.mcp.features import event_features
 
-    args = SimpleNamespace(random_state=42, test_size=0.15, val_size=0.15)
-    rng = random.Random(args.random_state)
-    records = load_prebalanced_binary(resolve_path("standardized_dataset"))
-    records += load_edge_binary(PROJECT_ROOT / EDGE_DATASET_PATH, 100, rng)
-    rng.shuffle(records)
-    _train, _val, test = split_records(records, args)
+    if not DETECTION_EVALUATION.is_file():
+        return {
+            "modo_evaluacion": "sin_ficha_congelada",
+            "artefacto_congelado_encontrado": False,
+            "modelo": resolve_path("detection_model").stem,
+            "semaforo": RED,
+        }
 
-    model = model_registry.load_model("detection_model")
-    features = [event_features(record["event"]) for record in test]
-    proba = [float(p[1]) for p in model.predict_proba(features)]
-    y_pred = [int(p >= 0.5) for p in proba]
-    y_true = [record["label"] for record in test]
-    score = score_run(y_true, y_pred, task="binary", y_score=proba)
+    frozen = json.loads(DETECTION_EVALUATION.read_text(encoding="utf-8"))
+    artifact = frozen.get("artifact") or {}
+    metrics = frozen.get("metrics") or {}
+    test_metrics = metrics.get("test") or {}
+    balancing = frozen.get("balancing") or {}
+    model_metadata = frozen.get("model") or {}
+    model_path = resolve_path("detection_model")
+    actual_hash = _sha256_file(model_path) if model_path.is_file() else None
+    expected_hash = str(artifact.get("sha256") or "")
 
-    frozen = latest_training_artifact("xgboost_detection_standardized_with_edge")
-    frozen_test = (frozen or {}).get("metrics", {}).get("test", {})
-    frozen_ok = "f1" in frozen_test and "n" in frozen_test
-    frozen_f1 = float(frozen_test.get("f1", 0.0))
-    split_ok = frozen_ok and frozen_test.get("n") == len(test)
-    live_f1 = float(score.get("f1", 0.0))
+    contract_issues: list[str] = []
+    model = None
+    if not model_path.is_file():
+        contract_issues.append("modelo_ausente")
+    else:
+        try:
+            model_registry.clear_cache()
+            model = model_registry.load_model("detection_model")
+        except Exception as exc:  # noqa: BLE001 - la auditoria informa en rojo
+            contract_issues.append(f"carga_fallida:{type(exc).__name__}")
+    if model is not None:
+        if str(getattr(model, "task", "")) != "binary_detection":
+            contract_issues.append("task_incompatible")
+        if tuple(getattr(model, "classes", ())) != (False, True):
+            contract_issues.append("clases_incompatibles")
+        if str(getattr(model, "feature_schema_sha256", "")) != str(
+            model_metadata.get("feature_schema_sha256") or ""
+        ):
+            contract_issues.append("esquema_features_incompatible")
+
+    metadata_issues = _detection_metadata_issues(
+        frozen,
+        model=model,
+        model_path=model_path,
+    )
+    report_ok = not metadata_issues
+    hash_ok = bool(expected_hash) and actual_hash == expected_hash
+    contract_ok = not contract_issues
     return {
-        "n_test": len(test),
-        "artefacto_congelado_encontrado": frozen_ok,
-        "split_reproducido": split_ok,
-        "f1_live": round(live_f1, 4),
-        "f1_congelado_entrenamiento": frozen_f1,
-        "delta": round(live_f1 - frozen_f1, 4),
-        "roc_auc_live": round(float(score.get("roc_auc", 0.0)), 4),
-        "modelo": "xgboost_detection_standardized_with_edge_20260705",
-        "semaforo": GREEN if frozen_ok and split_ok and live_f1 >= frozen_f1 - tolerance else RED,
+        "modo_evaluacion": "metricas_congeladas_hash_verificado",
+        "metricas_recalculadas": False,
+        "artefacto_congelado_encontrado": True,
+        "ficha_valida": report_ok,
+        "incidencias_ficha": metadata_issues,
+        "hash_modelo_coincide": hash_ok,
+        "contrato_modelo_valido": contract_ok,
+        "incidencias_contrato": contract_issues,
+        "corpus_balanceado": balancing.get("rows"),
+        "n_train": (balancing.get("splits") or {}).get("train", {}).get("rows"),
+        "n_validation": (balancing.get("splits") or {}).get("validation", {}).get("rows"),
+        "n_test": test_metrics.get("rows"),
+        "f1_ataque_congelado": test_metrics.get("attack_f1"),
+        "cobertura_operacional_congelada": (
+            metrics.get("operational_test") or {}
+        ).get("coverage"),
+        "f1_ataque_decidido_congelado": (
+            metrics.get("operational_test") or {}
+        ).get("attack_f1_decided"),
+        "modelo": model_path.stem,
+        "sha256_modelo": actual_hash,
+        "tolerancia_no_aplicada": tolerance,
+        "semaforo": GREEN if report_ok and hash_ok and contract_ok else RED,
     }
+
+
+def _detection_metadata_issues(
+    frozen: dict[str, Any],
+    *,
+    model: Any,
+    model_path: Path,
+) -> list[str]:
+    """Valida la coherencia interna de la ficha y el modelo sin fingir replay."""
+
+    issues: list[str] = []
+
+    def require(condition: bool, issue: str) -> None:
+        if not condition:
+            issues.append(issue)
+
+    def is_sha256(value: Any) -> bool:
+        text = str(value or "")
+        return len(text) == 64 and all(char in "0123456789abcdef" for char in text)
+
+    try:
+        artifact = frozen["artifact"]
+        inputs = frozen["inputs"]
+        balancing = frozen["balancing"]
+        model_metadata = frozen["model"]
+        metrics = frozen["metrics"]
+
+        require(
+            frozen.get("schema_version") == "deployed-detector-evaluation-v1",
+            "schema_version",
+        )
+        require(artifact.get("filename") == model_path.name, "artifact_filename")
+        require(artifact.get("task") == "binary_detection", "artifact_task")
+        require(artifact.get("classes") == [False, True], "artifact_classes")
+        require(is_sha256(artifact.get("sha256")), "artifact_sha256")
+        require(
+            model_path.is_file()
+            and int(artifact.get("bytes", -1)) == model_path.stat().st_size,
+            "artifact_bytes",
+        )
+
+        require(is_sha256(inputs.get("snapshot_sha256")), "snapshot_sha256")
+        input_files = inputs.get("files") or {}
+        require(
+            set(input_files) == {"manifests", "standardized"},
+            "input_groups",
+        )
+        for group in ("manifests", "standardized"):
+            files = input_files.get(group) or {}
+            require(len(files) == 5, f"input_count:{group}")
+            require(
+                all(is_sha256(value) for value in files.values()),
+                f"input_sha256:{group}",
+            )
+
+        rows = int(balancing.get("rows", 0))
+        class_counts = balancing.get("class_counts") or {}
+        splits = balancing.get("splits") or {}
+        origins = balancing.get("per_origin_per_class") or {}
+        require(rows == 23604, "balanced_rows")
+        require(
+            class_counts == {"benign": rows // 2, "attack": rows // 2},
+            "balanced_class_counts",
+        )
+        require(
+            is_sha256(balancing.get("selected_manifest_ids_sha256")),
+            "selection_sha256",
+        )
+        require(set(splits) == {"train", "validation", "test"}, "split_names")
+        require(
+            {name: int(values.get("rows", 0)) for name, values in splits.items()}
+            == {"train": 16496, "validation": 3536, "test": 3572},
+            "split_rows",
+        )
+        for name, values in splits.items():
+            require(
+                int(values.get("rows", 0)) == 2 * int(values.get("per_class", -1)),
+                f"split_balance:{name}",
+            )
+        require(
+            sum(int(values.get("rows", 0)) for values in splits.values()) == rows,
+            "split_total",
+        )
+        expected_origins = {
+            "bot_iot",
+            "edge_iiotset",
+            "iot23",
+            "ton_iot_linux",
+            "ton_iot_network",
+            "ton_iot_telemetry",
+            "ton_iot_windows",
+        }
+        require(set(origins) == expected_origins, "origin_names")
+        for origin, values in origins.items():
+            require(
+                int(values.get("total", -1))
+                == sum(
+                    int(values.get(split, 0))
+                    for split in ("train", "validation", "test")
+                ),
+                f"origin_total:{origin}",
+            )
+        require(
+            2 * sum(int(values.get("total", 0)) for values in origins.values())
+            == rows,
+            "origin_rows",
+        )
+
+        require(
+            int(model_metadata.get("feature_count", 0)) == 5264,
+            "feature_count_release",
+        )
+        require(
+            is_sha256(model_metadata.get("feature_schema_sha256")),
+            "feature_schema_sha256",
+        )
+        require(
+            is_sha256(model_metadata.get("booster_raw_sha256")),
+            "booster_raw_sha256",
+        )
+        if model is not None:
+            require(
+                len(model.vectorizer.get_feature_names_out())
+                == int(model_metadata["feature_count"]),
+                "feature_count_model",
+            )
+            booster_hash = hashlib.sha256(
+                model.estimator.get_booster().save_raw(raw_format="ubj")
+            ).hexdigest()
+            require(
+                booster_hash == model_metadata.get("booster_raw_sha256"),
+                "booster_hash_model",
+            )
+            actual_parameters = model.estimator.get_params()
+            for name, expected in (model_metadata.get("parameters") or {}).items():
+                require(
+                    actual_parameters.get(name) == expected,
+                    f"model_parameter:{name}",
+                )
+
+        test_metrics = metrics.get("test") or {}
+        matrix = test_metrics.get("confusion_matrix")
+        require(
+            isinstance(matrix, list)
+            and len(matrix) == 2
+            and all(isinstance(row, list) and len(row) == 2 for row in matrix),
+            "test_confusion_matrix_shape",
+        )
+        if (
+            isinstance(matrix, list)
+            and len(matrix) == 2
+            and all(isinstance(row, list) and len(row) == 2 for row in matrix)
+        ):
+            tn, fp = (int(value) for value in matrix[0])
+            fn, tp = (int(value) for value in matrix[1])
+            test_rows = int(test_metrics.get("rows", 0))
+            require(test_rows == 3572, "test_rows")
+            require(tn + fp + fn + tp == test_rows, "test_confusion_matrix_total")
+            precision = tp / (tp + fp)
+            recall = tp / (tp + fn)
+            f1 = 2 * precision * recall / (precision + recall)
+            require(
+                abs(float(test_metrics.get("accuracy", -1)) - (tn + tp) / test_rows)
+                < 1e-12,
+                "test_accuracy",
+            )
+            require(
+                abs(float(test_metrics.get("attack_precision", -1)) - precision)
+                < 1e-12,
+                "test_precision",
+            )
+            require(
+                abs(float(test_metrics.get("attack_recall", -1)) - recall) < 1e-12,
+                "test_recall",
+            )
+            require(
+                abs(float(test_metrics.get("attack_f1", -1)) - f1) < 1e-12,
+                "test_f1",
+            )
+        operational = metrics.get("operational_test") or {}
+        require(
+            int(operational.get("decided_rows", 0))
+            + int(operational.get("abstained_rows", 0))
+            == int(test_metrics.get("rows", -1)),
+            "operational_rows",
+        )
+        test_by_origin = metrics.get("test_by_origin") or {}
+        require(set(test_by_origin) == expected_origins, "test_origin_names")
+        require(
+            sum(int(values.get("rows", 0)) for values in test_by_origin.values())
+            == int(test_metrics.get("rows", -1)),
+            "test_origin_rows",
+        )
+        for origin, values in test_by_origin.items():
+            for key in ("attack_f1", "coverage", "attack_f1_decided"):
+                value = values.get(key)
+                require(
+                    isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0,
+                    f"test_origin_metric:{origin}:{key}",
+                )
+    except (AttributeError, KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+        issues.append(f"estructura_invalida:{type(exc).__name__}")
+    return sorted(set(issues))
 
 
 def _sha256_file(path: Path) -> str:
@@ -755,7 +988,7 @@ def main(argv: list[str] | None = None) -> int:
         detection = {"omitido": True, "semaforo": AMBER}
         attack_type = {"omitido": True, "semaforo": AMBER}
     else:
-        print("[2/5] Metricas batch del detector desplegado (split test reproducido)...")
+        print("[2/5] Ficha y contrato del detector desplegado...")
         detection = batch_detection(args.tolerance)
         print("[3/5] Auditoria batch del clasificador desplegado de 16 tipos...")
         attack_type = batch_attack_type(args.tolerance)

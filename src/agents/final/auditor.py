@@ -3,8 +3,8 @@
 
 Valida un ``CaseResult`` terminado en cuatro dimensiones:
 
-1. **Consistencia**: benigno sin familia de ataque, abstenciones correctamente
-   flaggeadas, malicioso completado con familia, estado coherente con el juez.
+1. **Consistencia**: benigno sin tipo de ataque, abstenciones correctamente
+   señaladas, malicioso completado con un tipo válido, estado coherente con el juez.
 2. **Trazabilidad**: agentes esperados presentes, todas las entradas cerradas,
    orden temporal sin retrocesos.
 3. **Target leakage**: el evento canonico del caso no arrastra campos de
@@ -27,7 +27,6 @@ from src.contracts.attack_taxonomy import (
     MULTIDATASET_TAXONOMY_VERSION,
     SUPPORTED_ATTACK_TAXONOMY_VERSIONS,
     attack_classes_for_taxonomy,
-    broad_family_for_attack_type,
 )
 from src.contracts.leakage import (
     contains_predictive_target_text,
@@ -198,9 +197,9 @@ class CaseAuditor:
             )
         if detection.is_malicious is False:
             add(
-                "consistencia_benigno_sin_familia",
-                classification.attack_family is None,
-                detail=f"familia={classification.attack_family}",
+                "consistencia_benigno_sin_tipo_ataque",
+                classification.attack_type is None,
+                detail=f"tipo={classification.attack_type}",
             )
         if detection.abstain:
             add(
@@ -221,8 +220,8 @@ class CaseAuditor:
             )
         if case.status == "completed" and detection.is_malicious:
             add(
-                "consistencia_malicioso_con_familia",
-                classification.attack_family is not None,
+                "consistencia_malicioso_con_tipo_ataque",
+                classification.attack_type is not None,
             )
         # defensivo: pydantic ya valida en construccion, pero el auditor
         # tambien recibe casos deserializados/mutados fuera de ese camino
@@ -240,23 +239,16 @@ class CaseAuditor:
                     f"probability={detection.probability}"
                 ),
             )
-        if detection.is_malicious and classification.attack_family is not None:
-            add(
-                "consistencia_malicioso_no_benigno",
-                classification.attack_family.strip().lower() not in {"benign", "normal"},
-                detail=f"familia={classification.attack_family}",
-            )
-        if detection.is_malicious and classification.model_task == "attack_family":
-            add(
-                "consistencia_modelo_familia_sin_subtipo",
-                classification.attack_subtype is None,
-                detail=f"subtipo={classification.attack_subtype}",
-            )
-        subtype_classes: tuple[str, ...] = ()
+        attack_classes: tuple[str, ...] = ()
         taxonomy_supported = False
-        if detection.is_malicious and classification.model_task == "attack_subtype":
+        if detection.is_malicious:
+            add(
+                "consistencia_modelo_por_tipo",
+                classification.model_task == "attack_type",
+                detail=f"model_task={classification.model_task}",
+            )
             try:
-                subtype_classes = attack_classes_for_taxonomy(
+                attack_classes = attack_classes_for_taxonomy(
                     classification.taxonomy_version
                 )
             except ValueError:
@@ -264,9 +256,9 @@ class CaseAuditor:
             else:
                 taxonomy_supported = True
             add(
-                "consistencia_subtipo_presente",
-                classification.attack_subtype is not None,
-                detail=f"subtipo={classification.attack_subtype}",
+                "consistencia_tipo_ataque_presente",
+                classification.attack_type is not None,
+                detail=f"tipo={classification.attack_type}",
             )
             add(
                 "consistencia_version_taxonomia",
@@ -279,69 +271,33 @@ class CaseAuditor:
             invalid_scores = {
                 str(label): score
                 for label, score in classification.top_scores.items()
-                if label not in subtype_classes
+                if label not in attack_classes
                 or isinstance(score, bool)
                 or not 0.0 <= float(score) <= 1.0
             }
             add(
-                "consistencia_top_scores_subtipos",
+                "consistencia_top_scores_tipos",
                 len(classification.top_scores) == 3
-                and classification.attack_subtype in classification.top_scores
+                and classification.attack_type in classification.top_scores
                 and not invalid_scores,
                 detail=(
                     f"cantidad={len(classification.top_scores)} "
-                    f"incluye_elegido={classification.attack_subtype in classification.top_scores} "
+                    f"incluye_elegido={classification.attack_type in classification.top_scores} "
                     f"valores_invalidos={invalid_scores}"
                 ),
             )
-            family_score = classification.family_scores.get(
-                classification.attack_family or ""
-            )
-            invalid_family_scores = {
-                str(label): score
-                for label, score in classification.family_scores.items()
-                if isinstance(score, bool) or not 0.0 <= float(score) <= 1.0
-            }
-            add(
-                "consistencia_puntuacion_familia",
-                bool(classification.family_scores)
-                and not invalid_family_scores
-                and family_score is not None
-                and classification.family_confidence is not None
-                and abs(float(family_score) - classification.family_confidence)
-                <= 1e-6
-                and abs(sum(classification.family_scores.values()) - 1.0) <= 1e-5,
-                detail=(
-                    f"familia={classification.attack_family} "
-                    f"score={family_score} "
-                    f"confidence={classification.family_confidence} "
-                    f"suma={sum(classification.family_scores.values())}"
-                ),
-            )
-        if detection.is_malicious and classification.attack_subtype is not None:
-            if classification.attack_subtype not in subtype_classes:
+        if detection.is_malicious and classification.attack_type is not None:
+            if classification.attack_type not in attack_classes:
                 add(
-                    "consistencia_subtipo_en_taxonomia",
+                    "consistencia_tipo_ataque_en_taxonomia",
                     False,
-                    detail=f"subtipo={classification.attack_subtype}",
+                    detail=f"tipo={classification.attack_type}",
                 )
             else:
-                expected_family = broad_family_for_attack_type(
-                    classification.attack_subtype
-                )
                 add(
-                    "consistencia_subtipo_en_taxonomia",
+                    "consistencia_tipo_ataque_en_taxonomia",
                     True,
-                    detail=f"subtipo={classification.attack_subtype}",
-                )
-                add(
-                    "consistencia_subtipo_vs_familia",
-                    classification.attack_family == expected_family,
-                    detail=(
-                        f"subtipo={classification.attack_subtype} "
-                        f"familia={classification.attack_family} "
-                        f"esperada={expected_family}"
-                    ),
+                    detail=f"tipo={classification.attack_type}",
                 )
                 if classification.top_scores:
                     top_label, top_score = max(
@@ -350,35 +306,27 @@ class CaseAuditor:
                 else:
                     top_label, top_score = None, None
                 add(
-                    "consistencia_subtipo_vs_top_scores",
-                    top_label == classification.attack_subtype
+                    "consistencia_tipo_ataque_vs_top_scores",
+                    top_label == classification.attack_type
                     and top_score is not None
                     and abs(float(top_score) - classification.confidence) <= 1e-6,
                     detail=(
-                        f"subtipo={classification.attack_subtype} "
+                        f"tipo={classification.attack_type} "
                         f"top={top_label} score={top_score} "
                         f"confidence={classification.confidence}"
                     ),
                 )
         if (
             detection.is_malicious
-            and classification.model_task == "attack_subtype"
-            and classification.attack_subtype is not None
+            and classification.model_task == "attack_type"
+            and classification.attack_type is not None
         ):
             add(
-                "consistencia_mitigacion_subtipo",
-                case.explanation.attack_subtype == classification.attack_subtype,
+                "consistencia_mitigacion_tipo_ataque",
+                case.explanation.attack_type == classification.attack_type,
                 detail=(
-                    f"mitigador={case.explanation.attack_subtype} "
-                    f"clasificador={classification.attack_subtype}"
-                ),
-            )
-            add(
-                "consistencia_mitigacion_familia",
-                case.explanation.attack_family == classification.attack_family,
-                detail=(
-                    f"mitigador={case.explanation.attack_family} "
-                    f"clasificador={classification.attack_family}"
+                    f"mitigador={case.explanation.attack_type} "
+                    f"clasificador={classification.attack_type}"
                 ),
             )
             add(
@@ -408,8 +356,8 @@ class CaseAuditor:
                 ),
             )
             add(
-                "consistencia_veredicto_juez_subtipo",
-                case.judge.final_label == classification.attack_subtype
+                "consistencia_veredicto_juez_tipo_ataque",
+                case.judge.final_label == classification.attack_type
                 and abs(
                     float(case.judge.final_confidence)
                     - float(classification.confidence)
@@ -417,7 +365,7 @@ class CaseAuditor:
                 <= 1e-6,
                 detail=(
                     f"juez={case.judge.final_label}/{case.judge.final_confidence} "
-                    f"clasificador={classification.attack_subtype}/"
+                    f"clasificador={classification.attack_type}/"
                     f"{classification.confidence}"
                 ),
             )
@@ -531,7 +479,7 @@ class CaseAuditor:
                 detail=f"probability={detection.probability}",
             )
         if (
-            classification.attack_family is not None
+            classification.attack_type is not None
             and classification.confidence < classification.decision_threshold
         ):
             add(

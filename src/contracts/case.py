@@ -92,16 +92,13 @@ class DetectionInfo(BaseModel):
 
 
 class ClassificationInfo(BaseModel):
-    attack_family: str | None = None
-    attack_subtype: str | None = None
+    attack_type: str | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    family_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     decision_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     model_name: str | None = None
-    model_task: Literal["attack_family", "attack_subtype"] = "attack_family"
+    model_task: Literal["attack_type"] = "attack_type"
     taxonomy_version: str | None = None
     top_scores: dict[str, float] = Field(default_factory=dict)
-    family_scores: dict[str, float] = Field(default_factory=dict)
     reason: list[str] = Field(default_factory=list)
 
 
@@ -141,10 +138,9 @@ class ExplanationInfo(BaseModel):
     mitigation_items: list[MitigationItem] = Field(default_factory=list)
     references: list[ThreatReference] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    attack_family: str | None = None
-    attack_subtype: str | None = None
+    attack_type: str | None = None
     taxonomy_version: str | None = None
-    catalog_scope: Literal["family", "attack_type"] | None = None
+    catalog_scope: Literal["attack_type"] | None = None
     catalog_version: str | None = None
     catalog_taxonomy_version: str | None = None
     catalog_compatible_taxonomy_versions: list[str] = Field(default_factory=list)
@@ -273,27 +269,17 @@ class CaseResult(BaseModel):
                 evidence=list(detection.get("evidence") or []),
             ),
             classification=ClassificationInfo(
-                attack_family=classification.get("attack_family"),
-                attack_subtype=classification.get("attack_subtype"),
+                attack_type=classification.get("attack_type"),
                 confidence=float(classification.get("confidence", 0.0) or 0.0),
-                family_confidence=(
-                    float(classification["family_confidence"])
-                    if classification.get("family_confidence") is not None
-                    else None
-                ),
                 decision_threshold=float(
                     classification.get("decision_threshold", 0.65)
                 ),
                 model_name=classification.get("model_name"),
-                model_task=classification.get("model_task") or "attack_family",
+                model_task=classification.get("model_task") or "attack_type",
                 taxonomy_version=classification.get("taxonomy_version"),
                 top_scores={
                     str(name): float(score)
                     for name, score in (classification.get("top_scores") or {}).items()
-                },
-                family_scores={
-                    str(name): float(score)
-                    for name, score in (classification.get("family_scores") or {}).items()
                 },
                 reason=list(classification.get("reason") or []),
             ),
@@ -310,8 +296,7 @@ class CaseResult(BaseModel):
                     for ref in (explanation.get("references") or [])
                 ],
                 confidence=float(explanation.get("confidence", 0.0) or 0.0),
-                attack_family=explanation.get("attack_family"),
-                attack_subtype=explanation.get("attack_subtype"),
+                attack_type=explanation.get("attack_type"),
                 taxonomy_version=explanation.get("taxonomy_version"),
                 catalog_scope=explanation.get("catalog_scope"),
                 catalog_version=explanation.get("catalog_version"),

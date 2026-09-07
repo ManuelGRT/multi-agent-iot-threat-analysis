@@ -2,11 +2,11 @@
 """Agente final de mitigacion (Fase 4): catalogo determinista + LLM anclado.
 
 Flujo en dos pasos:
-1. Determinista: ``threat_intel.suggest_mitigations(family, attack_type, ...)``
+1. Determinista: ``threat_intel.suggest_mitigations(attack_type, ...)``
    devuelve la base auditable especifica para una de las 16 clases operativas
-   (mitigaciones por fase + referencias MITRE ATT&CK/CAPEC). Los modelos
-   historicos sin subtipo conservan el fallback compatible por familia. Este
-   paso SIEMPRE se ejecuta.
+   (mitigaciones por fase + referencias MITRE ATT&CK/CAPEC). El tipo es
+   obligatorio y nunca se sustituye por una familia amplia. Este paso siempre
+   se ejecuta para los eventos maliciosos; en los benignos no hay mitigacion.
 2. LLM (opcional, ``llm=LLMMitigationAgent``): contextualiza las mitigaciones
    del catalogo al evento concreto (puertos, protocolo, telemetria). Regla
    dura: no puede inventar tecnicas ni referencias fuera del catalogo; toda
@@ -79,22 +79,56 @@ class FinalMitigator(FinalAgent):
         classification = state.get("classification_output") or {}
         event_id = str(canonical.get("event_id") or state.get("event_id") or "unknown")
 
-        model_task = str(
-            classification.get("model_task")
-            or classification.get("score_type")
-            or "attack_family"
-        )
-        raw_attack_type = classification.get("attack_subtype")
+        raw_attack_type = classification.get("attack_type")
         attack_type = str(raw_attack_type) if raw_attack_type else None
         taxonomy_version = classification.get("taxonomy_version")
-
-        if classification.get("attack_family"):
-            family = str(classification["attack_family"])
-        elif detection.get("is_malicious"):
-            family = "unknown_attack"
-        else:
-            family = "benign"
         schema_profile = canonical.get("schema_profile")
+
+        # El detector gestiona la clase Normal. Esta rama defensiva conserva
+        # el comportamiento benigno sin inventar un decimoséptimo tipo ni
+        # consultar una entrada familiar del catalogo.
+        if not bool(detection.get("is_malicious", False)):
+            confidence = 1.0 - float(detection.get("probability", 0.0) or 0.0)
+            confidence = min(max(confidence, 0.0), 1.0)
+            entry = self.start_entry(tool=None, event_id=event_id)
+            risk_summary = (
+                f"Evento {event_id} evaluado como benigno "
+                f"(p_maliciosa={float(detection.get('probability', 0.0) or 0.0):.4f}). "
+                "No requiere mitigacion."
+            )
+            output = ExplanationOutput(
+                event_id=event_id,
+                risk_summary=risk_summary,
+                mitigations=[],
+                confidence=confidence,
+                requires_human_review=False,
+                next_route="judge",
+            ).model_dump(mode="json")
+            output.update(
+                {
+                    "references": [],
+                    "mitigation_items": [],
+                    "source": "rule_based",
+                    "evidence": [],
+                    "has_llm_suggested": False,
+                    "first_five_catalog_anchored": False,
+                    "review_reasons": [],
+                }
+            )
+            entry.finish(
+                status="ok",
+                confidence=confidence,
+                summary="evento benigno; mitigacion no aplicable",
+            )
+            return self.trace_update(
+                state,
+                entry,
+                {
+                    "explanation_output": output,
+                    "needs_human_review": False,
+                    "route": "judge",
+                },
+            )
 
         # ------------------------------------------------------------------
         # Paso 1 (siempre): base determinista del catalogo threat intel
@@ -102,13 +136,57 @@ class FinalMitigator(FinalAgent):
         entry = self.start_entry(
             tool="suggest_mitigations",
             event_id=event_id,
-            family=family,
             attack_type=attack_type,
         )
+
+        if attack_type is None:
+            error = "El clasificador no proporciono un tipo de ataque"
+            fallback = ExplanationOutput(
+                event_id=event_id,
+                risk_summary="No puede consultarse el catalogo sin un tipo de ataque.",
+                mitigations=["escalate_to_analyst"],
+                confidence=0.0,
+                requires_human_review=True,
+                next_route="judge",
+            ).model_dump(mode="json")
+            fallback.update(
+                {
+                    "references": [],
+                    "mitigation_items": [
+                        {
+                            "text": "escalate_to_analyst",
+                            "phase": None,
+                            "source": "fallback",
+                            "base": None,
+                        }
+                    ],
+                    "source": "catalog",
+                    "has_llm_suggested": False,
+                    "first_five_catalog_anchored": False,
+                    "review_reasons": ["classification_attack_type_missing"],
+                    "attack_type": None,
+                    "taxonomy_version": taxonomy_version,
+                    "catalog_scope": None,
+                    "catalog_version": None,
+                    "catalog_taxonomy_version": None,
+                    "catalog_compatible_taxonomy_versions": [],
+                    "reference_quality": {},
+                }
+            )
+            return self.record_error(
+                state,
+                entry,
+                error,
+                {
+                    "explanation_output": fallback,
+                    "needs_human_review": True,
+                    "route": "judge",
+                },
+            )
+
         result = self.call_tool(
             "threat_intel",
             "suggest_mitigations",
-            family=family,
             schema_profile=schema_profile,
             attack_type=attack_type,
         )
@@ -116,7 +194,10 @@ class FinalMitigator(FinalAgent):
             error = str(result.get("error") or "suggest_mitigations sin resultado")
             fallback = ExplanationOutput(
                 event_id=event_id,
-                risk_summary=f"Sin catalogo threat intel disponible para {family}.",
+                risk_summary=(
+                    "Sin catalogo threat intel disponible para el tipo "
+                    f"{attack_type}."
+                ),
                 mitigations=["escalate_to_analyst"],
                 confidence=0.0,
                 requires_human_review=True,
@@ -135,9 +216,8 @@ class FinalMitigator(FinalAgent):
             payload["source"] = "catalog"
             payload["has_llm_suggested"] = False
             payload["first_five_catalog_anchored"] = False
-            payload["review_reasons"] = ["catalog_unavailable"]
-            payload["attack_family"] = family
-            payload["attack_subtype"] = attack_type
+            payload["review_reasons"] = ["catalog_attack_type_unavailable"]
+            payload["attack_type"] = attack_type
             payload["taxonomy_version"] = taxonomy_version
             payload["catalog_scope"] = None
             payload["catalog_version"] = None
@@ -155,13 +235,12 @@ class FinalMitigator(FinalAgent):
                 },
             )
 
-        normalized_family = str(result.get("family") or family)
         normalized_attack_type = (
             str(result["attack_type"])
             if result.get("attack_type") is not None
             else None
         )
-        catalog_scope = str(result.get("catalog_scope") or "family")
+        catalog_scope = str(result.get("catalog_scope") or "attack_type")
         catalog_version = (
             str(result["catalog_version"])
             if result.get("catalog_version") is not None
@@ -191,40 +270,21 @@ class FinalMitigator(FinalAgent):
             confidence = float(detection.get("probability", 0.0) or 0.0)
         confidence = min(max(confidence, 0.0), 1.0)
         review_reasons: list[str] = []
-        if normalized_family == "unknown_attack":
-            review_reasons.append("unknown_attack")
-        if model_task == "attack_subtype" and attack_type is None:
-            review_reasons.append("classification_attack_subtype_missing")
-        if attack_type is not None:
-            if normalized_attack_type != attack_type:
-                review_reasons.append("catalog_attack_type_mismatch")
-            if catalog_scope != "attack_type":
-                review_reasons.append("catalog_attack_type_scope_missing")
-            if not bool(result.get("family_consistent", False)):
-                review_reasons.append("catalog_attack_family_mismatch")
-            if taxonomy_version not in catalog_compatible_taxonomy_versions:
-                review_reasons.append("catalog_taxonomy_version_mismatch")
+        if normalized_attack_type != attack_type:
+            review_reasons.append("catalog_attack_type_mismatch")
+        if catalog_scope != "attack_type":
+            review_reasons.append("catalog_attack_type_scope_missing")
+        if taxonomy_version not in catalog_compatible_taxonomy_versions:
+            review_reasons.append("catalog_taxonomy_version_mismatch")
         requires_review = bool(review_reasons)
 
-        if normalized_family == "benign":
-            risk_summary = (
-                f"Evento {event_id} evaluado como benigno "
-                f"(p_maliciosa={float(detection.get('probability', 0.0) or 0.0):.4f}). "
-                "Mantener monitorizacion basica."
-            )
-        else:
-            attack_ids = [ref["attack_id"] for ref in references if ref.get("attack_id")]
-            classified_label = normalized_attack_type or normalized_family
-            family_context = (
-                f" (familia {normalized_family})" if normalized_attack_type else ""
-            )
-            risk_summary = (
-                f"Evento {event_id} clasificado como {classified_label}"
-                f"{family_context} "
-                f"(confianza {float(classification.get('confidence', 0.0) or 0.0):.4f}) "
-                f"sobre perfil {schema_profile or 'unknown'}. "
-                f"Referencias ATT&CK: {', '.join(attack_ids[:3]) or 'n/a'}."
-            )
+        attack_ids = [ref["attack_id"] for ref in references if ref.get("attack_id")]
+        risk_summary = (
+            f"Evento {event_id} clasificado como {normalized_attack_type} "
+            f"(confianza {float(classification.get('confidence', 0.0) or 0.0):.4f}) "
+            f"sobre perfil {schema_profile or 'unknown'}. "
+            f"Referencias ATT&CK: {', '.join(attack_ids[:3]) or 'n/a'}."
+        )
 
         catalog_payload = {
             "risk_summary": risk_summary,
@@ -237,8 +297,7 @@ class FinalMitigator(FinalAgent):
             "first_five_catalog_anchored": False,
             "review_reasons": review_reasons,
             "source": "catalog",
-            "attack_family": normalized_family,
-            "attack_subtype": normalized_attack_type,
+            "attack_type": normalized_attack_type,
             "taxonomy_version": taxonomy_version,
             "catalog_scope": catalog_scope,
             "catalog_version": catalog_version,
@@ -253,7 +312,7 @@ class FinalMitigator(FinalAgent):
             confidence=confidence,
             summary=(
                 f"tipo={normalized_attack_type or 'n/a'} "
-                f"familia={normalized_family} mitigaciones={len(mitigation_items)} "
+                f"mitigaciones={len(mitigation_items)} "
                 f"referencias={len(references)}"
             ),
         )
@@ -264,9 +323,11 @@ class FinalMitigator(FinalAgent):
         # ------------------------------------------------------------------
         final_payload = catalog_payload
         model_name: str | None = None
-        if self.llm is not None and normalized_family != "benign":
+        if self.llm is not None:
             llm_entry = self.start_entry(
-                tool="llm_contextualize", event_id=event_id, family=normalized_family
+                tool="llm_contextualize",
+                event_id=event_id,
+                attack_type=normalized_attack_type,
             )
             try:
                 raw = self.llm.contextualize(
@@ -291,8 +352,7 @@ class FinalMitigator(FinalAgent):
                 anchored["review_reasons"] = review_reasons
                 anchored["requires_human_review"] = bool(review_reasons)
                 for key in (
-                    "attack_family",
-                    "attack_subtype",
+                    "attack_type",
                     "taxonomy_version",
                     "catalog_scope",
                     "catalog_version",
@@ -352,8 +412,7 @@ class FinalMitigator(FinalAgent):
         explanation_output["review_reasons"] = list(
             final_payload.get("review_reasons") or []
         )
-        explanation_output["attack_family"] = final_payload.get("attack_family")
-        explanation_output["attack_subtype"] = final_payload.get("attack_subtype")
+        explanation_output["attack_type"] = final_payload.get("attack_type")
         explanation_output["taxonomy_version"] = final_payload.get("taxonomy_version")
         explanation_output["catalog_scope"] = final_payload.get("catalog_scope")
         explanation_output["catalog_version"] = final_payload.get("catalog_version")

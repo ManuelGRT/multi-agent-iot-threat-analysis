@@ -18,6 +18,7 @@ python -m pip install ".[test]"
 $env:MISTRAL_API_KEY="..."
 $env:INGEST_LLM_TIMEOUT_SECONDS="60"
 $env:TFM_STATE_DIR=".runtime-state"
+$env:MCP_CLIENT_MODE="inprocess"
 ```
 
 No mostrar ni guardar la clave en capturas, terminales compartidos o archivos
@@ -37,7 +38,9 @@ Explicación breve:
 > clasificador, mitigador y juez. El caso se persiste y un auditor independiente
 > puede comprobarlo posteriormente.»
 
-Señalar que el runtime contiene tres servidores MCP:
+Señalar que el runtime contiene tres servidores MCP. La demostración rápida
+usa explícitamente `inprocess`; el despliegue productivo utiliza MCP real por
+`stdio` de forma predeterminada:
 
 - `inference`: estandarización y modelos XGBoost;
 - `case_memory`: casos y trazas SQLite;
@@ -53,9 +56,10 @@ uvicorn src.api.app:app --host 0.0.0.0 --port 8000
 ```
 
 Abrir `http://localhost:8000` a pantalla completa. Como alternativa de
-despliegue, puede mostrarse la misma aplicación con:
+despliegue productivo por `stdio`, puede mostrarse la misma aplicación con:
 
 ```powershell
+$env:MCP_CLIENT_MODE="stdio"
 docker compose up --build
 ```
 
@@ -80,11 +84,16 @@ Qué señalar:
   la identidad del caso actual.
 - El detector muestra probabilidad y la zona gris `[0.4, 0.6]`; dentro de ella
   se abstiene y el juez solicita revisión humana.
-- El clasificador muestra el tipo, su familia agregada, la confianza y la
-  distribución top-3. Una confianza inferior a `0.65` también deriva el caso.
-- El mitigador muestra primero la contextualización de Mistral y mantiene
-  visibles las recomendaciones y referencias del catálogo. Los elementos
-  `llm_suggested` aparecen marcados como no respaldados.
+- El clasificador muestra el tipo elegido entre las 16 clases, su confianza y
+  la distribución top-3 de tipos. No deriva una familia amplia. Una confianza
+  inferior a `0.65` también deriva el caso.
+- El mitigador consulta directamente por `attack_type` la entrada específica
+  del catálogo, muestra primero la contextualización de Mistral y mantiene
+  visibles sus recomendaciones y referencias. Los elementos `llm_suggested`
+  aparecen marcados como no respaldados.
+- El juez comprueba que el tipo predicho sea el mismo utilizado por el
+  mitigador. El caso persistido queda indexado por ese tipo y el auditor vuelve
+  a comprobar su continuidad en el resultado cerrado.
 - El juez aprueba el caso o produce `human_interrupt`; esta última salida es
   una degradación controlada, no una clasificación maliciosa forzada.
 

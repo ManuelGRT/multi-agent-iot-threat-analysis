@@ -25,13 +25,13 @@
         <mxCell id="ag2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_detector&lt;/b&gt;&lt;br&gt;detect_event (XGBoost)&lt;br&gt;zona gris 0.4&#8211;0.6&lt;br&gt;&#8594; abstenci&#243;n" vertex="1">
           <mxGeometry height="92" width="220" x="410" y="308" as="geometry" />
         </mxCell>
-        <mxCell id="ag3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_classifier&lt;/b&gt;&lt;br&gt;classify_event&lt;br&gt;tipo + familia + confianza&lt;br&gt;+ top-3" vertex="1">
+        <mxCell id="ag3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_classifier&lt;/b&gt;&lt;br&gt;classify_event&lt;br&gt;1 de 16 tipos + confianza&lt;br&gt;+ top-3 de tipos" vertex="1">
           <mxGeometry height="92" width="210" x="670" y="308" as="geometry" />
         </mxCell>
-        <mxCell id="ag4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_mitigator&lt;/b&gt;&lt;br&gt;suggest_mitigations + LLM&lt;br&gt;anclado al cat&#225;logo&lt;br&gt;source: catalog | hybrid" vertex="1">
+        <mxCell id="ag4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_mitigator&lt;/b&gt;&lt;br&gt;cat&#225;logo por attack_type + LLM&lt;br&gt;anclado a la entrada del tipo&lt;br&gt;source: catalog | hybrid" vertex="1">
           <mxGeometry height="92" width="230" x="920" y="308" as="geometry" />
         </mxCell>
-        <mxCell id="ag5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_judge&lt;/b&gt;&lt;br&gt;umbrales + errores&lt;br&gt;approve /&lt;br&gt;revisi&#243;n humana" vertex="1">
+        <mxCell id="ag5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;final_judge&lt;/b&gt;&lt;br&gt;coherencia por tipo + umbrales&lt;br&gt;approve /&lt;br&gt;revisi&#243;n humana" vertex="1">
           <mxGeometry height="92" width="200" x="1190" y="308" as="geometry" />
         </mxCell>
         <mxCell id="mcp" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;fontSize=14;fontStyle=1;verticalAlign=top;spacingTop=8;" value="CAPA MCP &#8212; SDK oficial (FastMCP) &#183; toda tool devuelve tool_version + latency_ms &#183; modos in-process (tests/demo) y stdio (protocolo real)" vertex="1">
@@ -40,13 +40,13 @@
         <mxCell id="sv1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-datasets&lt;/b&gt;&lt;br&gt;list_datasets &#183; load_sample&lt;br&gt;load_batch &#183; get_schema_profile" vertex="1">
           <mxGeometry height="74" width="240" x="140" y="546" as="geometry" />
         </mxCell>
-        <mxCell id="sv2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-inference&lt;/b&gt;&lt;br&gt;standardize / detect / classify&lt;br&gt;(event &#183; batch) &#183; get_family_scores" vertex="1">
+        <mxCell id="sv2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-inference&lt;/b&gt;&lt;br&gt;standardize / detect / classify&lt;br&gt;tipo + confianza + top-3" vertex="1">
           <mxGeometry height="74" width="270" x="410" y="546" as="geometry" />
         </mxCell>
-        <mxCell id="sv3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-case-memory&lt;/b&gt;&lt;br&gt;create/update_case &#183; append_trace&lt;br&gt;get_case &#183; retrieve_similar_cases" vertex="1">
+        <mxCell id="sv3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-case-memory&lt;/b&gt;&lt;br&gt;create/update_case &#183; append_trace&lt;br&gt;persistencia y consulta por tipo" vertex="1">
           <mxGeometry height="74" width="250" x="710" y="546" as="geometry" />
         </mxCell>
-        <mxCell id="sv4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-threat-intel&lt;/b&gt;&lt;br&gt;map ATT&amp;amp;CK / CAPEC&lt;br&gt;suggest_mitigations &#183; cobertura Jorge" vertex="1">
+        <mxCell id="sv4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-threat-intel&lt;/b&gt;&lt;br&gt;consulta directa por attack_type&lt;br&gt;ATT&amp;amp;CK / CAPEC &#183; mitigaciones" vertex="1">
           <mxGeometry height="74" width="250" x="990" y="546" as="geometry" />
         </mxCell>
         <mxCell id="sv5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="&lt;b&gt;mcp-evaluation&lt;/b&gt;&lt;br&gt;score_run &#183; compare_with_baseline&lt;br&gt;export_report" vertex="1">
@@ -67,10 +67,10 @@
         <mxCell id="rc5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="baselines congelados&lt;br&gt;0.9363 vs 0.7479" vertex="1">
           <mxGeometry height="52" width="230" x="1270" y="688" as="geometry" />
         </mxCell>
-        <mxCell id="salida" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;spacing=6;" value="CaseResult auditable&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-size:11px;&quot;&gt;case_id &#183; trace[] completa &#183; mitigaciones con referencias &#183; status (completed / revisi&#243;n humana / error)&lt;/span&gt;" vertex="1">
+        <mxCell id="salida" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;spacing=6;" value="CaseResult auditable&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-size:11px;&quot;&gt;case_id &#183; tipo persistido &#183; trace[] completa &#183; mitigaciones con referencias &#183; status&lt;/span&gt;" vertex="1">
           <mxGeometry height="70" width="480" x="240" y="800" as="geometry" />
         </mxCell>
-        <mxCell id="auditor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;dashed=0;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;spacing=6;" value="Auditor&#237;a E2E (Fase 5)&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-size:11px;&quot;&gt;CaseAuditor por caso (consistencia &#183; traza &#183; leakage &#183; umbrales) + run_system_audit.py (semaforos, no-regresi&#243;n, baselines)&lt;/span&gt;" vertex="1">
+        <mxCell id="auditor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;dashed=0;fontSize=12;fontStyle=1;align=center;verticalAlign=middle;spacing=6;" value="Auditor&#237;a E2E (Fase 5)&lt;br&gt;&lt;span style=&quot;font-weight:normal;font-size:11px;&quot;&gt;coherencia del tipo &#183; traza &#183; leakage &#183; umbrales &#183; no-regresi&#243;n&lt;/span&gt;" vertex="1">
           <mxGeometry height="70" width="540" x="860" y="800" as="geometry" />
         </mxCell>
         <mxCell id="nota" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontColor=#666666;" value="Demo reproducible: demo_mcp_multiagent_case.py --offline &#183; digests SHA256 estables entre ejecuciones &#183; API: POST /cases/analyze &#183; suite automatizada en verde" vertex="1">

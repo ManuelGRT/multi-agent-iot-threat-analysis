@@ -72,12 +72,13 @@ def audit_case(case_id: str) -> CaseAuditReport:
     ni la decision operacional tomada previamente por el juez.
     """
     try:
-        stored = MCPToolClient(mode="inprocess").call(
-            "case_memory",
-            "get_case",
-            case_id=case_id,
-            include_trace=False,
-        )
+        with MCPToolClient() as memory_client:
+            stored = memory_client.call(
+                "case_memory",
+                "get_case",
+                case_id=case_id,
+                include_trace=False,
+            )
     except Exception as exc:
         raise HTTPException(
             status_code=503,

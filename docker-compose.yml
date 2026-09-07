@@ -12,7 +12,9 @@ services:
       MISTRAL_API_KEY: "${MISTRAL_API_KEY:?Define MISTRAL_API_KEY en el archivo .env}"
       INGEST_LLM_MODEL: "${INGEST_LLM_MODEL:-mistral-small-2603}"
       MITIGATOR_LLM_MODEL: "${MITIGATOR_LLM_MODEL:-mistral-small-2603}"
+      MCP_CLIENT_MODE: "${MCP_CLIENT_MODE:-stdio}"
       TFM_STATE_DIR: /var/lib/tfm_multiagent
+      TFM_ATTACK_TYPE_MODEL: "${TFM_ATTACK_TYPE_MODEL:-}"
     volumes:
       - runtime_state:/var/lib/tfm_multiagent
     tmpfs:

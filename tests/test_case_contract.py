@@ -50,10 +50,9 @@ def test_case_result_full_serialization_roundtrip():
         ),
         detection=DetectionInfo(is_malicious=True, probability=0.97, model_name="xgb_std_edge"),
         classification=ClassificationInfo(
-            attack_family="ddos",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             confidence=0.88,
-            model_task="attack_subtype",
+            model_task="attack_type",
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
         ),
         explanation=ExplanationInfo(
@@ -61,8 +60,7 @@ def test_case_result_full_serialization_roundtrip():
             mitigations=["rate_limit_traffic"],
             references=[ThreatReference(attack_id="T1498", name="Network DoS")],
             confidence=0.85,
-            attack_family="ddos",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             catalog_scope="attack_type",
             catalog_version="2.0",
@@ -92,7 +90,9 @@ def test_case_result_full_serialization_roundtrip():
     payload = json.loads(case.model_dump_json())
     assert payload["case_id"].startswith("case-")
     assert payload["explanation"]["references"][0]["attack_id"] == "T1498"
-    assert payload["explanation"]["attack_subtype"] == "DDoS_TCP"
+    assert payload["classification"]["attack_type"] == "DDoS_TCP"
+    assert payload["explanation"]["attack_type"] == "DDoS_TCP"
+    assert "attack_family" not in payload["classification"]
     assert payload["explanation"]["catalog_scope"] == "attack_type"
     assert payload["explanation"]["catalog_version"] == "2.0"
     assert (
@@ -108,8 +108,7 @@ def test_case_result_full_serialization_roundtrip():
     assert restored.case_id == case.case_id
     assert restored.trace[0].agent == "standardizer"
     assert restored.detection.probability == 0.97
-    assert restored.explanation.attack_family == "ddos"
-    assert restored.explanation.attack_subtype == "DDoS_TCP"
+    assert restored.explanation.attack_type == "DDoS_TCP"
     assert restored.explanation.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
     assert restored.explanation.catalog_scope == "attack_type"
     assert restored.explanation.catalog_version == "2.0"
@@ -156,19 +155,22 @@ def test_from_orchestrator_state_bridges_existing_contract():
         },
         "classification_output": {
             "event_id": "evt-9",
-            "attack_family": "botnet",
+            "attack_type": "Command_and_Control",
             "confidence": 0.8,
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
             "next_route": "explain",
         },
         "explanation_output": {
-            "risk_summary": "Posible botnet",
+            "risk_summary": "Posible canal de mando y control",
             "mitigations": ["isolate_device"],
             "confidence": 0.8,
+            "attack_type": "Command_and_Control",
         },
         "judge_output": {
             "action": "approve",
             "approved": True,
-            "final_label": "botnet",
+            "final_label": "Command_and_Control",
             "final_confidence": 0.8,
             "issues": [],
         },
@@ -185,9 +187,9 @@ def test_from_orchestrator_state_bridges_existing_contract():
     assert case.standardization.mapping_confidence == 0.9
     assert case.standardization.schema_profile == "network_flow"
     assert case.detection.is_malicious is True
-    assert case.classification.attack_family == "botnet"
+    assert case.classification.attack_type == "Command_and_Control"
     assert case.explanation.mitigations == ["isolate_device"]
-    assert case.judge.final_label == "botnet"
+    assert case.judge.final_label == "Command_and_Control"
     assert len(case.trace) == 2
     assert case.trace[1].confidence == 0.95
 
@@ -205,7 +207,7 @@ def test_from_orchestrator_state_benign_case_without_classification():
     }
     case = CaseResult.from_orchestrator_state(state)
     assert case.detection.is_malicious is False
-    assert case.classification.attack_family is None
+    assert case.classification.attack_type is None
     assert case.status == "completed"
     assert case.case_id.startswith("case-")
 
@@ -213,42 +215,42 @@ def test_from_orchestrator_state_benign_case_without_classification():
 def test_from_orchestrator_state_preserves_classifier_operational_contract():
     state = {
         "classification_output": {
-            "attack_family": "ddos",
-            "attack_subtype": "DDoS_TCP",
+            "attack_type": "DDoS_TCP",
             "confidence": 0.88,
-            "family_confidence": 0.94,
             "decision_threshold": 0.81,
-            "model_name": "xgboost_attack_subtype_jorge14_balanced_20260906",
-            "model_task": "attack_subtype",
-            "taxonomy_version": JORGE_TAXONOMY_VERSION,
-            "top_scores": {"DDoS_TCP": 0.88, "DDoS_UDP": 0.06},
-            "family_scores": {"ddos": 0.94},
+            "model_name": "xgboost_attack_subtype_multidataset16_balanced500_20260906",
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "top_scores": {
+                "DDoS_TCP": 0.88,
+                "DDoS_UDP": 0.06,
+                "XSS": 0.03,
+            },
         }
     }
     classification = CaseResult.from_orchestrator_state(state).classification
-    assert classification.model_task == "attack_subtype"
-    assert classification.taxonomy_version == JORGE_TAXONOMY_VERSION
+    assert classification.attack_type == "DDoS_TCP"
+    assert classification.model_task == "attack_type"
+    assert classification.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
     assert classification.decision_threshold == 0.81
     assert classification.model_name.endswith("_20260906")
-    assert classification.family_confidence == 0.94
-    assert classification.family_scores == {"ddos": 0.94}
+    assert len(classification.top_scores) == 3
+    assert not hasattr(classification, "attack_family")
 
 
 def test_from_orchestrator_state_preserves_typed_mitigation_contract():
     state = {
         "classification_output": {
-            "attack_family": "botnet",
-            "attack_subtype": "Command_and_Control",
+            "attack_type": "Command_and_Control",
             "confidence": 0.93,
-            "model_task": "attack_subtype",
+            "model_task": "attack_type",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
         },
         "explanation_output": {
             "risk_summary": "Canal de mando y control observado",
             "mitigations": ["aislar el dispositivo"],
             "confidence": 0.93,
-            "attack_family": "botnet",
-            "attack_subtype": "Command_and_Control",
+            "attack_type": "Command_and_Control",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
             "catalog_scope": "attack_type",
             "catalog_version": "2.0",
@@ -270,9 +272,8 @@ def test_from_orchestrator_state_preserves_typed_mitigation_contract():
 
     case = CaseResult.from_orchestrator_state(state)
 
-    assert case.classification.attack_subtype == "Command_and_Control"
-    assert case.explanation.attack_family == "botnet"
-    assert case.explanation.attack_subtype == "Command_and_Control"
+    assert case.classification.attack_type == "Command_and_Control"
+    assert case.explanation.attack_type == "Command_and_Control"
     assert case.explanation.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
     assert case.explanation.catalog_scope == "attack_type"
     assert case.explanation.catalog_version == "2.0"

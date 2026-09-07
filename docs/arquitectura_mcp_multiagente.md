@@ -36,9 +36,17 @@ sobre el `CaseResult` ya persistido, mediante
 
 ## 2. Tres servidores MCP
 
-Los agentes finales consumen solo tres dominios de herramientas. Cada servidor
-puede utilizarse en proceso o mediante el protocolo MCP por stdio con el mismo
-contrato JSON.
+Los agentes finales consumen solo tres dominios de herramientas. En producción
+se comunican por defecto mediante el protocolo MCP sobre `stdio`. El modo
+`inprocess` ejecuta directamente las mismas funciones y conserva el contrato
+JSON, pero se reserva para la demostración rápida y las pruebas que no evalúan
+el transporte. En `stdio`, cada caso crea los servidores de forma perezosa,
+mantiene una sesión por servidor durante todas sus llamadas y los cierra tras
+la persistencia final, incluso si el flujo termina con error.
+
+`run_case` gestiona automáticamente ese ciclo de vida cuando crea el cliente.
+Si se inyecta un cliente manualmente, el llamador conserva su propiedad y debe
+cerrarlo mediante `with MCPToolClient(...)` o `close()`.
 
 | Servidor | Módulo | Responsabilidad |
 |---|---|---|
@@ -60,10 +68,10 @@ controlada sin convertir una excepción en un resultado benigno.
 |---|---|---|
 | `FinalStandardizer` | Entrada limpia `row` o `text`; busca un éxito Mistral por hash exacto y, ante un *miss*, llama obligatoriamente a Mistral | Evento canónico, procedencia y confianza; cualquier fallo o confianza menor de 0,5 deriva al juez |
 | `FinalDetector` | Modelo XGBoost binario empaquetado | Veredicto y probabilidad; zona gris `[0.4, 0.6]` implica abstención |
-| `FinalClassifier` | Modelo XGBoost multiclase balanceado y empaquetado | Uno de 16 tipos, familia agregada, confianza y top-3; confianza menor de 0,65 solicita revisión |
-| `FinalMitigator` | Base del catálogo y contextualización Mistral por defecto | Explicación, recomendaciones y referencias con procedencia explícita |
-| `FinalJudge` | Reglas sobre todas las salidas y errores | `approve` o `human_interrupt` |
-| `CaseAuditor` | Revisión posterior del caso persistido | `approve`, `review` o `reject` por coherencia, trazabilidad, umbrales y fugas |
+| `FinalClassifier` | Modelo XGBoost multiclase balanceado y empaquetado | Uno de 16 tipos, confianza y top-3 de tipos; confianza menor de 0,65 solicita revisión |
+| `FinalMitigator` | Consulta directa del catálogo por `attack_type` y contextualización Mistral por defecto | Explicación, recomendaciones y referencias específicas del tipo, con procedencia explícita |
+| `FinalJudge` | Reglas sobre todas las salidas y errores; comprueba que clasificador y mitigador conserven el mismo tipo | `approve` o `human_interrupt` |
+| `CaseAuditor` | Revisión posterior del caso persistido | `approve`, `review` o `reject` por coherencia del tipo, trazabilidad, umbrales y fugas |
 
 Cada paso operacional añade un `TraceEntry` con estado, confianza, tiempos y
 errores. El auditor no es un nodo del grafo y emite un informe independiente.
@@ -106,12 +114,18 @@ El contrato de inferencia no importa módulos de evaluación ni agentes de
 entrenamiento. `src/mcp/features.py` mantiene la misma proyección de features
 que se usó al entrenarlos.
 
+El clasificador produce directamente una etiqueta entre los 16 tipos de la
+taxonomía desplegada, su confianza y las tres alternativas con mayor
+probabilidad. No calcula ni persiste una familia amplia.
+
 ## 6. Mitigación anclada
 
 El mitigador trabaja en dos capas:
 
-1. `threat_intel` obtiene del catálogo versionado mitigaciones por fase y
-   referencias ATT&CK/CAPEC verificables.
+1. `threat_intel` recibe el `attack_type` predicho y consulta directamente su
+   entrada del catálogo versionado para obtener mitigaciones por fase y
+   referencias ATT&CK/CAPEC verificables. No existe una consulta intermedia ni
+   una ruta de reserva por familia amplia.
 2. Mistral intenta contextualizar esa base para el evento observado.
 
 El validador conserva la procedencia de cada elemento. Las incorporaciones sin
@@ -123,8 +137,10 @@ llamada obligatoria del estandarizador ante un *cache miss*.
 ## 7. Contrato, persistencia y API
 
 `CaseResult` reúne el identificador, la entrada, el evento canónico, las salidas
-por etapa, la decisión del juez, los errores y la traza. El endpoint de análisis
-persiste siempre el caso en la memoria SQLite.
+por etapa, la decisión del juez, los errores y la traza. El juez y el auditor
+comprueban la continuidad del tipo entre la clasificación, la consulta del
+catálogo, la mitigación y el veredicto. El endpoint de análisis persiste siempre
+el caso en la memoria SQLite e indexa los casos maliciosos por tipo de ataque.
 
 Superficie pública:
 
@@ -166,6 +182,7 @@ python -m pip install .
 
 $env:MISTRAL_API_KEY="..."
 $env:TFM_STATE_DIR=".runtime-state" # opcional
+# MCP_CLIENT_MODE=stdio es el valor predeterminado
 uvicorn src.api.app:app --host 0.0.0.0 --port 8000
 ```
 
@@ -175,16 +192,24 @@ Configuración opcional:
 $env:INGEST_LLM_MODEL="mistral-small-2603"
 $env:INGEST_LLM_TIMEOUT_SECONDS="60"
 $env:MITIGATOR_LLM_MODEL="mistral-small-2603"
+$env:MCP_CLIENT_MODE="stdio"
+$env:MCP_STDIO_TIMEOUT_SECONDS="120"
 $env:TFM_STANDARDIZATION_CACHE_DB=".runtime-state/cache/mistral_standardization_v2.sqlite3"
 $env:TFM_CASE_MEMORY_DB=".runtime-state/case_memory.db"
+$env:TFM_ATTACK_TYPE_MODEL="C:/ruta/modelo-16-tipos.joblib"
 ```
+
+`TFM_ATTACK_TYPE_MODEL` solo es necesario para sustituir el artefacto incluido
+por otro que implemente exactamente la taxonomía desplegada de 16 tipos. La
+antigua variable `TFM_FAMILY_MODEL` no forma parte del contrato operativo.
 
 La clave `MISTRAL_API_KEY` debe proporcionarse solo mediante el entorno o un
 `.env` local ignorado por git.
 
-El extra `mcp` solo es necesario para arrancar los servidores mediante el
-protocolo stdio (`python -m pip install ".[mcp]"`); la API usa el mismo
-contrato en proceso.
+El SDK MCP forma parte de la instalación productiva. Para una demostración
+local con menor latencia puede seleccionarse explícitamente
+`MCP_CLIENT_MODE=inprocess`; para volver a atravesar el protocolo real basta con
+eliminar la variable o asignarle `stdio`.
 
 Ejecución en contenedor:
 

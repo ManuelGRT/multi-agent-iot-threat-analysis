@@ -286,9 +286,9 @@ const AUDIT_CHECK_INFO = {
     label: "Detección disponible",
     description: "Comprueba que un caso completado tenga veredicto benigno o malicioso.",
   },
-  "consistencia_benigno_sin_familia": {
-    label: "Benigno sin familia de ataque",
-    description: "Comprueba que un caso benigno no tenga asignada una familia maliciosa.",
+  "consistencia_benigno_sin_tipo_ataque": {
+    label: "Benigno sin tipo de ataque",
+    description: "Comprueba que un caso benigno no tenga asignado un tipo de ataque.",
   },
   "consistencia_abstencion_flaggeada": {
     label: "Abstención del detector atendida",
@@ -298,9 +298,9 @@ const AUDIT_CHECK_INFO = {
     label: "Abstención del estandarizador atendida",
     description: "Comprueba que una estandarización fallida se derive al juez para revisión.",
   },
-  "consistencia_malicioso_con_familia": {
-    label: "Ataque con familia asignada",
-    description: "Comprueba que un caso malicioso completado tenga familia de ataque.",
+  "consistencia_malicioso_con_tipo_ataque": {
+    label: "Ataque con tipo asignado",
+    description: "Comprueba que un caso malicioso completado tenga un tipo de ataque.",
   },
   "consistencia_probabilidad_en_rango": {
     label: "Probabilidad válida",
@@ -310,19 +310,15 @@ const AUDIT_CHECK_INFO = {
     label: "Etiqueta coherente con la probabilidad",
     description: "Comprueba que benigno o malicioso coincida con el umbral de detección.",
   },
-  "consistencia_malicioso_no_benigno": {
-    label: "Familia realmente maliciosa",
-    description: "Comprueba que un ataque no esté clasificado como benigno o normal.",
+  "consistencia_modelo_por_tipo": {
+    label: "Modelo de tipos correcto",
+    description: "Comprueba que el clasificador use directamente la tarea de 16 tipos de ataque.",
   },
-  "consistencia_modelo_familia_sin_subtipo": {
-    label: "Salida de familia sin tipo",
-    description: "Comprueba que el modelo antiguo no mezcle una familia con un tipo no producido por él.",
-  },
-  "consistencia_subtipo_en_taxonomia": {
+  "consistencia_tipo_ataque_en_taxonomia": {
     label: "Tipo de ataque reconocido",
     description: "Comprueba que el tipo predicho pertenezca a las clases admitidas por la taxonomía declarada.",
   },
-  "consistencia_subtipo_presente": {
+  "consistencia_tipo_ataque_presente": {
     label: "Tipo de ataque presente",
     description: "Comprueba que el clasificador por tipos haya devuelto un tipo de ataque.",
   },
@@ -330,29 +326,17 @@ const AUDIT_CHECK_INFO = {
     label: "Taxonomía vigente",
     description: "Comprueba que el modelo use una versión de taxonomía reconocida por el sistema.",
   },
-  "consistencia_top_scores_subtipos": {
+  "consistencia_top_scores_tipos": {
     label: "Top-3 de tipos válido",
     description: "Comprueba que sus etiquetas sean admitidas y sus puntuaciones estén entre 0 y 1.",
   },
-  "consistencia_puntuacion_familia": {
-    label: "Puntuación familiar coherente",
-    description: "Comprueba que la confianza de la familia coincida con la suma de sus tipos de ataque.",
-  },
-  "consistencia_subtipo_vs_familia": {
-    label: "Tipo y familia coherentes",
-    description: "Comprueba que la familia amplia corresponda al tipo de ataque predicho.",
-  },
-  "consistencia_subtipo_vs_top_scores": {
+  "consistencia_tipo_ataque_vs_top_scores": {
     label: "Tipo coherente con el top-3",
     description: "Comprueba que el tipo elegido tenga la mayor puntuación y coincida con la confianza.",
   },
-  "consistencia_mitigacion_subtipo": {
+  "consistencia_mitigacion_tipo_ataque": {
     label: "Mitigación para el tipo correcto",
     description: "Comprueba que el mitigador conserve el tipo de ataque predicho.",
-  },
-  "consistencia_mitigacion_familia": {
-    label: "Mitigación para la familia correcta",
-    description: "Comprueba que el mitigador conserve la familia amplia del ataque.",
   },
   "consistencia_mitigacion_taxonomia": {
     label: "Taxonomía de mitigación coherente",
@@ -362,7 +346,7 @@ const AUDIT_CHECK_INFO = {
     label: "Catálogo específico válido",
     description: "Comprueba que las medidas procedan del catálogo versionado del tipo predicho.",
   },
-  "consistencia_veredicto_juez_subtipo": {
+  "consistencia_veredicto_juez_tipo_ataque": {
     label: "Veredicto conserva el tipo",
     description: "Comprueba que la etiqueta y la confianza finales correspondan al tipo predicho.",
   },
@@ -444,7 +428,7 @@ const AUDIT_CHECK_INFO = {
   },
   "umbral_confianza_clasificacion_derivada": {
     label: "Clasificación incierta revisada",
-    description: "Comprueba que una familia con baja confianza solicite revisión humana.",
+    description: "Comprueba que un tipo con baja confianza solicite revisión humana.",
   },
 };
 
@@ -490,7 +474,7 @@ const AUDIT_FAILURE_LABELS = {
 };
 
 function auditField(raw, field) {
-  const match = String(raw || "").match(new RegExp(`${field}=((?:\\[[^\\]]*\\])|[^\\s]+)`));
+  const match = String(raw || "").match(new RegExp(`${field}=((?:\\[[^\\]]*\\])|(?:\\{[^}]*\\})|[^\\s]+)`));
   return match ? match[1] : null;
 }
 
@@ -548,10 +532,6 @@ function auditDetectionLabel(value) {
   return "sin veredicto";
 }
 
-function auditFamily(value) {
-  return value == null || ["None", "null", ""].includes(value) ? "ninguna" : value;
-}
-
 function formatLeakageEvidence(raw) {
   const labels = {
     campo_target_con_valor: "Campo objetivo con valor",
@@ -587,33 +567,29 @@ function formatAuditDetail(check) {
     case "consistencia_veredicto_deteccion_presente":
     case "consistencia_etiqueta_vs_probabilidad":
       return `Veredicto observado: ${verdict()} · Probabilidad maliciosa: ${probability()}`;
-    case "consistencia_benigno_sin_familia":
-    case "consistencia_malicioso_no_benigno":
-      return `Familia asignada: ${auditFamily(auditField(raw, "familia"))}`;
-    case "consistencia_subtipo_en_taxonomia":
-    case "consistencia_subtipo_presente":
-      return `Tipo de ataque: ${auditField(raw, "subtipo") || "no disponible"}`;
-    case "consistencia_modelo_familia_sin_subtipo":
-      return `Tipo de ataque inesperado: ${auditField(raw, "subtipo") || "ninguno"}`;
+    case "consistencia_benigno_sin_tipo_ataque":
+      return `Tipo asignado: ${auditField(raw, "tipo") || "ninguno"}`;
+    case "consistencia_tipo_ataque_en_taxonomia":
+    case "consistencia_tipo_ataque_presente":
+      return `Tipo de ataque: ${auditField(raw, "tipo") || "no disponible"}`;
+    case "consistencia_modelo_por_tipo":
+      return `Tarea del modelo: ${auditField(raw, "model_task") || "no disponible"}`;
     case "consistencia_version_taxonomia":
-      return `Versión recibida: ${auditField(raw, "recibida") || "no disponible"} · Versión esperada: ${auditField(raw, "esperada") || "no disponible"}`;
-    case "consistencia_top_scores_subtipos":
-      return `Puntuaciones recibidas: ${auditField(raw, "cantidad") || "0"} · Incluye el tipo elegido: ${auditYesNo(auditField(raw, "incluye_elegido"))}`;
-    case "consistencia_puntuacion_familia":
-      return `Familia: ${auditFamily(auditField(raw, "familia"))} · Confianza agregada: ${auditPercent(auditField(raw, "confidence"))}`;
-    case "consistencia_subtipo_vs_familia":
-      return `Tipo: ${auditField(raw, "subtipo") || "no disponible"} · Familia: ${auditFamily(auditField(raw, "familia"))} · Familia esperada: ${auditFamily(auditField(raw, "esperada"))}`;
-    case "consistencia_subtipo_vs_top_scores":
-      return `Tipo elegido: ${auditField(raw, "subtipo") || "no disponible"} · Primero del top-3: ${auditField(raw, "top") || "no disponible"} · Confianza: ${auditPercent(auditField(raw, "confidence"))}`;
-    case "consistencia_mitigacion_subtipo":
+      return `Versión recibida: ${auditField(raw, "recibida") || "no disponible"} · Versiones admitidas: ${auditField(raw, "soportadas") || "no disponibles"}`;
+    case "consistencia_top_scores_tipos": {
+      const invalid = auditField(raw, "valores_invalidos");
+      const invalidLabel = !invalid || invalid === "{}" ? "ninguna" : invalid;
+      return `Puntuaciones recibidas: ${auditField(raw, "cantidad") || "0"} · Incluye el tipo elegido: ${auditYesNo(auditField(raw, "incluye_elegido"))} · Etiquetas o puntuaciones inválidas: ${invalidLabel}`;
+    }
+    case "consistencia_tipo_ataque_vs_top_scores":
+      return `Tipo elegido: ${auditField(raw, "tipo") || "no disponible"} · Primero del top-3: ${auditField(raw, "top") || "no disponible"} · Confianza: ${auditPercent(auditField(raw, "confidence"))}`;
+    case "consistencia_mitigacion_tipo_ataque":
       return `Tipo del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Tipo del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
-    case "consistencia_mitigacion_familia":
-      return `Familia del mitigador: ${auditFamily(auditField(raw, "mitigador"))} · Familia del clasificador: ${auditFamily(auditField(raw, "clasificador"))}`;
     case "consistencia_mitigacion_taxonomia":
       return `Taxonomía del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Taxonomía del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
     case "consistencia_mitigacion_catalogo_tipado":
       return `Ámbito del catálogo: ${auditField(raw, "scope") || "no disponible"} · Versión: ${auditField(raw, "version") || "no disponible"} · Taxonomía: ${auditField(raw, "taxonomia_catalogo") || "no disponible"}`;
-    case "consistencia_veredicto_juez_subtipo":
+    case "consistencia_veredicto_juez_tipo_ataque":
       return `Veredicto del juez: ${auditField(raw, "juez") || "no disponible"} · Resultado del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
     case "consistencia_abstencion_flaggeada":
       return `Estado: ${status()} · Acción del juez: ${auditAction(auditField(raw, "action"))}`;
@@ -752,7 +728,7 @@ function pintarTarjetas(caso) {
     ${det.abstain ? '<p style="color:var(--gris);font-size:11.5px">El booleano interno del umbral no se considera un veredicto durante la abstención.</p>' : ""}
     <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${escapeHtml(det.model_name ?? "—")}</span></div>`;
 
-  if (cls.attack_family) {
+  if (cls.attack_type) {
     const decisionThreshold = Number.isFinite(Number(cls.decision_threshold))
       ? Number(cls.decision_threshold) : 0.65;
     const filas = Object.entries(cls.top_scores || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
@@ -760,13 +736,22 @@ function pintarTarjetas(caso) {
         <div class="barra"><div class="relleno" style="width:${ratioWidth(s)}%"></div></div>
         <span>${pct(s)}</span></div>`).join("");
     $("#t-cls .cuerpo").innerHTML = `
-      ${cls.attack_subtype ? `<div class="kv"><span class="k">Tipo de ataque</span><span><b>${escapeHtml(cls.attack_subtype)}</b></span></div>` : ""}
-      <div class="kv"><span class="k">Familia</span><span><b>${escapeHtml(cls.attack_family)}</b></span></div>
+      <div class="kv"><span class="k">Tipo de ataque</span><span><b>${escapeHtml(cls.attack_type)}</b></span></div>
       <div class="kv"><span class="k">Confianza</span><span>${pct(cls.confidence)}
         ${cls.confidence < decisionThreshold ? ` <span class="badge warn">&lt; ${pct(decisionThreshold)} → revisión</span>` : ""}</span></div>
-      <p style="margin:6px 0 2px;color:var(--gris);font-size:11.5px">Distribución top-3${cls.attack_subtype ? " de tipos de ataque" : ""}</p>${filas}`;
+      <p style="margin:6px 0 2px;color:var(--gris);font-size:11.5px">Distribución top-3 de tipos de ataque</p>${filas}`;
   } else {
-    $("#t-cls .cuerpo").innerHTML = '<p style="color:var(--gris)">No ejecutado (evento benigno o abstención del detector).</p>';
+    let classifierMessage;
+    if (det.abstain) {
+      classifierMessage = "No ejecutado: el detector se abstuvo.";
+    } else if (det.is_malicious === false) {
+      classifierMessage = "No ejecutado: el detector clasificó el evento como benigno.";
+    } else if (det.is_malicious === true) {
+      classifierMessage = "Sin tipo disponible: el clasificador falló o devolvió una salida inválida; el caso requiere revisión.";
+    } else {
+      classifierMessage = "No ejecutado: no existe un veredicto de detección.";
+    }
+    $("#t-cls .cuerpo").innerHTML = `<p style="color:var(--gris)">${classifierMessage}</p>`;
   }
 
   const llmName = String(exp.model_name || "").includes("::mistral::") ? "Mistral" : "LLM";

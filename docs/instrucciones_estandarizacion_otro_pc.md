@@ -34,7 +34,7 @@ interviene y cada resultado aceptado corresponde a una llamada en vivo.
 ```powershell
 cd <repo>
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[mcp,inference]"
+.\.venv\Scripts\python.exe -m pip install -e .
 ```
 
 Variables de entorno (misma terminal donde se lance):

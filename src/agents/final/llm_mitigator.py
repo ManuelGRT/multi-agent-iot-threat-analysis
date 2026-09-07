@@ -240,16 +240,13 @@ class LLMMitigationAgent:
                 "probability": detection.get("probability"),
             },
             "classification": {
-                "attack_family": classification.get("attack_family"),
-                "attack_subtype": classification.get("attack_subtype"),
+                "attack_type": classification.get("attack_type"),
                 "confidence": classification.get("confidence"),
-                "family_confidence": classification.get("family_confidence"),
                 "model_task": classification.get("model_task"),
                 "taxonomy_version": classification.get("taxonomy_version"),
                 "top_scores": classification.get("top_scores"),
             },
             "catalog": {
-                "family": catalog_result.get("family"),
                 "attack_type": catalog_result.get("attack_type"),
                 "catalog_scope": catalog_result.get("catalog_scope"),
                 "catalog_version": catalog_result.get("catalog_version"),

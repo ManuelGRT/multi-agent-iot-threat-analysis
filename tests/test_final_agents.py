@@ -139,13 +139,20 @@ def detect_ok(probability: float):
     }
 
 
-def classify_ok(family="ddos", confidence=0.95):
+def classify_ok(attack_type="DDoS_TCP", confidence=0.95):
     return {
         "ok": True,
-        "attack_family": family,
+        "attack_type": attack_type,
         "confidence": confidence,
-        "top_scores": {family: confidence, "scanning": 0.02, "injection": 0.01},
-        "model_name": "xgboost_attack_family_balanced_group_20260705",
+        "decision_threshold": 0.65,
+        "top_scores": {
+            attack_type: confidence,
+            "DDoS_UDP": 0.02,
+            "XSS": 0.01,
+        },
+        "model_task": "attack_type",
+        "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        "model_name": "xgboost_attack_subtype_multidataset16_balanced500_20260906",
     }
 
 
@@ -609,61 +616,39 @@ def test_classifier_requires_exact_top_three():
     with pytest.raises(ValueError, match="top-3"):
         FinalClassifier(top_k=2)
 
-def test_classifier_maps_family_and_top_scores():
-    stub = StubClient({("inference", "classify_event"): classify_ok("ddos", 0.95)})
+def test_classifier_persists_attack_type_and_top_scores():
+    stub = StubClient(
+        {("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95)}
+    )
     update = FinalClassifier(client=stub).run(base_state_with_event())
     output = update["classification_output"]
-    assert output["attack_family"] == "ddos"
+    assert output["attack_type"] == "DDoS_TCP"
     assert output["confidence"] == pytest.approx(0.95)
-    assert output["top_scores"]["ddos"] == pytest.approx(0.95)
+    assert output["top_scores"]["DDoS_TCP"] == pytest.approx(0.95)
+    assert len(output["top_scores"]) == 3
+    assert output["model_task"] == "attack_type"
+    assert not {
+        "attack_family",
+        "attack_subtype",
+        "family_confidence",
+        "family_scores",
+    } & output.keys()
     assert output["next_route"] == "explain"
     assert update["route"] == "explain"
 
 
-def test_classifier_preserves_jorge_subtype_and_broad_family():
+def test_classifier_accepts_multidataset_attack_type_contract():
     response = {
         "ok": True,
-        "attack_subtype": "DDoS_TCP",
-        "attack_family": "ddos",
-        "confidence": 0.91,
-        "family_confidence": 0.97,
-        "decision_threshold": 0.81,
-        "top_scores": {"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
-        "family_scores": {"ddos": 0.97, "injection": 0.03},
-        "score_type": "attack_subtype",
-        "model_task": "attack_subtype",
-        "taxonomy_version": JORGE_TAXONOMY_VERSION,
-        "model_name": "xgboost_attack_subtype_jorge14_balanced_20260906",
-    }
-    update = FinalClassifier(
-        client=StubClient({("inference", "classify_event"): response})
-    ).run(base_state_with_event())
-    output = update["classification_output"]
-    assert output["attack_subtype"] == "DDoS_TCP"
-    assert output["attack_family"] == "ddos"
-    assert output["model_task"] == "attack_subtype"
-    assert output["taxonomy_version"] == JORGE_TAXONOMY_VERSION
-    assert output["decision_threshold"] == pytest.approx(0.81)
-    assert output["family_confidence"] == pytest.approx(0.97)
-    assert output["next_route"] == "explain"
-    assert "score_type=attack_subtype" in output["reason"]
-
-
-def test_classifier_accepts_multidataset_subtype_and_broad_family():
-    response = {
-        "ok": True,
-        "attack_subtype": "Command_and_Control",
-        "attack_family": "botnet",
+        "attack_type": "Command_and_Control",
         "confidence": 0.90,
-        "family_confidence": 0.90,
         "decision_threshold": 0.70,
         "top_scores": {
             "Command_and_Control": 0.90,
             "DoS": 0.06,
             "DDoS_TCP": 0.04,
         },
-        "family_scores": {"botnet": 0.90, "ddos": 0.10},
-        "model_task": "attack_subtype",
+        "model_task": "attack_type",
         "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
         "model_name": "multidataset16",
     }
@@ -672,67 +657,63 @@ def test_classifier_accepts_multidataset_subtype_and_broad_family():
     ).run(base_state_with_event())
 
     assert update["route"] == "explain"
-    assert update["classification_output"]["attack_subtype"] == (
+    assert update["classification_output"]["attack_type"] == (
         "Command_and_Control"
     )
-    assert update["classification_output"]["attack_family"] == "botnet"
+    assert "score_type=attack_type" in update["classification_output"]["reason"]
 
 
-def test_classifier_rejects_incoherent_subtype_family_pair():
+def test_classifier_rejects_old_family_task():
     response = {
         "ok": True,
-        "attack_subtype": "DDoS_TCP",
-        "attack_family": "malware",
+        "attack_type": "DDoS_TCP",
         "confidence": 0.99,
-        "top_scores": {"DDoS_TCP": 0.99},
-        "model_task": "attack_subtype",
+        "top_scores": {"DDoS_TCP": 0.99, "DDoS_UDP": 0.01, "XSS": 0.0},
+        "model_task": "attack_family",
+        "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+    }
+    update = FinalClassifier(
+        client=StubClient({("inference", "classify_event"): response})
+    ).run(base_state_with_event())
+    assert update["route"] == "judge"
+    assert update["classification_output"]["attack_type"] is None
+    assert any("tarea_clasificador_no_soportada" in error for error in update["errors"])
+
+
+def test_classifier_rejects_non_deployed_taxonomy():
+    response = {
+        "ok": True,
+        "attack_type": "DDoS_TCP",
+        "confidence": 0.99,
+        "top_scores": {"DDoS_TCP": 0.99, "DDoS_UDP": 0.01, "XSS": 0.0},
+        "model_task": "attack_type",
         "taxonomy_version": JORGE_TAXONOMY_VERSION,
     }
     update = FinalClassifier(
         client=StubClient({("inference", "classify_event"): response})
     ).run(base_state_with_event())
     assert update["route"] == "judge"
-    assert update["classification_output"]["attack_family"] == "unknown_attack"
-    assert any("subtipo_familia_incoherentes" in error for error in update["errors"])
-
-
-def test_classifier_rejects_subtype_from_family_model():
-    response = {
-        "ok": True,
-        "attack_subtype": "DDoS_TCP",
-        "attack_family": "ddos",
-        "confidence": 0.99,
-        "top_scores": {"ddos": 0.99},
-        "model_task": "attack_family",
-    }
-    update = FinalClassifier(
-        client=StubClient({("inference", "classify_event"): response})
-    ).run(base_state_with_event())
-    assert update["route"] == "judge"
     assert any(
-        "subtipo_inesperado_para_modelo_familia" in error
+        "taxonomia_clasificador_no_soportada" in error
         for error in update["errors"]
     )
 
 
-def test_classifier_rejects_incomplete_subtype_scores():
+def test_classifier_rejects_incomplete_attack_type_scores():
     response = {
         "ok": True,
-        "attack_subtype": "DDoS_TCP",
-        "attack_family": "ddos",
+        "attack_type": "DDoS_TCP",
         "confidence": 0.91,
-        "family_confidence": 1.0,
         "top_scores": {"DDoS_TCP": 0.91},
-        "family_scores": {"ddos": 1.0},
-        "model_task": "attack_subtype",
-        "taxonomy_version": JORGE_TAXONOMY_VERSION,
+        "model_task": "attack_type",
+        "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
     }
     update = FinalClassifier(
         client=StubClient({("inference", "classify_event"): response})
     ).run(base_state_with_event())
     assert update["route"] == "judge"
     assert any(
-        "puntuaciones_clasificador_subtipo_incoherentes" in error
+        "puntuaciones_clasificador_tipo_incoherentes" in error
         for error in update["errors"]
     )
 
@@ -741,7 +722,7 @@ def test_classifier_tool_error_routes_judge():
     stub = StubClient({("inference", "classify_event"): {"ok": False, "error": "boom"}})
     update = FinalClassifier(client=stub).run(base_state_with_event())
     assert update["route"] == "judge"
-    assert update["classification_output"]["attack_family"] == "unknown_attack"
+    assert update["classification_output"]["attack_type"] is None
     assert update["errors"]
 
 
@@ -753,10 +734,15 @@ def test_mitigator_catalog_ddos_references_and_mitigations():
     state = {
         "canonical_event": dict(CANONICAL_EVENT),
         "detection_output": {"is_malicious": True, "probability": 0.97},
-        "classification_output": {"attack_family": "ddos", "confidence": 0.95},
+        "classification_output": {
+            "attack_type": "DDoS_TCP",
+            "confidence": 0.95,
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        },
         "trace": [],
     }
-    update = FinalMitigator(client=MCPToolClient()).run(state)
+    update = FinalMitigator(client=MCPToolClient(mode="inprocess")).run(state)
     output = update["explanation_output"]
     assert output["mitigations"], "debe haber mitigaciones del catalogo"
     reference_ids = {
@@ -771,85 +757,74 @@ def test_mitigator_catalog_ddos_references_and_mitigations():
 
 
 @pytest.mark.parametrize(
-    ("attack_subtype", "attack_family", "taxonomy_version", "expected_reference"),
+    ("attack_type", "expected_reference"),
     [
-        (
-            "DDoS_TCP",
-            "ddos",
-            MULTIDATASET_TAXONOMY_VERSION,
-            "CAPEC-482",
-        ),
-        ("DoS", "ddos", MULTIDATASET_TAXONOMY_VERSION, "T1499"),
-        (
-            "Command_and_Control",
-            "botnet",
-            MULTIDATASET_TAXONOMY_VERSION,
-            "T1071",
-        ),
+        ("DDoS_TCP", "CAPEC-482"),
+        ("DoS", "T1499"),
+        ("Command_and_Control", "T1071"),
     ],
 )
-def test_mitigator_uses_typed_catalog_contract(
-    attack_subtype, attack_family, taxonomy_version, expected_reference
-):
+def test_mitigator_uses_typed_catalog_contract(attack_type, expected_reference):
     state = {
         "canonical_event": dict(CANONICAL_EVENT),
         "detection_output": {"is_malicious": True, "probability": 0.97},
         "classification_output": {
-            "attack_family": attack_family,
-            "attack_subtype": attack_subtype,
+            "attack_type": attack_type,
             "confidence": 0.95,
-            "model_task": "attack_subtype",
-            "taxonomy_version": taxonomy_version,
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
         },
         "trace": [],
     }
 
-    update = FinalMitigator(client=MCPToolClient()).run(state)
+    update = FinalMitigator(client=MCPToolClient(mode="inprocess")).run(state)
     output = update["explanation_output"]
     reference_ids = {
         reference.get("attack_id") or reference.get("capec_id")
         for reference in output["references"]
     }
 
-    assert output["attack_subtype"] == attack_subtype
-    assert output["attack_family"] == attack_family
-    assert output["taxonomy_version"] == taxonomy_version
+    assert output["attack_type"] == attack_type
+    assert "attack_family" not in output
+    assert "attack_subtype" not in output
+    assert output["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
     assert output["catalog_scope"] == "attack_type"
-    assert output["catalog_version"] == "2.0"
+    assert output["catalog_version"] == "3.0"
     assert output["catalog_taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
     assert set(output["catalog_compatible_taxonomy_versions"]) == {
         JORGE_TAXONOMY_VERSION,
         MULTIDATASET_TAXONOMY_VERSION,
     }
-    assert taxonomy_version in output["catalog_compatible_taxonomy_versions"]
+    assert (
+        MULTIDATASET_TAXONOMY_VERSION
+        in output["catalog_compatible_taxonomy_versions"]
+    )
     assert expected_reference in reference_ids
-    assert attack_subtype in output["risk_summary"]
+    assert attack_type in output["risk_summary"]
     assert output["requires_human_review"] is False
     assert output["review_reasons"] == []
 
 
-def test_mitigator_flags_typed_catalog_family_mismatch():
+def test_mitigator_requires_attack_type_without_family_fallback():
     state = {
         "canonical_event": dict(CANONICAL_EVENT),
         "detection_output": {"is_malicious": True, "probability": 0.97},
         "classification_output": {
             "attack_family": "malware",
-            "attack_subtype": "DDoS_TCP",
             "confidence": 0.95,
-            "model_task": "attack_subtype",
+            "model_task": "attack_type",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
         },
         "trace": [],
     }
 
-    update = FinalMitigator(client=MCPToolClient()).run(state)
+    update = FinalMitigator(client=MCPToolClient(mode="inprocess")).run(state)
     output = update["explanation_output"]
 
-    assert output["attack_subtype"] == "DDoS_TCP"
-    assert output["attack_family"] == "ddos"
-    assert output["catalog_scope"] == "attack_type"
+    assert output["attack_type"] is None
+    assert output["catalog_scope"] is None
     assert output["requires_human_review"] is True
-    assert "catalog_attack_family_mismatch" in output["review_reasons"]
+    assert "classification_attack_type_missing" in output["review_reasons"]
     assert update["needs_human_review"] is True
 
 
@@ -859,7 +834,7 @@ def test_mitigator_benign_minimal_monitoring():
         "detection_output": {"is_malicious": False, "probability": 0.02},
         "trace": [],
     }
-    update = FinalMitigator(client=MCPToolClient()).run(state)
+    update = FinalMitigator(client=MCPToolClient(mode="inprocess")).run(state)
     output = update["explanation_output"]
     assert "benigno" in output["risk_summary"]
     assert output["requires_human_review"] is False
@@ -867,14 +842,19 @@ def test_mitigator_benign_minimal_monitoring():
     assert not any("aislar" in m or "bloquear" in m for m in output["mitigations"])
 
 
-def test_mitigator_unknown_family_requires_review():
+def test_mitigator_unknown_attack_type_requires_review():
     state = {
         "canonical_event": dict(CANONICAL_EVENT),
         "detection_output": {"is_malicious": True, "probability": 0.8},
-        "classification_output": {"attack_family": "familia_inexistente", "confidence": 0.4},
+        "classification_output": {
+            "attack_type": "tipo_inexistente",
+            "confidence": 0.4,
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        },
         "trace": [],
     }
-    update = FinalMitigator(client=MCPToolClient()).run(state)
+    update = FinalMitigator(client=MCPToolClient(mode="inprocess")).run(state)
     assert update["explanation_output"]["requires_human_review"] is True
     assert update["needs_human_review"] is True
 
@@ -884,7 +864,12 @@ def test_mitigator_tool_error_falls_back_to_review():
     state = {
         "canonical_event": dict(CANONICAL_EVENT),
         "detection_output": {"is_malicious": True, "probability": 0.9},
-        "classification_output": {"attack_family": "ddos", "confidence": 0.9},
+        "classification_output": {
+            "attack_type": "DDoS_TCP",
+            "confidence": 0.9,
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        },
         "trace": [],
     }
     update = FinalMitigator(client=stub).run(state)
@@ -901,8 +886,29 @@ def clean_state():
         "canonical_event": dict(CANONICAL_EVENT),
         "ingest_output": {"mapping_confidence": 0.9},
         "detection_output": {"is_malicious": True, "probability": 0.97, "abstain": False},
-        "classification_output": {"attack_family": "ddos", "confidence": 0.95},
-        "explanation_output": {"requires_human_review": False},
+        "classification_output": {
+            "attack_type": "DDoS_TCP",
+            "confidence": 0.95,
+            "decision_threshold": 0.65,
+            "model_task": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "top_scores": {
+                "DDoS_TCP": 0.95,
+                "DDoS_UDP": 0.03,
+                "XSS": 0.02,
+            },
+        },
+        "explanation_output": {
+            "attack_type": "DDoS_TCP",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "catalog_scope": "attack_type",
+            "catalog_version": "2.0",
+            "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "catalog_compatible_taxonomy_versions": [
+                MULTIDATASET_TAXONOMY_VERSION,
+            ],
+            "requires_human_review": False,
+        },
         "trace": [],
     }
 
@@ -910,22 +916,29 @@ def clean_state():
 def configure_typed_mitigation(
     state,
     *,
-    attack_subtype="DDoS_TCP",
-    attack_family="ddos",
-    taxonomy_version=JORGE_TAXONOMY_VERSION,
+    attack_type="DDoS_TCP",
+    taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
 ):
+    alternatives = [
+        label
+        for label in ("DDoS_UDP", "XSS", "DoS", "Command_and_Control")
+        if label != attack_type
+    ][:2]
     state["classification_output"].update(
         {
-            "attack_family": attack_family,
-            "attack_subtype": attack_subtype,
-            "model_task": "attack_subtype",
+            "attack_type": attack_type,
+            "model_task": "attack_type",
             "taxonomy_version": taxonomy_version,
+            "top_scores": {
+                attack_type: state["classification_output"]["confidence"],
+                alternatives[0]: 0.03,
+                alternatives[1]: 0.02,
+            },
         }
     )
     state["explanation_output"].update(
         {
-            "attack_family": attack_family,
-            "attack_subtype": attack_subtype,
+            "attack_type": attack_type,
             "taxonomy_version": taxonomy_version,
             "catalog_scope": "attack_type",
             "catalog_version": "2.0",
@@ -939,17 +952,24 @@ def configure_typed_mitigation(
     return state
 
 
+def set_classifier_confidence(state, confidence):
+    state["classification_output"]["confidence"] = confidence
+    attack_type = state["classification_output"]["attack_type"]
+    state["classification_output"]["top_scores"][attack_type] = confidence
+    return state
+
+
 def test_judge_approves_clean_case():
     update = FinalJudge().run(clean_state())
     output = update["judge_output"]
     assert output["action"] == "approve"
     assert output["approved"] is True
-    assert output["final_label"] == "ddos"
+    assert output["final_label"] == "DDoS_TCP"
     assert update["needs_human_review"] is False
     assert update["route"] == "end"
 
 
-def test_judge_accepts_coherent_subtype_and_family():
+def test_judge_accepts_coherent_attack_type():
     state = configure_typed_mitigation(clean_state())
     update = FinalJudge().run(state)
     assert update["judge_output"]["action"] == "approve"
@@ -957,10 +977,10 @@ def test_judge_accepts_coherent_subtype_and_family():
     assert update["judge_output"]["final_confidence"] == pytest.approx(0.95)
 
 
-def test_judge_accepts_multidataset_dos_subtype_contract():
+def test_judge_accepts_multidataset_dos_attack_type_contract():
     state = configure_typed_mitigation(
         clean_state(),
-        attack_subtype="DoS",
+        attack_type="DoS",
         taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
     )
     update = FinalJudge().run(state)
@@ -968,14 +988,10 @@ def test_judge_accepts_multidataset_dos_subtype_contract():
     assert update["judge_output"]["final_label"] == "DoS"
 
 
-def test_judge_uses_persisted_subtype_threshold_and_contract():
+def test_judge_uses_persisted_attack_type_threshold_and_contract():
     state = configure_typed_mitigation(clean_state())
-    state["classification_output"].update(
-        {
-            "decision_threshold": 0.81,
-            "confidence": 0.80,
-        }
-    )
+    state["classification_output"]["decision_threshold"] = 0.81
+    set_classifier_confidence(state, 0.80)
     update = FinalJudge().run(state)
     assert "classification_confidence_below_review_threshold" in update[
         "judge_output"
@@ -991,12 +1007,8 @@ def test_judge_applies_operational_classifier_threshold_boundary(
     confidence, expected_action
 ):
     state = configure_typed_mitigation(clean_state())
-    state["classification_output"].update(
-        {
-            "decision_threshold": 0.65,
-            "confidence": confidence,
-        }
-    )
+    state["classification_output"]["decision_threshold"] = 0.65
+    set_classifier_confidence(state, confidence)
 
     update = FinalJudge().run(state)
 
@@ -1007,40 +1019,46 @@ def test_judge_applies_operational_classifier_threshold_boundary(
     ) is (confidence < 0.65)
 
 
-def test_judge_rejects_incomplete_subtype_model_contract():
+def test_judge_rejects_incomplete_attack_type_model_contract():
     state = clean_state()
     state["classification_output"].update(
-        {"model_task": "attack_subtype", "decision_threshold": 0.81}
+        {
+            "attack_type": None,
+            "model_task": "attack_type",
+            "taxonomy_version": None,
+            "decision_threshold": 0.81,
+        }
     )
     update = FinalJudge().run(state)
-    assert "classification_subtype_missing" in update["judge_output"]["issues"]
+    assert "classification_attack_type_missing" in update["judge_output"]["issues"]
     assert "classification_taxonomy_version_invalid" in update["judge_output"]["issues"]
 
 
-def test_judge_flags_subtype_family_mismatch():
+def test_judge_flags_attack_type_outside_taxonomy():
     state = configure_typed_mitigation(
         clean_state(),
-        attack_family="malware",
+        attack_type="Novel_Attack",
     )
     update = FinalJudge().run(state)
-    assert "classification_subtype_family_mismatch" in update["judge_output"]["issues"]
+    assert "classification_attack_type_outside_taxonomy" in update[
+        "judge_output"
+    ]["issues"]
 
 
 @pytest.mark.parametrize(
     ("field", "value", "expected_issue"),
     [
-        ("attack_subtype", "DDoS_UDP", "mitigation_attack_subtype_mismatch"),
-        ("attack_family", "malware", "mitigation_attack_family_mismatch"),
+        ("attack_type", "DDoS_UDP", "mitigation_attack_type_mismatch"),
         (
             "taxonomy_version",
-            MULTIDATASET_TAXONOMY_VERSION,
+            JORGE_TAXONOMY_VERSION,
             "mitigation_taxonomy_version_mismatch",
         ),
         ("catalog_scope", "family", "mitigation_catalog_scope_invalid"),
         ("catalog_version", None, "mitigation_catalog_version_missing"),
         (
             "catalog_compatible_taxonomy_versions",
-            [MULTIDATASET_TAXONOMY_VERSION],
+            [JORGE_TAXONOMY_VERSION],
             "mitigation_catalog_taxonomy_version_mismatch",
         ),
     ],
@@ -1058,14 +1076,12 @@ def test_judge_flags_typed_mitigation_contract_mismatch(
     assert update["needs_human_review"] is True
 
 
-def test_judge_flags_subtype_from_family_model():
+def test_judge_rejects_legacy_model_task():
     state = clean_state()
-    state["classification_output"]["attack_subtype"] = "DDoS_TCP"
+    state["classification_output"]["model_task"] = "attack_subtype"
     update = FinalJudge().run(state)
-    assert "classification_subtype_unexpected_for_family_model" in update[
-        "judge_output"
-    ]["issues"]
-    assert update["judge_output"]["final_label"] == "ddos"
+    assert "classification_model_task_invalid" in update["judge_output"]["issues"]
+    assert update["judge_output"]["final_label"] == "DDoS_TCP"
 
 
 def test_judge_flags_detector_abstention():
@@ -1111,7 +1127,7 @@ def test_judge_flags_low_mapping_confidence():
 
 def test_judge_flags_low_classification_confidence():
     state = clean_state()
-    state["classification_output"]["confidence"] = 0.4
+    set_classifier_confidence(state, 0.4)
     update = FinalJudge().run(state)
     assert (
         "classification_confidence_below_review_threshold"
@@ -1141,12 +1157,14 @@ def test_judge_rejects_inconsistent_detection_semantics():
     assert update["judge_output"]["approved"] is False
 
 
-def test_judge_rejects_malicious_case_classified_as_benign():
+def test_judge_rejects_attack_type_outside_taxonomy():
     state = clean_state()
-    state["classification_output"]["attack_family"] = "benign"
+    state["classification_output"]["attack_type"] = "benign"
 
     update = FinalJudge().run(state)
-    assert "malicious_classified_as_benign" in update["judge_output"]["issues"]
+    assert "classification_attack_type_outside_taxonomy" in update[
+        "judge_output"
+    ]["issues"]
 
 
 def test_judge_benign_case_label_and_confidence():
@@ -1159,3 +1177,75 @@ def test_judge_benign_case_label_and_confidence():
     assert output["action"] == "approve"
     assert output["final_label"] == "benign"
     assert output["final_confidence"] == pytest.approx(0.95)
+
+
+def test_judge_requires_review_when_detector_has_no_verdict_without_abstaining():
+    state = clean_state()
+    state["detection_output"] = {
+        "is_malicious": None,
+        "probability": 0.0,
+        "abstain": False,
+    }
+    state.pop("classification_output")
+    state.pop("explanation_output")
+
+    update = FinalJudge().run(state)
+    output = update["judge_output"]
+
+    assert output["action"] == "human_interrupt"
+    assert output["approved"] is False
+    assert output["final_label"] is None
+    assert output["final_confidence"] == 0.0
+    assert "detection_verdict_missing" in output["issues"]
+
+
+def test_judge_never_uses_attack_type_when_detector_says_benign():
+    state = clean_state()
+    state["detection_output"] = {
+        "is_malicious": False,
+        "probability": 0.1,
+        "abstain": False,
+    }
+
+    update = FinalJudge().run(state)
+    output = update["judge_output"]
+
+    assert output["action"] == "human_interrupt"
+    assert output["approved"] is False
+    assert output["final_label"] == "benign"
+    assert output["final_confidence"] == pytest.approx(0.9)
+    assert "benign_with_classification" in output["issues"]
+
+
+def test_judge_requires_the_deployed_multidataset_taxonomy():
+    state = configure_typed_mitigation(
+        clean_state(), taxonomy_version=JORGE_TAXONOMY_VERSION
+    )
+
+    update = FinalJudge().run(state)
+
+    assert update["judge_output"]["action"] == "human_interrupt"
+    assert "classification_taxonomy_version_invalid" in update["judge_output"][
+        "issues"
+    ]
+
+
+@pytest.mark.parametrize(
+    "top_scores",
+    [
+        {},
+        {"DDoS_TCP": 0.95, "XSS": 0.05},
+        {"DDoS_TCP": 0.95, "XSS": 0.03, "invented_attack": 0.02},
+        {"DDoS_TCP": 0.95, "XSS": 0.03, "DoS": 1.2},
+        {"DDoS_TCP": 0.80, "XSS": 0.10, "DoS": 0.10},
+        {"DDoS_TCP": 0.40, "XSS": 0.50, "DoS": 0.10},
+    ],
+)
+def test_judge_rejects_invalid_attack_type_top_three(top_scores):
+    state = clean_state()
+    state["classification_output"]["top_scores"] = top_scores
+
+    update = FinalJudge().run(state)
+
+    assert update["judge_output"]["action"] == "human_interrupt"
+    assert "classification_top_scores_invalid" in update["judge_output"]["issues"]

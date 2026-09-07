@@ -129,12 +129,14 @@ recupera (§4).
 - **Juez por reglas**: el juez final es determinista por umbrales (no LLM);
   la revisión humana es la salida prevista para los casos dudosos (así lo
   muestran la demo y la auditoría, no es un fallo).
-- **MCP por stdio**: los tres servidores del runtime comparten el mismo
-  contrato que el modo in-process. Para operación, la API mantiene cargados los
-  modelos y evita arrancar un proceso por llamada.
+- **MCP por stdio**: el runtime productivo atraviesa por defecto el protocolo
+  MCP real. Para cada caso, el cliente abre de forma perezosa como máximo un
+  proceso y una sesión por servidor, los reutiliza en todas las llamadas del
+  flujo y los cierra después de persistir el `CaseResult`. La demo rápida fija
+  `inprocess` y ejecuta las mismas tools y contratos sin transporte MCP.
 - **Evaluación de mitigaciones**: se audita estructura, cobertura y
-  anclaje; no hay validación con expertos humanos (igual que en el TFM
-  previo, que además tenía evaluación circular — declararlo).
+  anclaje; las referencias asistidas por IA fueron revisadas una a una por el
+  autor, pero no existe validación por expertos humanos independientes.
 
 ## 8. Evidencia de sistema (para el capítulo de validación)
 

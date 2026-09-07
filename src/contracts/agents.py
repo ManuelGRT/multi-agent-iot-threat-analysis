@@ -27,16 +27,13 @@ class DetectionOutput(BaseModel):
 
 class ClassificationOutput(BaseModel):
     event_id: str
-    attack_family: str | None = None
-    attack_subtype: str | None = None
+    attack_type: str | None = None
     confidence: float = Field(ge=0.0, le=1.0)
-    family_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     decision_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
     model_name: str | None = None
-    model_task: Literal["attack_family", "attack_subtype"] = "attack_family"
+    model_task: Literal["attack_type"] = "attack_type"
     taxonomy_version: str | None = None
     top_scores: dict[str, float] = Field(default_factory=dict)
-    family_scores: dict[str, float] = Field(default_factory=dict)
     cross_dataset_neighbors: list[str] = Field(default_factory=list)
     reason: list[str] = Field(default_factory=list)
     next_route: Literal["explain", "judge", "end"]
@@ -46,10 +43,9 @@ class ExplanationOutput(BaseModel):
     risk_summary: str
     mitigations: list[str]
     confidence: float = Field(ge=0.0, le=1.0)
-    attack_family: str | None = None
-    attack_subtype: str | None = None
+    attack_type: str | None = None
     taxonomy_version: str | None = None
-    catalog_scope: Literal["family", "attack_type"] | None = None
+    catalog_scope: Literal["attack_type"] | None = None
     catalog_version: str | None = None
     catalog_taxonomy_version: str | None = None
     catalog_compatible_taxonomy_versions: list[str] = Field(default_factory=list)

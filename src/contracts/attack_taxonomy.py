@@ -1,11 +1,10 @@
 """Taxonomias operativas de tipos de ataque para el clasificador.
 
-El detector binario es responsable de ``Normal``. Por ello, el clasificador
-operacional utiliza exclusivamente los catorce tipos de ataque de
-Edge-IIoTset empleados en el trabajo de referencia. La familia amplia se
-deriva despues de la prediccion para conservar la compatibilidad con el
-catalogo de mitigacion. La vista multidataset amplia ese contrato de forma
-independiente para cubrir ataques significativos de las demas fuentes.
+El detector binario es responsable de ``Normal``. El clasificador operacional
+predice directamente uno de los dieciseis tipos de la taxonomia multidataset;
+no deriva una agrupacion paralela. La taxonomia de catorce tipos de
+Edge-IIoTset se conserva para reproducir la comparativa con el trabajo de
+referencia.
 """
 from __future__ import annotations
 
@@ -53,30 +52,6 @@ SUPPORTED_ATTACK_TAXONOMY_VERSIONS: tuple[str, ...] = (
     JORGE_TAXONOMY_VERSION,
     MULTIDATASET_TAXONOMY_VERSION,
 )
-
-JORGE_TO_BROAD_FAMILY: dict[str, str] = {
-    "Backdoor": "malware",
-    "DDoS_HTTP": "ddos",
-    "DDoS_ICMP": "ddos",
-    "DDoS_TCP": "ddos",
-    "DDoS_UDP": "ddos",
-    "Fingerprinting": "scanning",
-    "MITM": "mitm",
-    "Password": "bruteforce",
-    "Port_Scanning": "scanning",
-    "Ransomware": "malware",
-    "SQL_injection": "injection",
-    "Uploading": "injection",
-    "Vulnerability_scanner": "scanning",
-    "XSS": "injection",
-}
-
-MULTIDATASET_TO_BROAD_FAMILY: dict[str, str] = {
-    **JORGE_TO_BROAD_FAMILY,
-    # El catalogo de inteligencia agrupa DoS y DDoS bajo ``ddos``.
-    "DoS": "ddos",
-    "Command_and_Control": "botnet",
-}
 
 ResolutionStatus = Literal[
     "exact",
@@ -384,13 +359,6 @@ def resolve_multidataset_class(
     return TaxonomyResolution("out_of_taxonomy", None, "dataset_not_supported")
 
 
-def broad_family_for_attack_type(attack_type: str) -> str:
-    try:
-        return MULTIDATASET_TO_BROAD_FAMILY[str(attack_type)]
-    except KeyError as exc:
-        raise ValueError(f"Tipo de ataque fuera de la taxonomia: {attack_type!r}") from exc
-
-
 def attack_classes_for_taxonomy(version: object) -> tuple[str, ...]:
     """Devuelve el espacio cerrado de clases de una version soportada.
 
@@ -470,7 +438,6 @@ def taxonomy_report() -> dict[str, object]:
         "version": JORGE_TAXONOMY_VERSION,
         "attack_classes": list(JORGE_ATTACK_CLASSES),
         "all_classes": list(JORGE_ALL_CLASSES),
-        "broad_families": dict(sorted(JORGE_TO_BROAD_FAMILY.items())),
         "normal_policy": "binary_detector_only",
         "native_rules": native_rules,
     }
@@ -488,7 +455,6 @@ def multidataset_taxonomy_report() -> dict[str, object]:
         "reference_taxonomy_version": JORGE_TAXONOMY_VERSION,
         "attack_classes": list(MULTIDATASET_ATTACK_CLASSES),
         "all_classes": list(MULTIDATASET_ALL_CLASSES),
-        "broad_families": dict(sorted(MULTIDATASET_TO_BROAD_FAMILY.items())),
         "normal_policy": "binary_detector_only",
         "mapping_statuses_used_for_training": ["exact", "forced"],
         "forced_mapping_policy": {
@@ -537,15 +503,12 @@ __all__ = [
     "JORGE_ALL_CLASSES",
     "JORGE_ATTACK_CLASSES",
     "JORGE_TAXONOMY_VERSION",
-    "JORGE_TO_BROAD_FAMILY",
     "MULTIDATASET_ALL_CLASSES",
     "MULTIDATASET_ATTACK_CLASSES",
     "MULTIDATASET_TAXONOMY_VERSION",
-    "MULTIDATASET_TO_BROAD_FAMILY",
     "SUPPORTED_ATTACK_TAXONOMY_VERSIONS",
     "TaxonomyResolution",
     "attack_classes_for_taxonomy",
-    "broad_family_for_attack_type",
     "multidataset_taxonomy_report",
     "normalise_dataset",
     "normalise_taxonomy_token",

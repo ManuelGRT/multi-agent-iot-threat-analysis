@@ -12,7 +12,10 @@ from typing import Any, Literal, Mapping, Sequence
 import numpy as np
 
 
-ProductionTask = Literal["binary_detection", "attack_family", "attack_subtype"]
+# ``attack_subtype`` es el valor legado serializado dentro del joblib de 16
+# tipos. El registro de inferencia lo traduce al contrato publico
+# ``model_task='attack_type'``; no existe ya una tarea operacional de familia.
+ProductionTask = Literal["binary_detection", "attack_subtype"]
 
 
 class ProductionModelError(ValueError):

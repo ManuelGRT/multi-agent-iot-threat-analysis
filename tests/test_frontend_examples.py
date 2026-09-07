@@ -269,10 +269,33 @@ def test_frontend_prioritizes_mistral_context_and_shows_every_mitigation():
 def test_frontend_shows_only_the_classifier_top_three():
     html = TestClient(app).get("/").text
 
+    assert "if (cls.attack_type)" in html
+    assert "escapeHtml(cls.attack_type)" in html
+    assert "cls.attack_family" not in html
+    assert "Tipo de ataque" in html
     assert "Distribución top-3" in html
     assert ".slice(0, 3)" in html
     assert "Distribución top-5" not in html
     assert ".slice(0, 5)" not in html
+
+
+def test_frontend_explains_missing_attack_type_and_full_audit_details():
+    html = TestClient(app).get("/").text
+
+    assert "Versiones admitidas:" in html
+    assert 'auditField(raw, "soportadas")' in html
+    assert "Versión esperada:" not in html
+    assert "Etiquetas o puntuaciones inválidas:" in html
+    assert 'auditField(raw, "valores_invalidos")' in html
+    assert r"(?:\\{[^}]*\\})" in html
+    assert "No ejecutado: el detector se abstuvo." in html
+    assert "No ejecutado: el detector clasificó el evento como benigno." in html
+    assert (
+        "Sin tipo disponible: el clasificador falló o devolvió una salida "
+        "inválida; el caso requiere revisión."
+    ) in html
+    assert "No ejecutado: no existe un veredicto de detección." in html
+    assert "No ejecutado (evento benigno o abstención del detector)." not in html
 
 
 def test_frontend_escapes_case_result_values_before_using_inner_html():
@@ -285,7 +308,7 @@ def test_frontend_escapes_case_result_values_before_using_inner_html():
         'escapeHtml(std.failure_code ?? "standardization_failed")',
         'escapeHtml(det.model_name ?? "—")',
         "escapeHtml(f)",
-        "escapeHtml(cls.attack_family)",
+        "escapeHtml(cls.attack_type)",
         'escapeHtml(juez.action ?? "—")',
         'escapeHtml(juez.final_label ?? "—")',
         "juez.issues.map(issue => escapeHtml(issue))",
@@ -308,7 +331,7 @@ def test_frontend_escapes_case_result_values_before_using_inner_html():
         '${std.schema_profile ?? "—"}',
         '${std.modality ?? "—"}',
         '${det.model_name ?? "—"}',
-        "${cls.attack_family}",
+        "${cls.attack_type}",
         '${juez.final_label ?? "—"}',
         '${juez.issues.join(", ")}',
         "<tr><td>${t.agent}</td>",
@@ -329,7 +352,7 @@ def test_frontend_explains_every_auditor_check_without_hard_type():
     auditor_source = AUDITOR_SOURCE.read_text(encoding="utf-8")
     check_ids = set(re.findall(r'add\(\s*"([^"]+)"', auditor_source))
 
-    assert len(check_ids) == 43
+    assert len(check_ids) == 39
     for check_id in check_ids:
         entry = re.compile(
             rf'"{re.escape(check_id)}":\s*\{{\s*'
@@ -352,7 +375,7 @@ def test_frontend_formats_auditor_details_for_people_without_hiding_raw_evidence
     assert 'detalle.className = "auditoria-check-detalle"' in html
     assert 'detalle.title = String(check.detail);' in html
     assert "Sin incidencias." in html
-    assert "Familia asignada:" in html
+    assert "Tipo asignado:" in html
     assert "Probabilidad maliciosa:" in html
     assert "Secuencia observada:" in html
     assert "Agentes con error:" in html

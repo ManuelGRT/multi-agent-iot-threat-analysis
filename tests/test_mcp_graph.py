@@ -39,27 +39,34 @@ FINAL_AGENT_NAMES = [
     "final_judge",
 ]
 
+# Proyeccion sin target de una fila MITM del test congelado de Edge-IIoTset
+# (manifest_id terminado en ``::736``). Mantiene estable la ruta completa con
+# el detector y el clasificador realmente desplegados.
 STDIO_E2E_EVENT = {
     "event_id": "evt-stdio-e2e",
     "modality": "network_flow",
-    "src_ip": "192.168.0.128",
-    "dst_ip": "192.168.0.170",
-    "src_port": 60210,
-    "dst_port": 4321,
-    "transport_proto": "TCP",
-    "packet_count": 1,
-    "byte_count": 208,
-    "duration_ms": 1.0,
     "telemetry": {
-        "tcp.flags": 24.0,
-        "tcp.flags.ack": 1.0,
-        "tcp.len": 208.0,
-        "tcp.dstport": 4321.0,
-        "tcp.srcport": 60210.0,
+        "arp.src.proto_ipv4": "0.0",
+        "ip.src_host": "0",
+        "mbtcp.trans_id": "0.0",
+        "mbtcp.unit_id": "0.0",
+        "mqtt.ver": "0.0",
+        "tcp.dstport": "0.0",
+        "tcp.flags.ack": "0.0",
+        "tcp_len": 5353.0,
+        "tcp_options": 5353.0,
+        "tcp_payload": 4.0,
+        "udp.stream": "0.0",
     },
     "schema_profile": "network_packet",
     "semantic_text": "TCP packet with payload",
-    "provenance": {"dataset": "stdio_smoke", "split": "stream"},
+    "provenance": {
+        "dataset": "edge_iiotset",
+        "source_file": "ML-EdgeIIoT-dataset.csv",
+        "row_id": 736,
+        "split": "test",
+        "parser_version": "llm-0.1.0",
+    },
     "mapping_confidence": 0.95,
 }
 
@@ -584,7 +591,7 @@ def test_real_stdio_client_runs_full_graph_and_persists(tmp_path, monkeypatch):
     assert case.standardization.source == "prestandardized"
     assert case.detection.is_malicious is True
     assert case.detection.probability > 0.6
-    assert case.classification.attack_type == "Backdoor"
+    assert case.classification.attack_type == "MITM"
     assert (
         case.classification.confidence
         >= case.classification.decision_threshold

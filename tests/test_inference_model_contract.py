@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = REPO_ROOT / "src" / "mcp" / "data" / "models"
 ACTIVE_MODELS = {
     "detection": MODEL_DIR
-    / "xgboost_detection_validation_2026_20260822.joblib",
+    / "xgboost_detection_balanced_by_origin_20260905.joblib",
     "classifier": MODEL_DIR
     / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
 }
@@ -47,7 +47,7 @@ PROBE_ROWS = [
             "detection",
             "binary_detection",
             [False, True],
-            [False, False, False],
+            [True, True, True],
         ),
         (
             "classifier",
@@ -89,7 +89,12 @@ def test_active_model_loads_from_runtime_contract_and_predicts(
     assert type(model).__module__ == "src.contracts.inference"
     assert model.task == expected_task
     assert model.classes == expected_classes
-    if name == "classifier":
+    if name == "detection":
+        assert model.feature_schema_sha256 == (
+            "de41afdd00f73945f34c071b99752d75339b88b7af1cb813439b383cca7c9c1b"
+        )
+        assert len(model.vectorizer.get_feature_names_out()) == 5264
+    else:
         assert model.confidence_threshold == pytest.approx(0.65)
     assert model.predict(PROBE_ROWS) == expected_predictions
     probabilities = model.predict_proba(PROBE_ROWS)

@@ -95,7 +95,7 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         os.getenv("TFM_DETECTION_MODEL")
         or package_data_dir()
         / "models"
-        / "xgboost_detection_validation_2026_20260822.joblib"
+        / "xgboost_detection_balanced_by_origin_20260905.joblib"
     ),
     "attack_type_model": lambda: Path(
         os.getenv("TFM_ATTACK_TYPE_MODEL")

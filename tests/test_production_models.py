@@ -209,7 +209,9 @@ def test_fake_factory_preserves_splits_fits_vectorizer_on_train_and_reports_metr
     assert classifier.artifact_path is None
     assert detector.report["artifact"] is None
     assert classifier.report["artifact"] is None
-    assert detector.report["supports"]["train"]["rows"] == 6
+    assert detector.report["supports"]["train"]["rows"] == 4
+    assert detector.report["balancing"]["output_rows"] == 12
+    assert detector.report["balancing"]["after"]["global"]["balanced"] is True
     assert classifier.report["supports"]["train"]["rows"] == 4
     assert "unseen_val_feature" not in detector.model.vectorizer.vocabulary_
     assert "unseen_val_feature" not in classifier.model.vectorizer.vocabulary_
@@ -217,6 +219,10 @@ def test_fake_factory_preserves_splits_fits_vectorizer_on_train_and_reports_metr
     assert set(detector.report["metrics"]["test"]["by_dataset"]) == {
         "edge_iiotset"
     }
+    assert set(detector.report["metrics"]["test"]["by_origin"]) == {
+        "edge_iiotset"
+    }
+    assert detector.report["metrics"]["test"]["operational"]["coverage"] == 1.0
     assert len(detector.report["data_sha256"]["train"]) == 64
     assert classifier.report["family_mapping"]["version"] == FAMILY_MAPPING_VERSION
 

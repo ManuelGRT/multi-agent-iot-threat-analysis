@@ -106,8 +106,13 @@ la API ni del grafo.
 Los dos artefactos activos están incluidos como recursos del paquete y se
 deserializan mediante el contrato estable `src/contracts/inference.py`:
 
-- `xgboost_detection_validation_2026_20260822.joblib`;
+- `xgboost_detection_balanced_by_origin_20260905.joblib`;
 - `xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib`.
+
+La [ficha reproducible del detector](evaluation_references/xgboost_detection_balanced_by_origin_20260905.json)
+documenta el corpus balanceado de 23.604 filas, el ajuste sobre 16.496 filas de
+entrenamiento, las particiones de validación y test y los hashes del artefacto,
+del esquema y del booster.
 
 El registro de modelos los carga de forma perezosa una sola vez por proceso.
 El contrato de inferencia no importa módulos de evaluación ni agentes de

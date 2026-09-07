@@ -135,7 +135,7 @@ def detect_ok(probability: float):
         "ok": True,
         "is_malicious": probability >= 0.5,
         "probability": probability,
-        "model_name": "xgboost_detection_standardized_with_edge_20260705",
+        "model_name": "xgboost_detection_balanced_by_origin_20260905",
     }
 
 

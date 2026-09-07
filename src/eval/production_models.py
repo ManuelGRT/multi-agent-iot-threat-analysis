@@ -35,6 +35,7 @@ from src.contracts.inference import (
     ProductionXGBoostModel,
     _validated_encoded_predictions,
 )
+from src.eval.binary_balancing import balance_binary_records, logical_binary_origin
 from src.eval.jorge_models import compute_classification_metrics
 from src.eval.validation_campaign import PreparedRecord
 
@@ -43,6 +44,7 @@ EstimatorFactory = Callable[..., Any]
 
 FAMILY_MAPPING_VERSION = "broad_attack_family_v1_2026-08-06"
 SPLITS = ("train", "val", "test")
+BINARY_GRAY_ZONE = (0.4, 0.6)
 
 BASE_XGBOOST_PARAMETERS: Mapping[str, Any] = {
     "n_estimators": 300,
@@ -97,6 +99,7 @@ def train_production_candidates(
     family_path: str | Path | None = None,
     estimator_factory: EstimatorFactoryProtocol | None = None,
     parameter_overrides: Mapping[str, Any] | None = None,
+    detector_balance_seed: int = 42,
 ) -> ProductionTrainingResult:
     """Train both global candidates, then optionally persist explicit paths.
 
@@ -118,6 +121,7 @@ def train_production_candidates(
         values,
         estimator_factory=estimator_factory,
         parameter_overrides=parameter_overrides,
+        balance_seed=detector_balance_seed,
     )
     classifier = train_global_family_classifier(
         values,
@@ -137,8 +141,9 @@ def train_global_detector(
     model_path: str | Path | None = None,
     estimator_factory: EstimatorFactoryProtocol | None = None,
     parameter_overrides: Mapping[str, Any] | None = None,
+    balance_seed: int = 42,
 ) -> CandidateTrainingResult:
-    """Train the global binary detector from frozen-split binary records."""
+    """Train a 1:1 detector inside every frozen split and logical origin."""
 
     values = tuple(records)
     labelled: list[tuple[PreparedRecord, bool]] = []
@@ -158,6 +163,7 @@ def train_global_detector(
         estimator_factory=estimator_factory,
         parameter_overrides=parameter_overrides,
         family_mapping=None,
+        balance_seed=balance_seed,
     )
     if model_path is not None:
         _persist_result(result, model_path)
@@ -424,8 +430,26 @@ def _train_candidate(
     parameter_overrides: Mapping[str, Any] | None,
     family_mapping: Mapping[str, Any] | None,
     random_state: int = 42,
+    balance_seed: int | None = None,
 ) -> CandidateTrainingResult:
     deduplicated, dedup_report = deduplicate_labelled_records(labelled)
+    balancing_report: dict[str, Any] | None = None
+    if task == "binary_detection":
+        if balance_seed is None:
+            raise ProductionModelError(
+                "binary_detection requiere una semilla de balanceo"
+            )
+        labels_by_id = {
+            record.manifest_id: label for record, label in deduplicated
+        }
+        balanced_records, balancing_report = balance_binary_records(
+            (record for record, _label in deduplicated),
+            seed=balance_seed,
+        )
+        deduplicated = tuple(
+            (record, labels_by_id[record.manifest_id])
+            for record in balanced_records
+        )
     by_split: dict[str, list[tuple[PreparedRecord, bool | str]]] = {
         split: [] for split in SPLITS
     }
@@ -516,17 +540,18 @@ def _train_candidate(
     for split in ("val", "test"):
         records_in_split = by_split[split]
         features = [dict(record.features) for record, _label in records_in_split]
+        transformed = vectorizer.transform(features)
         truth = np.asarray(
             [class_to_index[label] for _record, label in records_in_split],
             dtype=np.int64,
         )
         predictions = _validated_encoded_predictions(
-            estimator.predict(vectorizer.transform(features)),
+            estimator.predict(transformed),
             expected_size=len(records_in_split),
             n_classes=len(classes),
             context=f"{task}/{split}",
         )
-        metrics[split] = {
+        split_metrics = {
             "global": compute_classification_metrics(
                 truth,
                 predictions,
@@ -541,6 +566,41 @@ def _train_candidate(
                 positive_index=(classes.index(True) if task == "binary_detection" else None),
             ),
         }
+        if task == "binary_detection":
+            probabilities = np.asarray(estimator.predict_proba(transformed), dtype=float)
+            expected_shape = (len(records_in_split), len(classes))
+            if probabilities.shape != expected_shape or not np.all(
+                np.isfinite(probabilities)
+            ):
+                raise ProductionModelError(
+                    f"{task}/{split}: predict_proba devolvio "
+                    f"shape={probabilities.shape}; esperado={expected_shape} "
+                    "y valores finitos"
+                )
+            positive_scores = probabilities[:, classes.index(True)]
+            split_metrics["by_origin"] = _metrics_by_origin(
+                records_in_split,
+                predictions,
+                classes=classes,
+                class_to_index=class_to_index,
+                positive_index=classes.index(True),
+            )
+            split_metrics["operational"] = _operational_binary_metrics(
+                truth,
+                predictions,
+                positive_scores,
+                classes=classes,
+            )
+            split_metrics["operational_by_origin"] = (
+                _operational_metrics_by_origin(
+                    records_in_split,
+                    truth,
+                    predictions,
+                    positive_scores,
+                    classes=classes,
+                )
+            )
+        metrics[split] = split_metrics
 
     report: dict[str, Any] = {
         "task": task,
@@ -550,6 +610,7 @@ def _train_candidate(
         "input_rows": len(labelled),
         "skipped_rows": dict(skipped),
         "deduplication": dedup_report,
+        "balancing": balancing_report,
         "supports": {
             split: _support_report(items) for split, items in by_split.items()
         },
@@ -598,6 +659,100 @@ def _metrics_by_dataset(
             positive_index=positive_index,
         )
     return output
+
+
+def _metrics_by_origin(
+    records: Sequence[tuple[PreparedRecord, bool | str]],
+    predictions: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+    class_to_index: Mapping[bool | str, int],
+    positive_index: int | None,
+) -> dict[str, Any]:
+    indices: dict[str, list[int]] = defaultdict(list)
+    for index, (record, _label) in enumerate(records):
+        indices[logical_binary_origin(record)].append(index)
+    output: dict[str, Any] = {}
+    for origin, positions in sorted(indices.items()):
+        truth = np.asarray(
+            [class_to_index[records[index][1]] for index in positions],
+            dtype=np.int64,
+        )
+        predicted = np.asarray(
+            [predictions[index] for index in positions], dtype=np.int64
+        )
+        output[origin] = compute_classification_metrics(
+            truth,
+            predicted,
+            classes=classes,
+            positive_index=positive_index,
+        )
+    return output
+
+
+def _operational_metrics_by_origin(
+    records: Sequence[tuple[PreparedRecord, bool | str]],
+    truth: np.ndarray,
+    predictions: np.ndarray,
+    positive_scores: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+) -> dict[str, Any]:
+    indices: dict[str, list[int]] = defaultdict(list)
+    for index, (record, _label) in enumerate(records):
+        indices[logical_binary_origin(record)].append(index)
+    return {
+        origin: _operational_binary_metrics(
+            truth[positions],
+            predictions[positions],
+            positive_scores[positions],
+            classes=classes,
+        )
+        for origin, raw_positions in sorted(indices.items())
+        for positions in [np.asarray(raw_positions, dtype=np.int64)]
+    }
+
+
+def _operational_binary_metrics(
+    truth: np.ndarray,
+    predictions: np.ndarray,
+    positive_scores: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+) -> dict[str, Any]:
+    low, high = BINARY_GRAY_ZONE
+    if truth.shape != predictions.shape or truth.shape != positive_scores.shape:
+        raise ProductionModelError(
+            "Metricas operacionales: vectores con tamanos distintos"
+        )
+    decided_mask = (positive_scores < low) | (positive_scores > high)
+    abstained_mask = ~decided_mask
+    decided_truth = truth[decided_mask]
+    decided_predictions = predictions[decided_mask]
+    abstained_labels = Counter(
+        _report_label(classes[int(index)]) for index in truth[abstained_mask]
+    )
+    total = int(len(truth))
+    decided = int(np.sum(decided_mask))
+    payload: dict[str, Any] = {
+        "decision_threshold": 0.5,
+        "gray_zone_inclusive": [low, high],
+        "total_rows": total,
+        "decided_rows": decided,
+        "abstained_rows": total - decided,
+        "coverage": decided / total if total else 0.0,
+        "abstention_rate": (total - decided) / total if total else 0.0,
+        "abstained_class_counts": dict(sorted(abstained_labels.items())),
+        "decided_metrics": None,
+    }
+    if decided:
+        payload["decided_metrics"] = compute_classification_metrics(
+            decided_truth,
+            decided_predictions,
+            classes=classes,
+            positive_index=classes.index(True),
+        )
+    return payload
 
 
 def _support_report(

@@ -1,5 +1,5 @@
 # src/agents/final/final_detector.py
-"""Agente final de deteccion: tool MCP ``detect_event`` (XGBoost con Edge).
+"""Agente final de deteccion: XGBoost global balanceado por origen.
 
 Politica de abstencion: probabilidad en zona gris [gray_low, gray_high]
 (por defecto 0.4-0.6) -> abstain=True y ruta al juez (revision humana).
@@ -69,7 +69,10 @@ class FinalDetector(FinalAgent):
                 f"probability={probability:.4f}",
                 f"gray_zone=[{self.gray_low}, {self.gray_high}]",
             ],
-            model_name=str(result.get("model_name") or "xgboost_detection_standardized_with_edge"),
+            model_name=str(
+                result.get("model_name")
+                or "xgboost_detection_balanced_by_origin_20260905"
+            ),
             next_route=next_route,
             abstain=abstain,
         )

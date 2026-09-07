@@ -596,7 +596,7 @@ def main() -> int:
     from src.contracts.case import CaseResult
     from src.mcp import model_registry
     from src.mcp.client import MCPToolClient
-    from src.mcp.common import package_data_dir
+    from src.mcp.common import package_data_dir, resolve_path
     from src.orchestration.mcp_graph import default_final_agents, run_case
 
     model_registry.clear_cache()
@@ -640,7 +640,7 @@ def main() -> int:
     )
     auditor = CaseAuditor()
 
-    detector_model = package_data_dir() / "models" / "xgboost_detection_validation_2026_20260822.joblib"
+    detector_model = resolve_path("detection_model")
     catalog_path = package_data_dir() / "threat_intel_catalog.json"
     campaign_manifest = {
         "campaign": "mitigator_mistral_live_multidataset16",

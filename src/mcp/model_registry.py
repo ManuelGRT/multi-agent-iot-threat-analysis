@@ -36,14 +36,29 @@ def clear_cache() -> None:
 # ---------------------------------------------------------------------------
 
 def detect(event_data: dict[str, Any]) -> dict[str, Any]:
-    """Deteccion binaria con el candidato global de validation_2026."""
+    """Deteccion binaria con el artefacto balanceado por origen."""
     model = load_model("detection_model")
+    if str(getattr(model, "task", "")) != "binary_detection":
+        raise ValueError(
+            "El detector desplegado debe declarar task='binary_detection'"
+        )
+    classes = tuple(getattr(model, "classes", ()))
+    if (
+        len(classes) != 2
+        or not all(type(value) is bool for value in classes)
+        or set(classes) != {False, True}
+    ):
+        raise ValueError(
+            "El detector desplegado debe contener exactamente las clases "
+            "[False, True]"
+        )
     features = event_features(event_data)
-    probability = float(model.predict_proba([features])[0][1])
+    probabilities = model.predict_proba([features])[0]
+    probability = float(probabilities[classes.index(True)])
     return {
         "is_malicious": probability >= 0.5,
         "probability": probability,
-        "model_name": "xgboost_detection_validation_2026_20260822",
+        "model_name": _model_name(model, resolve_path("detection_model").stem),
         "feature_count": len(features),
     }
 

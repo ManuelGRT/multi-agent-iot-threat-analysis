@@ -5,7 +5,7 @@ Expone los modelos preparados del TFM:
 - Estandarizacion final: reutiliza por contenido exacto un exito Mistral
   validado; en cache miss, Mistral en vivo es obligatorio. Nunca usa
   adaptadores. Un fallo produce una abstencion para revision humana.
-- Deteccion: ``xgboost_detection_validation_2026_20260822.joblib``.
+- Deteccion: ``xgboost_detection_balanced_by_origin_20260905.joblib``.
 - Clasificacion:
   ``xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib``.
 """

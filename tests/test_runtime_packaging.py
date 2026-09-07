@@ -9,7 +9,10 @@ from src.mcp.common import package_data_dir, resolve_path
 
 
 REPO = Path(__file__).resolve().parents[1]
-DETECTION_MODEL = "xgboost_detection_validation_2026_20260822.joblib"
+DETECTION_MODEL = "xgboost_detection_balanced_by_origin_20260905.joblib"
+DETECTION_MODEL_SHA256 = (
+    "f2d7d3dbe9c90fbd7f3d1f134d91e77f855dde134119eced812646e285524393"
+)
 CLASSIFIER_MODEL = "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
 CLASSIFIER_MODEL_SHA256 = (
     "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5"
@@ -31,6 +34,14 @@ def test_packaged_classifier_is_the_reviewed_balanced_16_type_artifact():
 
     assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
         CLASSIFIER_MODEL_SHA256
+    )
+
+
+def test_packaged_detector_is_the_reviewed_balanced_by_origin_artifact():
+    model_path = resolve_path("detection_model")
+
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        DETECTION_MODEL_SHA256
     )
 
 

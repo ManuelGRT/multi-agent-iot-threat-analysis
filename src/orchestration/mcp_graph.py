@@ -38,8 +38,8 @@ from src.orchestration.state import OrchestratorState
 
 
 @dataclass
-class FinalAgentBundle:
-    """Agentes finales que comparten un mismo cliente MCP."""
+class MultiAgentComponents:
+    """Componentes del flujo multiagente que comparten un cliente MCP."""
 
     standardizer: FinalStandardizer
     detector: FinalDetector
@@ -88,7 +88,7 @@ def default_final_agents(
     gray_high: float = 0.6,
     use_llm_mitigator: bool | None = None,
     mitigator_llm: LLMMitigationAgent | None = None,
-) -> FinalAgentBundle:
+) -> MultiAgentComponents:
     client = client or MCPToolClient()
     llm = mitigator_llm
     if llm is None:
@@ -99,7 +99,7 @@ def default_final_agents(
         )
         if enabled:
             llm = default_mitigator_llm()
-    return FinalAgentBundle(
+    return MultiAgentComponents(
         standardizer=FinalStandardizer(client=client),
         detector=FinalDetector(client=client, gray_low=gray_low, gray_high=gray_high),
         classifier=FinalClassifier(client=client),
@@ -127,7 +127,11 @@ def _route_map() -> dict[str, Any]:
 class FinalLocalOrchestrator:
     """Fallback sin langgraph: mismo contrato ``invoke`` que el grafo compilado."""
 
-    def __init__(self, agents: FinalAgentBundle | None = None, max_steps: int = 12):
+    def __init__(
+        self,
+        agents: MultiAgentComponents | None = None,
+        max_steps: int = 12,
+    ):
         self.agents = agents or default_final_agents()
         self.max_steps = max_steps
 
@@ -159,7 +163,7 @@ class FinalLocalOrchestrator:
 
 def build_final_graph(
     checkpointer: Any = None,
-    agents: FinalAgentBundle | None = None,
+    agents: MultiAgentComponents | None = None,
     client: MCPToolClient | None = None,
 ):
     """Compila el grafo final (langgraph si esta disponible, local si no).
@@ -257,7 +261,7 @@ def _persist_case(
 def run_case(
     raw_input: dict[str, Any],
     case_id: str | None = None,
-    agents: FinalAgentBundle | None = None,
+    agents: MultiAgentComponents | None = None,
     client: MCPToolClient | None = None,
     use_llm_mitigator: bool | None = None,
     persist: bool = False,

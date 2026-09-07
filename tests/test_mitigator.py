@@ -736,7 +736,7 @@ def test_catalog_error_fallback_items_consistent_with_flat_list():
 
 
 def test_llm_failure_case_level_stays_completed():
-    from src.orchestration.mcp_graph import FinalAgentBundle, run_case
+    from src.orchestration.mcp_graph import MultiAgentComponents, run_case
     from src.agents.final import (
         FinalClassifier,
         FinalDetector,
@@ -753,7 +753,7 @@ def test_llm_failure_case_level_stays_completed():
         }
     )
     llm = llm_with_stub(error=ConnectionError("api caida"))
-    agents = FinalAgentBundle(
+    agents = MultiAgentComponents(
         standardizer=FinalStandardizer(client=stub),
         detector=FinalDetector(client=stub),
         classifier=FinalClassifier(client=stub),
@@ -771,7 +771,7 @@ def test_llm_failure_case_level_stays_completed():
 
 
 def test_llm_suggested_marks_survive_case_result_boundary():
-    from src.orchestration.mcp_graph import FinalAgentBundle, run_case
+    from src.orchestration.mcp_graph import MultiAgentComponents, run_case
     from src.agents.final import (
         FinalClassifier,
         FinalDetector,
@@ -790,7 +790,7 @@ def test_llm_suggested_marks_survive_case_result_boundary():
             ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
-    agents = FinalAgentBundle(
+    agents = MultiAgentComponents(
         standardizer=FinalStandardizer(client=stub),
         detector=FinalDetector(client=stub),
         classifier=FinalClassifier(client=stub),
@@ -916,7 +916,7 @@ def test_edge_attack_types_require_the_exact_contractual_spelling():
 # ---------------------------------------------------------------------------
 
 def test_run_case_with_llm_mitigator_produces_hybrid_case():
-    from src.orchestration.mcp_graph import FinalAgentBundle, run_case
+    from src.orchestration.mcp_graph import MultiAgentComponents, run_case
     from src.agents.final import (
         FinalClassifier,
         FinalDetector,
@@ -933,7 +933,7 @@ def test_run_case_with_llm_mitigator_produces_hybrid_case():
         }
     )
     llm = llm_with_stub(payload=hybrid_payload_ok())
-    agents = FinalAgentBundle(
+    agents = MultiAgentComponents(
         standardizer=FinalStandardizer(client=stub),
         detector=FinalDetector(client=stub),
         classifier=FinalClassifier(client=stub),

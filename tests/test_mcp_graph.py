@@ -13,7 +13,7 @@ from src.mcp.client import MCPToolClient
 from src.mcp.common import resolve_path
 from src.orchestration.mcp_graph import (
     CasePersistenceError,
-    FinalAgentBundle,
+    MultiAgentComponents,
     build_final_graph,
     default_final_agents,
     run_case,
@@ -78,8 +78,8 @@ def _models_loadable() -> bool:
     return resolve_path("detection_model").exists() and resolve_path("attack_type_model").exists()
 
 
-def stub_bundle(overrides: dict) -> FinalAgentBundle:
-    """Bundle de agentes finales sobre un StubClient (hermetico, sin modelos)."""
+def stub_bundle(overrides: dict) -> MultiAgentComponents:
+    """Componentes del flujo sobre un StubClient hermetico y sin modelos."""
     from src.agents.final import (
         FinalClassifier,
         FinalDetector,
@@ -89,7 +89,7 @@ def stub_bundle(overrides: dict) -> FinalAgentBundle:
     )
 
     stub = StubClient(overrides)
-    return FinalAgentBundle(
+    return MultiAgentComponents(
         standardizer=FinalStandardizer(client=stub),
         detector=FinalDetector(client=stub),
         classifier=FinalClassifier(client=stub),

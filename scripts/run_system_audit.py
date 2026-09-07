@@ -6,10 +6,10 @@ Ejecuta, sin APIs externas (100% local y determinista):
 1. Smoke E2E: N casos por dataset (Edge-IIoTset, TON-IoT host, TON-IoT
    telemetry, IoT-23) recorren el grafo final completo -> % de CaseResult
    validos + auditoria por caso (CaseAuditor, Fase 5a).
-2. Metricas batch de los MODELOS DESPLEGADOS (.joblib) reproduciendo el split
-   de test exacto de sus scripts de entrenamiento (seed 42) y puntuando con
-   con utilidades offline: no-regresion frente a las metricas congeladas
-   de los artefactos de entrenamiento.
+2. Metricas batch de los MODELOS DESPLEGADOS (.joblib). Para el clasificador
+   se reconstruye el test exacto de 16 tipos mediante su seleccion congelada;
+   si los inputs originales no estan disponibles, solo se informa la metrica
+   congelada tras verificar la seleccion, el sidecar y el hash del modelo.
 3. Certificacion de los baselines congelados (Fase 0): Edge canonico
    multiclase 0.9363 >= 0.93 y > 0.7479 (Jorge LLM FT), binario >= 0.99,
    artefactos de respaldo presentes. Regla dura del proyecto: los resultados
@@ -29,6 +29,8 @@ Uso:
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+import hashlib
 import json
 import random
 import sys
@@ -59,6 +61,16 @@ EDGE_DATASET_PATH = (
 )
 BALANCED450_REPORT = "artifacts/informe_edgeiiot_estandarizado_ml_vs_tfm_jorge_balanced450_20260622.md"
 EDGE_CANONICAL_MODEL = "artifacts/models/edgeiiot_canonical_adapter_tfm_less_current.joblib"
+ATTACK_TYPE_AUDIT_DIR = (
+    PROJECT_ROOT
+    / "artifacts"
+    / "validation_2026"
+    / "classifier_multidataset16_balanced500_threshold065_20260907"
+)
+ATTACK_TYPE_REPORT = ATTACK_TYPE_AUDIT_DIR / "classifier_multidataset16_report.json"
+ATTACK_TYPE_SELECTION = ATTACK_TYPE_AUDIT_DIR / "global_selection.jsonl"
+ATTACK_TYPE_SIDECAR = ATTACK_TYPE_AUDIT_DIR / "taxonomy_mapping_sidecar.jsonl"
+ATTACK_TYPE_REPRODUCTION_EPSILON = 1e-9
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -131,8 +143,12 @@ def smoke_datasets(per_dataset: int) -> dict[str, list[dict[str, Any]]]:
     }
 
 
-def run_smoke(per_dataset: int) -> dict[str, Any]:
-    agents = default_final_agents()  # cliente in-process compartido: modelos se cargan una vez
+def run_smoke(
+    per_dataset: int, client: MCPToolClient | None = None
+) -> dict[str, Any]:
+    # Auditoria offline rapida: comparte modelos y no pretende medir transporte.
+    client = client or MCPToolClient(mode="inprocess")
+    agents = default_final_agents(client=client)
     auditor = CaseAuditor()
     per_dataset_results: dict[str, Any] = {}
     all_cases = []
@@ -231,86 +247,339 @@ def batch_detection(tolerance: float) -> dict[str, Any]:
     }
 
 
-def batch_family(tolerance: float) -> dict[str, Any]:
-    from scripts.evaluate_xgboost_attack_family_classification_group_lodo import (
-        dataset_group,
-        load_edge_attack_families,
-        load_prebalanced_attack_families,
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _selection_sha256(rows: list[dict[str, Any]]) -> str:
+    """Recalcula la huella con el mismo contrato que genero el corpus."""
+
+    payload = [
+        {
+            "manifest_id": row["manifest_id"],
+            "split": row["classifier_split"],
+            "label": row["attack_type"],
+            "dataset_origin": row["dataset_origin"],
+            "detailed_origin": row["detailed_origin"],
+            "mapping_status": row["mapping_status"],
+            "mapping_reason": row["mapping_reason"],
+        }
+        for row in rows
+    ]
+    encoded = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _resolve_campaign_inputs(
+    report: dict[str, Any],
+) -> dict[str, Any]:
+    """Localiza y verifica los inputs exactos inventariados por la campana.
+
+    Las rutas absolutas originales pueden no existir en otro clon. En ese caso
+    se intenta el layout relativo habitual. Una ausencia habilita el modo de
+    integridad congelada; un fichero presente con hash distinto es corrupcion.
+    """
+
+    resolved: dict[str, list[Path]] = {"manifests": [], "standardized_results": []}
+    missing: list[str] = []
+    mismatches: list[str] = []
+    relative_dirs = {
+        "manifests": PROJECT_ROOT / "artifacts" / "validation_2026" / "manifests",
+        "standardized_results": (
+            PROJECT_ROOT / "artifacts" / "validation_2026" / "standardized"
+        ),
+    }
+    for category in resolved:
+        for item in report.get("inputs", {}).get(category, []):
+            recorded = Path(str(item.get("path", "")))
+            candidates = (recorded, relative_dirs[category] / recorded.name)
+            path = next((candidate for candidate in candidates if candidate.is_file()), None)
+            if path is None:
+                missing.append(recorded.name or f"{category}:ruta_vacia")
+                continue
+            expected_size = int(item.get("bytes", -1))
+            expected_hash = str(item.get("sha256", "")).casefold()
+            if path.stat().st_size != expected_size or _sha256_file(path) != expected_hash:
+                mismatches.append(str(path))
+                continue
+            resolved[category].append(path)
+    expected_counts = {
+        category: len(report.get("inputs", {}).get(category, []))
+        for category in resolved
+    }
+    available = (
+        not missing
+        and not mismatches
+        and all(len(resolved[key]) == expected_counts[key] for key in resolved)
     )
-    from scripts.train_xgboost_attack_family_balanced_standardized import (
-        balance_by_group_and_family,
-        split_records,
+    return {
+        "available": available,
+        "integrity_ok": not mismatches,
+        "paths": resolved,
+        "missing": missing,
+        "mismatches": mismatches,
+    }
+
+
+def _verify_attack_type_sidecar(
+    selection: list[dict[str, Any]], sidecar_path: Path
+) -> bool:
+    expected = {str(row["manifest_id"]): row for row in selection}
+    if len(expected) != len(selection):
+        return False
+    observed: dict[str, dict[str, Any]] = {}
+    for row in iter_jsonl(sidecar_path):
+        manifest_id = str(row.get("manifest_id", ""))
+        if manifest_id not in expected:
+            continue
+        if manifest_id in observed:
+            return False
+        observed[manifest_id] = row
+    if set(observed) != set(expected):
+        return False
+    return all(
+        observed[manifest_id].get("attack_type") == selected.get("attack_type")
+        and observed[manifest_id].get("dataset_origin") == selected.get("dataset_origin")
+        and observed[manifest_id].get("detailed_origin") == selected.get("detailed_origin")
+        and observed[manifest_id].get("status") == selected.get("mapping_status")
+        and observed[manifest_id].get("reason") == selected.get("mapping_reason")
+        and observed[manifest_id].get("deduplication_status") == "kept"
+        for manifest_id, selected in expected.items()
+    )
+
+
+def _frozen_attack_type_metrics(test_report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "accuracy": float(test_report["accuracy"]),
+        "precision_macro": float(test_report["macro"]["precision"]),
+        "recall_macro": float(test_report["macro"]["recall"]),
+        "f1_macro": float(test_report["macro"]["f1"]),
+        "precision_weighted": float(test_report["weighted"]["precision"]),
+        "recall_weighted": float(test_report["weighted"]["recall"]),
+        "f1_weighted": float(test_report["weighted"]["f1"]),
+        "top3_accuracy": float(test_report["top3_accuracy"]),
+        "selective": dict(test_report["selective"]),
+    }
+
+
+def _recompute_attack_type_test(
+    *,
+    model: Any,
+    test_rows: list[dict[str, Any]],
+    campaign_inputs: dict[str, list[Path]],
+    threshold: float,
+) -> dict[str, Any]:
+    from src.eval.classifier_balancing import MappedClassifierRecord
+    from src.eval.classifier_evaluation import evaluate_classifier_view
+    from src.eval.validation_campaign import PreflightRequirements, load_validation_campaign
+
+    campaign = load_validation_campaign(
+        campaign_inputs["manifests"],
+        campaign_inputs["standardized_results"],
+        PreflightRequirements(
+            require_complete=True,
+            require_llm=True,
+            provider="mistral",
+            model="mistral-small-2603",
+            dedup_scope="global",
+        ),
+    )
+    prepared = {record.manifest_id: record for record in campaign.joined_records}
+    missing = [row["manifest_id"] for row in test_rows if row["manifest_id"] not in prepared]
+    if missing:
+        raise ValueError(f"Faltan {len(missing)} filas del test exacto en la campana")
+
+    records = []
+    for row in test_rows:
+        record = prepared[row["manifest_id"]]
+        if record.feature_fingerprint != row["feature_fingerprint"]:
+            raise ValueError(
+                "La huella de features no coincide para " + str(row["manifest_id"])
+            )
+        records.append(
+            MappedClassifierRecord(
+                record=record,
+                label=str(row["attack_type"]),
+                dataset_origin=str(row["dataset_origin"]),
+                detailed_origin=str(row["detailed_origin"]),
+                mapping_status=str(row["mapping_status"]),
+                mapping_reason=str(row["mapping_reason"]),
+            )
+        )
+    return evaluate_classifier_view(
+        model,
+        records,
+        confidence_threshold=threshold,
+        complete_label_space=True,
+    )
+
+
+def batch_attack_type(tolerance: float) -> dict[str, Any]:
+    """Audita el clasificador desplegado sobre el test exacto de 16 tipos."""
+
+    from src.contracts.attack_taxonomy import (
+        MULTIDATASET_ATTACK_CLASSES,
+        MULTIDATASET_TAXONOMY_VERSION,
     )
     from src.mcp import model_registry
-    from src.mcp.features import event_features
 
-    args = SimpleNamespace(random_state=42, test_size=0.15, val_size=0.15)
-    rng = random.Random(args.random_state)
-    pool = load_prebalanced_attack_families(resolve_path("standardized_dataset"))
-    pool.extend(load_edge_attack_families(PROJECT_ROOT / EDGE_DATASET_PATH, 5000, rng))
-    for record in pool:
-        record["dataset_group"] = dataset_group(record["dataset"])
-    rng.shuffle(pool)
-    records = balance_by_group_and_family(pool, 100, rng)
-    _train, _val, test = split_records(records, args)
+    base = {
+        "artefacto_evaluacion_encontrado": ATTACK_TYPE_REPORT.is_file(),
+        "seleccion_encontrada": ATTACK_TYPE_SELECTION.is_file(),
+        "sidecar_encontrado": ATTACK_TYPE_SIDECAR.is_file(),
+    }
+    if not all(base.values()):
+        return {
+            **base,
+            "modo_evaluacion": "no_disponible",
+            "metricas_recalculadas": False,
+            "motivo": "Faltan artefactos de la evaluacion exacta de 16 tipos",
+            "semaforo": RED,
+        }
 
-    model = model_registry.load_model("family_model")
-    features = [event_features(record["event"]) for record in test]
-    y_pred = model.predict(features)
-    y_true = [record["label"] for record in test]
-    score = score_run(y_true, list(y_pred), task="multiclass")
-
-    frozen = latest_training_artifact("xgboost_attack_family_balanced_group")
-    frozen_test = (frozen or {}).get("metrics", {}).get("test", {})
-    frozen_ok = "weighted_f1" in frozen_test and "n" in frozen_test
-    frozen_f1 = float(frozen_test.get("weighted_f1", 0.0))
-    # el split se considera reproducido si coincide el tamano Y la
-    # distribucion de clases del test congelado
-    from collections import Counter
-
-    live_counts = dict(sorted(Counter(y_true).items()))
-    frozen_counts = frozen_test.get("class_counts")
-    split_ok = (
-        frozen_ok
-        and frozen_test.get("n") == len(test)
-        and (frozen_counts is None or frozen_counts == live_counts)
+    report = json.loads(ATTACK_TYPE_REPORT.read_text(encoding="utf-8"))
+    selection = list(iter_jsonl(ATTACK_TYPE_SELECTION))
+    balance = report.get("global_protocol", {}).get("balance", {})
+    test_report = report.get("global_protocol", {}).get("evaluation", {}).get("test", {})
+    expected_classes = tuple(MULTIDATASET_ATTACK_CLASSES)
+    report_classes = tuple(report.get("taxonomy", {}).get("attack_classes", ()))
+    test_rows = [row for row in selection if row.get("classifier_split") == "test"]
+    support = dict(sorted(Counter(str(row.get("attack_type")) for row in test_rows).items()))
+    frozen_support = dict(sorted(test_report.get("class_support", {}).items()))
+    selection_ok = (
+        len(selection) == int(balance.get("selected_rows", -1))
+        and _selection_sha256(selection) == balance.get("selection_sha256")
+        and len(test_rows) == int(test_report.get("rows", -1))
+        and support == frozen_support
+        and set(support) == set(expected_classes)
     )
-    live_f1 = float(score.get("f1", 0.0))
+    sidecar_ok = _verify_attack_type_sidecar(selection, ATTACK_TYPE_SIDECAR)
 
-    # Slice Edge del test: el generalista frente a la referencia de Jorge.
-    edge_pairs = [
-        (record["label"], str(pred))
-        for record, pred in zip(test, y_pred)
-        if record["dataset"] == "EDGE_IIOTSET"
-    ]
-    edge_slice: dict[str, Any] = {"n": len(edge_pairs)}
-    if edge_pairs:
-        edge_score = score_run(
-            [p[0] for p in edge_pairs],
-            [p[1] for p in edge_pairs],
-            task="multiclass",
-        )
-        edge_slice["f1_live"] = round(float(edge_score.get("f1", 0.0)), 4)
-        frozen_edge = (
-            (frozen or {}).get("metrics", {}).get("test_by_dataset_family", {}).get("EDGE_IIOTSET", {})
-        )
-        edge_slice["f1_congelado"] = frozen_edge.get("weighted_f1")
-        edge_slice["supera_a_jorge_0.7479"] = edge_slice["f1_live"] > 0.7479
+    model_path = resolve_path("attack_type_model")
+    expected_model_hash = str(report.get("candidate_artifact", {}).get("sha256", ""))
+    model_hash = _sha256_file(model_path) if model_path.is_file() else None
+    hash_ok = bool(model_hash and model_hash.casefold() == expected_model_hash.casefold())
+    model = model_registry.load_model("attack_type_model") if hash_ok else None
+    model_contract_ok = bool(
+        model is not None
+        and getattr(model, "task", None) == "attack_subtype"
+        and set(map(str, model.classes)) == set(expected_classes)
+        and len(model.classes) == len(expected_classes)
+        and report.get("taxonomy", {}).get("version") == MULTIDATASET_TAXONOMY_VERSION
+        and report_classes == expected_classes
+    )
 
-    return {
-        "n_test": len(test),
-        "artefacto_congelado_encontrado": frozen_ok,
-        "split_reproducido": split_ok,
-        "f1_live_weighted": round(live_f1, 4),
-        "f1_congelado_entrenamiento": frozen_f1,
-        "delta": round(live_f1 - frozen_f1, 4),
-        "slice_edge": edge_slice,
-        "modelo": "xgboost_attack_family_balanced_group_20260705",
-        "nota": (
-            "Metrica del modelo GENERALISTA multi-dataset desplegado; la comparativa con Jorge "
-            "(0.9363 vs 0.7479) es sobre Edge canonico y esta congelada en la seccion de baselines."
+    frozen = _frozen_attack_type_metrics(test_report)
+    inputs = _resolve_campaign_inputs(report)
+    common = {
+        **base,
+        "n_test": len(test_rows),
+        "numero_tipos": len(support),
+        "soporte_por_tipo": support,
+        "seleccion_verificada": selection_ok,
+        "sidecar_verificado": sidecar_ok,
+        "sha256_modelo_desplegado": model_hash,
+        "sha256_modelo_documentado": expected_model_hash or None,
+        "hash_modelo_coincide": hash_ok,
+        "contrato_modelo_valido": model_contract_ok,
+        "inputs_campaign_disponibles": inputs["available"],
+        "inputs_campaign_integridad": inputs["integrity_ok"],
+        "inputs_campaign_ausentes": inputs["missing"],
+        "inputs_campaign_alterados": inputs["mismatches"],
+        "modelo": getattr(model, "model_name", None) if model is not None else None,
+        "metricas_congeladas": frozen,
+    }
+    integrity_ok = selection_ok and sidecar_ok and hash_ok and model_contract_ok
+    if not inputs["integrity_ok"]:
+        return {
+            **common,
+            "modo_evaluacion": "no_disponible",
+            "metricas_recalculadas": False,
+            "motivo": "Hay inputs inventariados cuyo tamano o SHA-256 no coincide",
+            "semaforo": RED,
+        }
+    if not integrity_ok:
+        return {
+            **common,
+            "modo_evaluacion": "integridad_no_verificada",
+            "metricas_recalculadas": False,
+            "motivo": (
+                "No coinciden el modelo desplegado, su contrato o los artefactos "
+                "que fijan la membresia exacta del test"
+            ),
+            "semaforo": RED,
+        }
+    if not inputs["available"]:
+        return {
+            **common,
+            "modo_evaluacion": "metricas_congeladas_hash_verificado",
+            "metricas_recalculadas": False,
+            "motivo": (
+                "No estan todos los inputs originales; se informa la metrica congelada "
+                "solo tras verificar seleccion, sidecar y hash del modelo desplegado"
+            ),
+            "semaforo": GREEN if integrity_ok else RED,
+        }
+
+    try:
+        live_report = _recompute_attack_type_test(
+            model=model,
+            test_rows=test_rows,
+            campaign_inputs=inputs["paths"],
+            threshold=float(frozen["selective"]["threshold"]),
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        return {
+            **common,
+            "modo_evaluacion": "reproduccion_fallida",
+            "metricas_recalculadas": False,
+            "motivo": f"{type(exc).__name__}: {exc}",
+            "semaforo": RED,
+        }
+
+    live = _frozen_attack_type_metrics(live_report)
+    metric_pairs = {
+        "accuracy": (live["accuracy"], frozen["accuracy"]),
+        "precision_macro": (live["precision_macro"], frozen["precision_macro"]),
+        "recall_macro": (live["recall_macro"], frozen["recall_macro"]),
+        "f1_macro": (live["f1_macro"], frozen["f1_macro"]),
+        "precision_weighted": (
+            live["precision_weighted"], frozen["precision_weighted"]
         ),
-        "semaforo": GREEN if frozen_ok and split_ok and live_f1 >= frozen_f1 - tolerance else RED,
+        "recall_weighted": (live["recall_weighted"], frozen["recall_weighted"]),
+        "f1_weighted": (live["f1_weighted"], frozen["f1_weighted"]),
+        "top3_accuracy": (live["top3_accuracy"], frozen["top3_accuracy"]),
+        "selective_coverage": (
+            live["selective"]["coverage"], frozen["selective"]["coverage"]
+        ),
+        "selective_accuracy": (
+            live["selective"]["accuracy"], frozen["selective"]["accuracy"]
+        ),
+        "selective_f1_macro": (
+            live["selective"]["macro_f1"], frozen["selective"]["macro_f1"]
+        ),
+    }
+    deltas = {key: current - expected for key, (current, expected) in metric_pairs.items()}
+    exact_metrics = all(
+        abs(delta) <= ATTACK_TYPE_REPRODUCTION_EPSILON for delta in deltas.values()
+    )
+    no_regression = live["f1_weighted"] >= frozen["f1_weighted"] - tolerance
+    return {
+        **common,
+        "modo_evaluacion": "test_exacto_recalculado",
+        "metricas_recalculadas": True,
+        "metricas_recalculadas_test": live,
+        "deltas_vs_congeladas": deltas,
+        "reproduccion_exacta": exact_metrics,
+        "sin_regresion_segun_tolerancia": no_regression,
+        "tolerancia_no_regresion": tolerance,
+        "semaforo": GREEN if integrity_ok and exact_metrics and no_regression else RED,
     }
 
 
@@ -479,17 +748,17 @@ def main(argv: list[str] | None = None) -> int:
     client = MCPToolClient(mode="inprocess")
 
     print("[1/5] Smoke E2E por dataset...")
-    smoke = run_smoke(args.smoke_per_dataset)
+    smoke = run_smoke(args.smoke_per_dataset, client=client)
     smoke_cases = smoke.pop("casos")
 
     if args.skip_batch:
         detection = {"omitido": True, "semaforo": AMBER}
-        family = {"omitido": True, "semaforo": AMBER}
+        attack_type = {"omitido": True, "semaforo": AMBER}
     else:
         print("[2/5] Metricas batch del detector desplegado (split test reproducido)...")
         detection = batch_detection(args.tolerance)
-        print("[3/5] Metricas batch del clasificador de familia desplegado...")
-        family = batch_family(args.tolerance)
+        print("[3/5] Auditoria batch del clasificador desplegado de 16 tipos...")
+        attack_type = batch_attack_type(args.tolerance)
 
     print("[4/5] Baselines congelados + cobertura CAPEC de Jorge...")
     baselines = check_frozen_baselines()
@@ -502,7 +771,7 @@ def main(argv: list[str] | None = None) -> int:
         "smoke_e2e": smoke["semaforo_smoke"],
         "auditoria_por_caso": smoke["semaforo_auditoria"],
         "batch_deteccion_desplegado": detection["semaforo"],
-        "batch_familia_desplegado": family["semaforo"],
+        "batch_tipo_ataque_desplegado": attack_type["semaforo"],
         "baselines_congelados_vs_jorge": baselines["semaforo"],
         "cobertura_capec_jorge": jorge_coverage["semaforo"],
         "target_leakage": leakage["semaforo"],
@@ -523,7 +792,7 @@ def main(argv: list[str] | None = None) -> int:
         "todo_verde": all_green,
         "smoke_e2e": {k: v for k, v in smoke.items() if not k.startswith("semaforo")},
         "batch_deteccion": detection,
-        "batch_familia": family,
+        "batch_tipo_ataque": attack_type,
         "baselines_congelados": baselines,
         "cobertura_capec_jorge": jorge_coverage,
         "target_leakage": leakage,
@@ -548,7 +817,10 @@ def main(argv: list[str] | None = None) -> int:
         },
         {"heading": "1. Smoke E2E por dataset", "body": payload["smoke_e2e"]},
         {"heading": "2. Batch deteccion (modelo desplegado)", "body": detection},
-        {"heading": "3. Batch familia (modelo desplegado)", "body": family},
+        {
+            "heading": "3. Batch clasificador de 16 tipos (modelo desplegado)",
+            "body": attack_type,
+        },
         {"heading": "4. Baselines congelados (Edge canonico vs Jorge)", "body": baselines},
         {"heading": "5. Cobertura CAPEC del TFM de Jorge", "body": jorge_coverage},
         {"heading": "6. Target leakage", "body": leakage},

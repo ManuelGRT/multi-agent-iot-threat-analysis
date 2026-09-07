@@ -26,7 +26,19 @@ def _models_loadable() -> bool:
         import xgboost  # noqa: F401
     except ImportError:
         return False
-    return resolve_path("detection_model").exists() and resolve_path("family_model").exists()
+    return resolve_path("detection_model").exists() and resolve_path("attack_type_model").exists()
+
+
+def _attack_type_audit_artifacts_available() -> bool:
+    return all(
+        path.exists()
+        for path in (
+            audit_script.ATTACK_TYPE_REPORT,
+            audit_script.ATTACK_TYPE_SELECTION,
+            audit_script.ATTACK_TYPE_SIDECAR,
+            resolve_path("attack_type_model"),
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +132,65 @@ def test_batch_detection_red_without_frozen_artifact(monkeypatch):
     assert result["semaforo"] == audit_script.RED  # sin referencia no hay verde
 
 
+@pytest.mark.skipif(
+    not (_models_loadable() and _attack_type_audit_artifacts_available()),
+    reason="modelo o artefactos del clasificador de 16 tipos no disponibles",
+)
+def test_batch_attack_type_reports_frozen_metrics_if_campaign_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        audit_script,
+        "_resolve_campaign_inputs",
+        lambda report: {
+            "available": False,
+            "integrity_ok": True,
+            "paths": {"manifests": [], "standardized_results": []},
+            "missing": ["input_ausente.jsonl"],
+            "mismatches": [],
+        },
+    )
+
+    result = audit_script.batch_attack_type(tolerance=0.02)
+
+    assert result["modo_evaluacion"] == "metricas_congeladas_hash_verificado"
+    assert result["metricas_recalculadas"] is False
+    assert result["hash_modelo_coincide"] is True
+    assert result["seleccion_verificada"] is True
+    assert result["sidecar_verificado"] is True
+    assert result["n_test"] == 1200
+    assert result["numero_tipos"] == 16
+    assert set(result["soporte_por_tipo"].values()) == {75}
+    assert result["metricas_congeladas"]["f1_weighted"] == pytest.approx(
+        0.8916753705196386
+    )
+    assert result["semaforo"] == audit_script.GREEN
+
+
+@pytest.mark.skipif(
+    not (_models_loadable() and _attack_type_audit_artifacts_available()),
+    reason="modelo o artefactos del clasificador de 16 tipos no disponibles",
+)
+def test_batch_attack_type_reproduces_exact_frozen_test_when_inputs_exist():
+    inventory = audit_script._resolve_campaign_inputs(
+        json.loads(audit_script.ATTACK_TYPE_REPORT.read_text(encoding="utf-8"))
+    )
+    if not inventory["available"]:
+        pytest.skip("inputs originales de la campana no disponibles")
+
+    result = audit_script.batch_attack_type(tolerance=0.02)
+
+    assert result["modo_evaluacion"] == "test_exacto_recalculado"
+    assert result["metricas_recalculadas"] is True
+    assert result["reproduccion_exacta"] is True
+    assert result["n_test"] == 1200
+    assert result["numero_tipos"] == 16
+    assert result["metricas_recalculadas_test"]["accuracy"] == pytest.approx(
+        0.8908333333333334
+    )
+    assert result["metricas_recalculadas_test"]["top3_accuracy"] == pytest.approx(0.98)
+    assert result["metricas_recalculadas_test"]["selective"]["threshold"] == 0.65
+    assert result["semaforo"] == audit_script.GREEN
+
+
 # ---------------------------------------------------------------------------
 # E2E del script (rapido: sin batch)
 # ---------------------------------------------------------------------------
@@ -163,6 +234,8 @@ def test_main_skip_batch_produces_report_with_green_core():
         assert semaforos["cobertura_capec_jorge"] == audit_script.GREEN
         assert semaforos["target_leakage"] == audit_script.GREEN
         assert semaforos["batch_deteccion_desplegado"] == audit_script.AMBER
+        assert semaforos["batch_tipo_ataque_desplegado"] == audit_script.AMBER
+        assert "batch_tipo_ataque" in payload
         assert payload["todo_verde"] is False
         assert md_path.exists()
         assert "Semaforos" in md_path.read_text(encoding="utf-8")

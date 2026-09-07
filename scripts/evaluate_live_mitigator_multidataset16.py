@@ -48,7 +48,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection", type=Path, required=True)
     parser.add_argument("--standardized-dir", type=Path, required=True)
-    parser.add_argument("--family-model", type=Path, required=True)
+    parser.add_argument("--attack-type-model", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--per-class", type=int, default=1)
@@ -198,7 +198,7 @@ class RecordingLLM:
         record: dict[str, Any] = {
             "started_at": started_at,
             "event_id": canonical.get("event_id"),
-            "attack_subtype": classification.get("attack_subtype"),
+            "attack_type": classification.get("attack_type"),
             "base_count": len(base_items),
             "base_ids": [item.get("id") for item in base_items],
             "status": "error",
@@ -302,7 +302,7 @@ def prepare_selection(
             continue
         if float(detection["probability"]) < min_detection_probability:
             continue
-        if classification.get("attack_subtype") != attack_type:
+        if classification.get("attack_type") != attack_type:
             continue
         if float(classification["confidence"]) < min_classifier_confidence:
             continue
@@ -321,7 +321,6 @@ def prepare_selection(
                 "mapping_confidence": mapping_confidence,
                 "detection_probability": float(detection["probability"]),
                 "classifier_confidence": float(classification["confidence"]),
-                "classifier_family": classification.get("attack_family"),
                 "standardization_provider": materialized.get("provider"),
                 "standardization_model": materialized.get("model"),
                 "standardization_latency_s": materialized.get("latency_s"),
@@ -392,7 +391,7 @@ def case_metrics(
         "schema_profile": selected.get("schema_profile"),
         "standardization_source": case.standardization.source,
         "detection_probability": case.detection.probability,
-        "predicted_attack_type": case.classification.attack_subtype,
+        "predicted_attack_type": case.classification.attack_type,
         "classifier_confidence": case.classification.confidence,
         "llm_status": getattr(llm_trace, "status", None),
         "llm_trace_error": getattr(llm_trace, "error", None),
@@ -558,9 +557,9 @@ def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     selection_path = args.selection.expanduser().resolve()
     standardized_dir = args.standardized_dir.expanduser().resolve()
-    family_model = args.family_model.expanduser().resolve()
+    attack_type_model = args.attack_type_model.expanduser().resolve()
     output_dir = args.output_dir.expanduser().resolve()
-    for path in (selection_path, family_model):
+    for path in (selection_path, attack_type_model):
         if not path.is_file():
             raise FileNotFoundError(path)
     if not standardized_dir.is_dir():
@@ -574,7 +573,7 @@ def main() -> int:
     state_dir = output_dir / "runtime_state"
     state_dir.mkdir(parents=True, exist_ok=True)
     os.environ["TFM_REPO_ROOT"] = str(repo)
-    os.environ["TFM_FAMILY_MODEL"] = str(family_model)
+    os.environ["TFM_ATTACK_TYPE_MODEL"] = str(attack_type_model)
     os.environ["TFM_STATE_DIR"] = str(state_dir)
     os.environ["MISTRAL_BASE_URL"] = OFFICIAL_MISTRAL_BASE_URL
     os.environ["MITIGATOR_LLM_MODEL"] = args.model
@@ -686,8 +685,8 @@ def main() -> int:
                 "credential_present": True,
             },
             "classifier": {
-                "path": str(family_model),
-                "sha256": sha256_file(family_model),
+                "path": str(attack_type_model),
+                "sha256": sha256_file(attack_type_model),
             },
             "detector": {
                 "path": str(detector_model),
@@ -708,7 +707,7 @@ def main() -> int:
             "flow": [
                 "final_standardizer_prestandardized_passthrough",
                 "final_detector",
-                "final_classifier_attack_subtype_16",
+                "final_classifier_attack_type_16",
                 "final_mitigator_catalog",
                 "final_mitigator_mistral_live",
                 "final_judge",

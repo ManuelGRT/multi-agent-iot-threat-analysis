@@ -1,0 +1,202 @@
+{
+  "by_attack_type": [
+    {
+      "attack_type": "Backdoor",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.1982704638651113,
+      "rouge_l_vs_reference": 0.27328852391250485,
+      "tfidf_cosine_vs_catalog": 0.26133962689264423,
+      "tfidf_cosine_vs_reference": 0.21244834117065878
+    },
+    {
+      "attack_type": "Command_and_Control",
+      "contexts": 8,
+      "manually_approved": 8,
+      "rouge_l_vs_catalog": 0.18542987535676503,
+      "rouge_l_vs_reference": 0.17819369394642715,
+      "tfidf_cosine_vs_catalog": 0.24088253620029748,
+      "tfidf_cosine_vs_reference": 0.17838707392506362
+    },
+    {
+      "attack_type": "DDoS_HTTP",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.2699070601806164,
+      "rouge_l_vs_reference": 0.25948321213613107,
+      "tfidf_cosine_vs_catalog": 0.34252448154854687,
+      "tfidf_cosine_vs_reference": 0.22986606205250146
+    },
+    {
+      "attack_type": "DDoS_ICMP",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.20255954456635622,
+      "rouge_l_vs_reference": 0.170058876647918,
+      "tfidf_cosine_vs_catalog": 0.2754094060178978,
+      "tfidf_cosine_vs_reference": 0.16203450753240725
+    },
+    {
+      "attack_type": "DDoS_TCP",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.19981099435473113,
+      "rouge_l_vs_reference": 0.22156918935437972,
+      "tfidf_cosine_vs_catalog": 0.3012333751953954,
+      "tfidf_cosine_vs_reference": 0.2642578549833265
+    },
+    {
+      "attack_type": "DDoS_UDP",
+      "contexts": 5,
+      "manually_approved": 5,
+      "rouge_l_vs_catalog": 0.2104705737300674,
+      "rouge_l_vs_reference": 0.14324592370931044,
+      "tfidf_cosine_vs_catalog": 0.31498460444269416,
+      "tfidf_cosine_vs_reference": 0.1851173205952205
+    },
+    {
+      "attack_type": "DoS",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.18548737675854804,
+      "rouge_l_vs_reference": 0.21043913838965986,
+      "tfidf_cosine_vs_catalog": 0.2618728738657773,
+      "tfidf_cosine_vs_reference": 0.23742205479689799
+    },
+    {
+      "attack_type": "Fingerprinting",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.1533998406758697,
+      "rouge_l_vs_reference": 0.20238298388850712,
+      "tfidf_cosine_vs_catalog": 0.1937261290477776,
+      "tfidf_cosine_vs_reference": 0.15613065077697638
+    },
+    {
+      "attack_type": "MITM",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.2419572760870586,
+      "rouge_l_vs_reference": 0.3016907483123577,
+      "tfidf_cosine_vs_catalog": 0.33292542539290787,
+      "tfidf_cosine_vs_reference": 0.27985667267810604
+    },
+    {
+      "attack_type": "Password",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.1658171601974123,
+      "rouge_l_vs_reference": 0.2385785419035588,
+      "tfidf_cosine_vs_catalog": 0.2597018188618211,
+      "tfidf_cosine_vs_reference": 0.21681609616755476
+    },
+    {
+      "attack_type": "Port_Scanning",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.2487857204032397,
+      "rouge_l_vs_reference": 0.268276839737864,
+      "tfidf_cosine_vs_catalog": 0.2820721051881832,
+      "tfidf_cosine_vs_reference": 0.25141950535238833
+    },
+    {
+      "attack_type": "Ransomware",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.24742246757238448,
+      "rouge_l_vs_reference": 0.23278206124478965,
+      "tfidf_cosine_vs_catalog": 0.3159149611366855,
+      "tfidf_cosine_vs_reference": 0.20789096484469696
+    },
+    {
+      "attack_type": "SQL_injection",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.1813136227120369,
+      "rouge_l_vs_reference": 0.17248704643750665,
+      "tfidf_cosine_vs_catalog": 0.30234925915066846,
+      "tfidf_cosine_vs_reference": 0.16892400759710133
+    },
+    {
+      "attack_type": "Uploading",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.18931075825000118,
+      "rouge_l_vs_reference": 0.17967985870815537,
+      "tfidf_cosine_vs_catalog": 0.2743545908364288,
+      "tfidf_cosine_vs_reference": 0.17717553128981806
+    },
+    {
+      "attack_type": "Vulnerability_scanner",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.23947306713826952,
+      "rouge_l_vs_reference": 0.19229260591594008,
+      "tfidf_cosine_vs_catalog": 0.3056718222082038,
+      "tfidf_cosine_vs_reference": 0.2148512978401185
+    },
+    {
+      "attack_type": "XSS",
+      "contexts": 7,
+      "manually_approved": 7,
+      "rouge_l_vs_catalog": 0.1755663585507304,
+      "rouge_l_vs_reference": 0.1642646824001939,
+      "tfidf_cosine_vs_catalog": 0.2504805039755188,
+      "tfidf_cosine_vs_reference": 0.1691626219441365
+    }
+  ],
+  "generated_at": "2026-09-07T10:43:39+00:00",
+  "global": {
+    "contexts": 111,
+    "manually_approved": 111,
+    "rouge_l_vs_catalog": 0.20566994460082,
+    "rouge_l_vs_reference": 0.2139882822796778,
+    "tfidf_cosine_vs_catalog": 0.28125241411752294,
+    "tfidf_cosine_vs_reference": 0.2071214088068778
+  },
+  "protocol": {
+    "candidate": "Mistral mitigation_items[].context",
+    "catalog_reference": "associated immutable mitigation base",
+    "cosine": "separate paired TF-IDF spaces for catalog and independent reference",
+    "independent_reference": "AI-assisted contextualization drafted without the Mistral candidate",
+    "interpretation": "auxiliary lexical similarity; not semantic correctness",
+    "reference_provenance": [
+      {
+        "authoring_method": "ai_assisted_blind_draft",
+        "authoring_system": "OpenAI Codex",
+        "candidate_context_hidden_during_drafting": true,
+        "component_sources": [
+          {
+            "path": "artifacts/validation_2026/mitigator_mistral_live_multidataset16_20260906_run01/reference_draft_batch_network.json",
+            "sha256": "95c4a044f7f48703b3c697b5f3c108d70b0511b164d0fe4c478c17ad22415f89"
+          },
+          {
+            "path": "artifacts/validation_2026/mitigator_mistral_live_multidataset16_20260906_run01/reference_draft_batch_security.json",
+            "sha256": "7e8927bb303a8894527a30125dacc0dffae38de48cc5787198e49cb5f7a63cf1"
+          },
+          {
+            "path": "artifacts/validation_2026/mitigator_mistral_live_multidataset16_20260906_run01/reference_draft_batch_application.json",
+            "sha256": "e18a33ae1b2ffff3b75bd540a87a049aaa76a936e35390fed7f6781449af1046"
+          }
+        ],
+        "frozen_at": "2026-09-07T10:43:24+00:00",
+        "manual_review_confirmation": {
+          "reviewed_at": "2026-09-07T10:43:05Z",
+          "reviewer": "Manuel Gonzalo Ramírez Tirado",
+          "scope": "all references individually reviewed"
+        },
+        "manual_review_policy": "each reference requires explicit author approval",
+        "manual_review_status": "approved_by_author",
+        "source_material": "canonical event evidence and immutable catalog base only"
+      }
+    ],
+    "reference_sources": [
+      {
+        "path": "docs/evaluation_references/mitigator_context_references_ai_assisted_20260907.json",
+        "sha256": "1cb48bd1358976a6c1afe338e1c05fe5f66c8efa3174216416915428acc53cbb"
+      }
+    ],
+    "rouge_l": "token-normalized LCS F1"
+  },
+  "schema_version": "1.0"
+}

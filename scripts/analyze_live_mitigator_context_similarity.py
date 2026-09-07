@@ -81,7 +81,7 @@ def main() -> int:
 
     pairs: list[dict[str, Any]] = []
     for case in cases:
-        subtype = case["classification"]["attack_subtype"]
+        attack_type = case["classification"]["attack_type"]
         for item in case["explanation"]["mitigation_items"]:
             if item.get("source") != "llm":
                 continue
@@ -92,7 +92,7 @@ def main() -> int:
             pairs.append(
                 {
                     "case_id": case["case_id"],
-                    "attack_type": subtype,
+                    "attack_type": attack_type,
                     "base": base,
                     "context": context,
                     "rouge_l": rouge_l(context, base),

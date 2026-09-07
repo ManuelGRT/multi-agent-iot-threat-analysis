@@ -1,7 +1,7 @@
 {
-  "version": "2.0",
-  "generated_at": "2026-09-06",
-  "description": "Catalogo determinista de threat intel para el agente de mitigacion. La version 2.0 conserva las familias amplias por compatibilidad y anade una entrada operativa especifica para cada uno de los 16 tipos de la taxonomia multidataset. El LLM contextualiza las acciones seleccionadas, pero no puede presentar como auditada ninguna aportacion ajena al catalogo.",
+  "version": "3.0",
+  "generated_at": "2026-09-07",
+  "description": "Catalogo determinista de threat intel para el agente de mitigacion. La consulta operativa se realiza exclusivamente por una de las 16 entradas de tipo de ataque de la taxonomia multidataset. Las referencias se resuelven por identificador contra un registro global, sin derivar ni consultar familias amplias. El LLM contextualiza las acciones seleccionadas, pero no puede presentar como auditada ninguna aportacion ajena al catalogo.",
   "attack_taxonomy": {
     "version": "multidataset_attack_type_v1_2026-09-06",
     "compatible_versions": [
@@ -27,163 +27,50 @@
       "Command_and_Control"
     ]
   },
-  "families": {
-    "benign": {
-      "attack_techniques": [],
-      "capec_patterns": [],
-      "mitigations": {
-        "containment": [],
-        "eradication": [],
-        "prevention": ["mantener monitorizacion basica y baselines de comportamiento"]
-      },
-      "note": "Trafico benigno: no se requieren acciones correctivas."
+  "reference_catalog": {
+    "attack_techniques": {
+      "T1498": {"id": "T1498", "name": "Network Denial of Service", "url": "https://attack.mitre.org/techniques/T1498/"},
+      "T1499": {"id": "T1499", "name": "Endpoint Denial of Service", "url": "https://attack.mitre.org/techniques/T1499/"},
+      "T1595": {"id": "T1595", "name": "Active Scanning", "url": "https://attack.mitre.org/techniques/T1595/"},
+      "T1046": {"id": "T1046", "name": "Network Service Discovery", "url": "https://attack.mitre.org/techniques/T1046/"},
+      "T1071": {"id": "T1071", "name": "Application Layer Protocol (C2)", "url": "https://attack.mitre.org/techniques/T1071/"},
+      "T1110": {"id": "T1110", "name": "Brute Force", "url": "https://attack.mitre.org/techniques/T1110/"},
+      "T1190": {"id": "T1190", "name": "Exploit Public-Facing Application", "url": "https://attack.mitre.org/techniques/T1190/"},
+      "T1105": {"id": "T1105", "name": "Ingress Tool Transfer", "url": "https://attack.mitre.org/techniques/T1105/"},
+      "T1204": {"id": "T1204", "name": "User Execution", "url": "https://attack.mitre.org/techniques/T1204/"},
+      "T1557": {"id": "T1557", "name": "Adversary-in-the-Middle", "url": "https://attack.mitre.org/techniques/T1557/"}
     },
-    "ddos": {
-      "attack_techniques": [
-        {"id": "T1498", "name": "Network Denial of Service", "url": "https://attack.mitre.org/techniques/T1498/"},
-        {"id": "T1499", "name": "Endpoint Denial of Service", "url": "https://attack.mitre.org/techniques/T1499/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-125", "name": "Flooding", "url": "https://capec.mitre.org/data/definitions/125.html"},
-        {"id": "CAPEC-482", "name": "TCP Flood", "url": "https://capec.mitre.org/data/definitions/482.html"},
-        {"id": "CAPEC-486", "name": "UDP Flood", "url": "https://capec.mitre.org/data/definitions/486.html"},
-        {"id": "CAPEC-487", "name": "ICMP Flood", "url": "https://capec.mitre.org/data/definitions/487.html"},
-        {"id": "CAPEC-488", "name": "HTTP Flood", "url": "https://capec.mitre.org/data/definitions/488.html"}
-      ],
-      "mitigations": {
-        "containment": ["aplicar rate limiting sobre el trafico de origen", "activar proteccion DDoS upstream (scrubbing)"],
-        "eradication": ["bloquear IPs/redes de origen persistentes en el firewall perimetral"],
-        "prevention": ["M1037 Filter Network Traffic: reglas de filtrado y listas de control", "dimensionar capacidad y anycast para absorber picos"]
-      },
-      "attack_mitigation_refs": [{"id": "M1037", "name": "Filter Network Traffic", "url": "https://attack.mitre.org/mitigations/M1037/"}]
+    "capec_patterns": {
+      "CAPEC-125": {"id": "CAPEC-125", "name": "Flooding", "url": "https://capec.mitre.org/data/definitions/125.html"},
+      "CAPEC-482": {"id": "CAPEC-482", "name": "TCP Flood", "url": "https://capec.mitre.org/data/definitions/482.html"},
+      "CAPEC-486": {"id": "CAPEC-486", "name": "UDP Flood", "url": "https://capec.mitre.org/data/definitions/486.html"},
+      "CAPEC-487": {"id": "CAPEC-487", "name": "ICMP Flood", "url": "https://capec.mitre.org/data/definitions/487.html"},
+      "CAPEC-488": {"id": "CAPEC-488", "name": "HTTP Flood", "url": "https://capec.mitre.org/data/definitions/488.html"},
+      "CAPEC-300": {"id": "CAPEC-300", "name": "Port Scanning", "url": "https://capec.mitre.org/data/definitions/300.html"},
+      "CAPEC-310": {"id": "CAPEC-310", "name": "Scanning for Vulnerable Software", "url": "https://capec.mitre.org/data/definitions/310.html"},
+      "CAPEC-224": {"id": "CAPEC-224", "name": "Fingerprinting", "url": "https://capec.mitre.org/data/definitions/224.html"},
+      "CAPEC-542": {"id": "CAPEC-542", "name": "Targeted Malware", "url": "https://capec.mitre.org/data/definitions/542.html"},
+      "CAPEC-112": {"id": "CAPEC-112", "name": "Brute Force", "url": "https://capec.mitre.org/data/definitions/112.html"},
+      "CAPEC-49": {"id": "CAPEC-49", "name": "Password Brute Forcing", "url": "https://capec.mitre.org/data/definitions/49.html"},
+      "CAPEC-66": {"id": "CAPEC-66", "name": "SQL Injection", "url": "https://capec.mitre.org/data/definitions/66.html"},
+      "CAPEC-242": {"id": "CAPEC-242", "name": "Code Injection", "url": "https://capec.mitre.org/data/definitions/242.html"},
+      "CAPEC-63": {"id": "CAPEC-63", "name": "Cross-Site Scripting (XSS)", "url": "https://capec.mitre.org/data/definitions/63.html"},
+      "CAPEC-523": {"id": "CAPEC-523", "name": "Malicious Software Implanted", "url": "https://capec.mitre.org/data/definitions/523.html"},
+      "CAPEC-94": {"id": "CAPEC-94", "name": "Adversary in the Middle (AiTM)", "url": "https://capec.mitre.org/data/definitions/94.html"}
     },
-    "scanning": {
-      "attack_techniques": [
-        {"id": "T1595", "name": "Active Scanning", "url": "https://attack.mitre.org/techniques/T1595/"},
-        {"id": "T1046", "name": "Network Service Discovery", "url": "https://attack.mitre.org/techniques/T1046/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-300", "name": "Port Scanning", "url": "https://capec.mitre.org/data/definitions/300.html"},
-        {"id": "CAPEC-169", "name": "Footprinting", "url": "https://capec.mitre.org/data/definitions/169.html"},
-        {"id": "CAPEC-310", "name": "Scanning for Vulnerable Software", "url": "https://capec.mitre.org/data/definitions/310.html"},
-        {"id": "CAPEC-224", "name": "Fingerprinting", "url": "https://capec.mitre.org/data/definitions/224.html"}
-      ],
-      "mitigations": {
-        "containment": ["bloquear el origen si el escaneo es repetido o agresivo"],
-        "eradication": ["revisar y cerrar puertos/servicios expuestos innecesarios"],
-        "prevention": ["M1042 Disable or Remove Feature or Program: minimizar superficie expuesta", "aumentar sensibilidad de deteccion de escaneo en IDS/IPS"]
-      },
-      "attack_mitigation_refs": [{"id": "M1042", "name": "Disable or Remove Feature or Program", "url": "https://attack.mitre.org/mitigations/M1042/"}]
-    },
-    "botnet": {
-      "attack_techniques": [
-        {"id": "T1584.005", "name": "Compromise Infrastructure: Botnet", "url": "https://attack.mitre.org/techniques/T1584/005/"},
-        {"id": "T1071", "name": "Application Layer Protocol (C2)", "url": "https://attack.mitre.org/techniques/T1071/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-542", "name": "Targeted Malware", "url": "https://capec.mitre.org/data/definitions/542.html"}
-      ],
-      "mitigations": {
-        "containment": ["aislar el dispositivo IoT comprometido de la red", "cortar comunicaciones con los indicadores C2 observados"],
-        "eradication": ["reflashear/restaurar firmware limpio del dispositivo", "rotar credenciales del dispositivo y servicios asociados"],
-        "prevention": ["M1031 Network Intrusion Prevention: firmas y bloqueo C2", "cambiar credenciales por defecto y deshabilitar telnet"]
-      },
-      "attack_mitigation_refs": [{"id": "M1031", "name": "Network Intrusion Prevention", "url": "https://attack.mitre.org/mitigations/M1031/"}]
-    },
-    "bruteforce": {
-      "attack_techniques": [
-        {"id": "T1110", "name": "Brute Force", "url": "https://attack.mitre.org/techniques/T1110/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-112", "name": "Brute Force", "url": "https://capec.mitre.org/data/definitions/112.html"},
-        {"id": "CAPEC-49", "name": "Password Brute Forcing", "url": "https://capec.mitre.org/data/definitions/49.html"}
-      ],
-      "mitigations": {
-        "containment": ["aplicar bloqueo temporal de cuenta/origen tras intentos fallidos"],
-        "eradication": ["rotar credenciales debiles o comprometidas"],
-        "prevention": ["M1032 Multi-factor Authentication donde sea posible", "M1027 Password Policies: politicas de contrasena robustas", "limitar exposicion de servicios de autenticacion (SSH/Telnet/MQTT)"]
-      },
-      "attack_mitigation_refs": [
-        {"id": "M1032", "name": "Multi-factor Authentication", "url": "https://attack.mitre.org/mitigations/M1032/"},
-        {"id": "M1027", "name": "Password Policies", "url": "https://attack.mitre.org/mitigations/M1027/"}
-      ]
-    },
-    "injection": {
-      "attack_techniques": [
-        {"id": "T1190", "name": "Exploit Public-Facing Application", "url": "https://attack.mitre.org/techniques/T1190/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-66", "name": "SQL Injection", "url": "https://capec.mitre.org/data/definitions/66.html"},
-        {"id": "CAPEC-88", "name": "OS Command Injection", "url": "https://capec.mitre.org/data/definitions/88.html"},
-        {"id": "CAPEC-242", "name": "Code Injection", "url": "https://capec.mitre.org/data/definitions/242.html"},
-        {"id": "CAPEC-63", "name": "Cross-Site Scripting (XSS)", "url": "https://capec.mitre.org/data/definitions/63.html"}
-      ],
-      "mitigations": {
-        "containment": ["poner el servicio afectado detras de WAF o retirarlo temporalmente"],
-        "eradication": ["parchear la aplicacion/servicio vulnerable", "revisar logs de aplicacion en busca de payloads y persistencia"],
-        "prevention": ["M1051 Update Software: ciclo de parcheo", "validacion y saneamiento de entradas (consultas parametrizadas)"]
-      },
-      "attack_mitigation_refs": [{"id": "M1051", "name": "Update Software", "url": "https://attack.mitre.org/mitigations/M1051/"}]
-    },
-    "malware": {
-      "attack_techniques": [
-        {"id": "T1105", "name": "Ingress Tool Transfer", "url": "https://attack.mitre.org/techniques/T1105/"},
-        {"id": "T1204", "name": "User Execution", "url": "https://attack.mitre.org/techniques/T1204/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-542", "name": "Targeted Malware", "url": "https://capec.mitre.org/data/definitions/542.html"},
-        {"id": "CAPEC-523", "name": "Malicious Software Implanted", "url": "https://capec.mitre.org/data/definitions/523.html"}
-      ],
-      "mitigations": {
-        "containment": ["aislar el host afectado de la red"],
-        "eradication": ["ejecutar analisis forense y eliminar artefactos", "restaurar desde backup limpio si hay persistencia"],
-        "prevention": ["M1049 Antivirus/Antimalware en endpoints gestionables", "control de integridad de firmware/procesos en IoT"]
-      },
-      "attack_mitigation_refs": [{"id": "M1049", "name": "Antivirus/Antimalware", "url": "https://attack.mitre.org/mitigations/M1049/"}]
-    },
-    "exfiltration": {
-      "attack_techniques": [
-        {"id": "T1041", "name": "Exfiltration Over C2 Channel", "url": "https://attack.mitre.org/techniques/T1041/"},
-        {"id": "T1048", "name": "Exfiltration Over Alternative Protocol", "url": "https://attack.mitre.org/techniques/T1048/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-99", "name": "XML Parser Attack (data exfiltration vector)", "url": "https://capec.mitre.org/data/definitions/99.html"}
-      ],
-      "mitigations": {
-        "containment": ["contener el endpoint y cortar el canal de salida detectado"],
-        "eradication": ["auditar accesos a los datos afectados y revocar credenciales implicadas"],
-        "prevention": ["M1057 Data Loss Prevention", "filtrado y monitorizacion de egress (destinos/volumenes anomalos)"]
-      },
-      "attack_mitigation_refs": [{"id": "M1057", "name": "Data Loss Prevention", "url": "https://attack.mitre.org/mitigations/M1057/"}]
-    },
-    "mitm": {
-      "attack_techniques": [
-        {"id": "T1557", "name": "Adversary-in-the-Middle", "url": "https://attack.mitre.org/techniques/T1557/"}
-      ],
-      "capec_patterns": [
-        {"id": "CAPEC-94", "name": "Adversary in the Middle (AiTM)", "url": "https://capec.mitre.org/data/definitions/94.html"}
-      ],
-      "mitigations": {
-        "containment": ["inspeccionar tablas ARP y aislar el segmento afectado"],
-        "eradication": ["eliminar entradas ARP/DNS envenenadas y el nodo intruso"],
-        "prevention": ["M1041 Encrypt Sensitive Information: TLS con validacion estricta de certificados", "segmentar redes no confiables y usar dynamic ARP inspection"]
-      },
-      "attack_mitigation_refs": [{"id": "M1041", "name": "Encrypt Sensitive Information", "url": "https://attack.mitre.org/mitigations/M1041/"}]
-    },
-    "unknown_attack": {
-      "attack_techniques": [],
-      "capec_patterns": [],
-      "mitigations": {
-        "containment": ["aumentar monitorizacion del activo afectado"],
-        "eradication": [],
-        "prevention": ["escalar a analista con el contexto capturado", "capturar evidencia adicional (pcap/logs) para clasificacion posterior"]
-      },
-      "note": "Familia no clasificada: priorizar captura de contexto y escalado."
+    "attack_mitigation_refs": {
+      "M1037": {"id": "M1037", "name": "Filter Network Traffic", "url": "https://attack.mitre.org/mitigations/M1037/"},
+      "M1042": {"id": "M1042", "name": "Disable or Remove Feature or Program", "url": "https://attack.mitre.org/mitigations/M1042/"},
+      "M1031": {"id": "M1031", "name": "Network Intrusion Prevention", "url": "https://attack.mitre.org/mitigations/M1031/"},
+      "M1032": {"id": "M1032", "name": "Multi-factor Authentication", "url": "https://attack.mitre.org/mitigations/M1032/"},
+      "M1027": {"id": "M1027", "name": "Password Policies", "url": "https://attack.mitre.org/mitigations/M1027/"},
+      "M1051": {"id": "M1051", "name": "Update Software", "url": "https://attack.mitre.org/mitigations/M1051/"},
+      "M1049": {"id": "M1049", "name": "Antivirus/Antimalware", "url": "https://attack.mitre.org/mitigations/M1049/"},
+      "M1041": {"id": "M1041", "name": "Encrypt Sensitive Information", "url": "https://attack.mitre.org/mitigations/M1041/"}
     }
   },
   "attack_types": {
     "Backdoor": {
-      "family": "malware",
       "attack_technique_ids": ["T1105", "T1204"],
       "capec_pattern_ids": ["CAPEC-523"],
       "attack_mitigation_ref_ids": ["M1049"],
@@ -203,7 +90,6 @@
       "note": "Respuesta especifica para persistencia o acceso remoto mediante backdoor."
     },
     "DDoS_HTTP": {
-      "family": "ddos",
       "attack_technique_ids": ["T1498"],
       "capec_pattern_ids": ["CAPEC-125", "CAPEC-488"],
       "attack_mitigation_ref_ids": ["M1037"],
@@ -223,7 +109,6 @@
       "note": "Mitigacion de inundacion distribuida en la capa HTTP."
     },
     "DDoS_ICMP": {
-      "family": "ddos",
       "attack_technique_ids": ["T1498"],
       "capec_pattern_ids": ["CAPEC-125", "CAPEC-487"],
       "attack_mitigation_ref_ids": ["M1037"],
@@ -243,7 +128,6 @@
       "note": "Mitigacion de inundacion distribuida mediante ICMP."
     },
     "DDoS_TCP": {
-      "family": "ddos",
       "attack_technique_ids": ["T1498"],
       "capec_pattern_ids": ["CAPEC-125", "CAPEC-482"],
       "attack_mitigation_ref_ids": ["M1037"],
@@ -263,7 +147,6 @@
       "note": "Mitigacion de inundacion distribuida basada en TCP."
     },
     "DDoS_UDP": {
-      "family": "ddos",
       "attack_technique_ids": ["T1498"],
       "capec_pattern_ids": ["CAPEC-125", "CAPEC-486"],
       "attack_mitigation_ref_ids": ["M1037"],
@@ -283,7 +166,6 @@
       "note": "Mitigacion de inundacion distribuida basada en UDP."
     },
     "Fingerprinting": {
-      "family": "scanning",
       "attack_technique_ids": ["T1595"],
       "capec_pattern_ids": ["CAPEC-224"],
       "attack_mitigation_ref_ids": ["M1042"],
@@ -303,7 +185,6 @@
       "note": "Respuesta especifica ante identificacion activa de sistema, servicio o dispositivo."
     },
     "MITM": {
-      "family": "mitm",
       "attack_technique_ids": ["T1557"],
       "capec_pattern_ids": ["CAPEC-94"],
       "attack_mitigation_ref_ids": ["M1041"],
@@ -323,7 +204,6 @@
       "note": "Respuesta especifica ante adversario en el medio."
     },
     "Password": {
-      "family": "bruteforce",
       "attack_technique_ids": ["T1110"],
       "capec_pattern_ids": ["CAPEC-112", "CAPEC-49"],
       "attack_mitigation_ref_ids": ["M1032", "M1027"],
@@ -343,7 +223,6 @@
       "note": "Respuesta especifica ante ataques contra credenciales o contrasenas."
     },
     "Port_Scanning": {
-      "family": "scanning",
       "attack_technique_ids": ["T1046"],
       "capec_pattern_ids": ["CAPEC-300"],
       "attack_mitigation_ref_ids": ["M1042"],
@@ -363,7 +242,6 @@
       "note": "Respuesta especifica ante escaneo de puertos."
     },
     "Ransomware": {
-      "family": "malware",
       "attack_technique_ids": ["T1105", "T1204"],
       "capec_pattern_ids": ["CAPEC-542"],
       "attack_mitigation_ref_ids": ["M1049"],
@@ -384,7 +262,6 @@
       "note": "CAPEC-542 se conserva como referencia generica de malware; no identifica por si solo cifrado de datos."
     },
     "SQL_injection": {
-      "family": "injection",
       "attack_technique_ids": ["T1190"],
       "capec_pattern_ids": ["CAPEC-66"],
       "attack_mitigation_ref_ids": ["M1051"],
@@ -404,7 +281,6 @@
       "note": "Respuesta especifica ante inyeccion SQL."
     },
     "Uploading": {
-      "family": "injection",
       "attack_technique_ids": ["T1190"],
       "capec_pattern_ids": ["CAPEC-242"],
       "attack_mitigation_ref_ids": ["M1051"],
@@ -424,7 +300,6 @@
       "note": "Respuesta especifica ante carga de contenido o codigo malicioso."
     },
     "Vulnerability_scanner": {
-      "family": "scanning",
       "attack_technique_ids": ["T1595"],
       "capec_pattern_ids": ["CAPEC-310"],
       "attack_mitigation_ref_ids": ["M1042"],
@@ -444,7 +319,6 @@
       "note": "Respuesta especifica ante busqueda automatizada de vulnerabilidades."
     },
     "XSS": {
-      "family": "injection",
       "attack_technique_ids": ["T1190"],
       "capec_pattern_ids": ["CAPEC-63"],
       "attack_mitigation_ref_ids": ["M1051"],
@@ -464,7 +338,6 @@
       "note": "Respuesta especifica ante cross-site scripting."
     },
     "DoS": {
-      "family": "ddos",
       "attack_technique_ids": ["T1499"],
       "capec_pattern_ids": ["CAPEC-125"],
       "attack_mitigation_ref_ids": ["M1037"],
@@ -484,7 +357,6 @@
       "note": "DoS se trata de forma separada de DDoS; no presupone multiples origenes ni scrubbing distribuido."
     },
     "Command_and_Control": {
-      "family": "botnet",
       "attack_technique_ids": ["T1071"],
       "capec_pattern_ids": ["CAPEC-542"],
       "attack_mitigation_ref_ids": ["M1031"],
@@ -510,20 +382,20 @@
     "description": "Mapeo manual ataque->CAPEC del TFM previo de Jorge (TFM_Jorge_Juan_Tejero-Threat_IoT.pdf, Tabla 3.4; version articulo arXiv:2507.02390, Tabla 3). Era su UNICA documentacion de mitigacion: las contramedidas genericas de CAPEC se inyectaban en el prompt del LLM sin anclaje auditable. Este catalogo cubre todos sus patrones CAPEC y anade tecnicas ATT&CK, mitigaciones ATT&CK M-* y priorizacion por fases que aquel no usaba.",
     "source": "TFM_Jorge_Juan_Tejero-Threat_IoT.pdf (Tabla 3.4, p. 20) / arXiv:2507.02390 (Tabla 3, p. 7)",
     "mappings": [
-      {"attack_type": "DDoS_UDP", "capec_id": "CAPEC-486", "capec_name": "UDP Flood", "family": "ddos"},
-      {"attack_type": "DDoS_ICMP", "capec_id": "CAPEC-487", "capec_name": "ICMP Flood", "family": "ddos"},
-      {"attack_type": "DDoS_TCP", "capec_id": "CAPEC-482", "capec_name": "TCP Flood", "family": "ddos"},
-      {"attack_type": "DDoS_HTTP", "capec_id": "CAPEC-488", "capec_name": "HTTP Flood", "family": "ddos"},
-      {"attack_type": "SQL_injection", "capec_id": "CAPEC-66", "capec_name": "SQL Injection", "family": "injection"},
-      {"attack_type": "XSS", "capec_id": "CAPEC-63", "capec_name": "Cross-Site Scripting (XSS)", "family": "injection"},
-      {"attack_type": "Uploading", "capec_id": "CAPEC-242", "capec_name": "Code Injection", "family": "injection"},
-      {"attack_type": "Password", "capec_id": "CAPEC-49", "capec_name": "Password Brute Forcing", "family": "bruteforce"},
-      {"attack_type": "Vulnerability_scanner", "capec_id": "CAPEC-310", "capec_name": "Scanning for Vulnerable Software", "family": "scanning"},
-      {"attack_type": "Port_Scanning", "capec_id": "CAPEC-300", "capec_name": "Port Scanning", "family": "scanning"},
-      {"attack_type": "Fingerprinting", "capec_id": "CAPEC-224", "capec_name": "Fingerprinting", "family": "scanning"},
-      {"attack_type": "Backdoor", "capec_id": "CAPEC-523", "capec_name": "Malicious Software Implanted", "family": "malware"},
-      {"attack_type": "Ransomware", "capec_id": "CAPEC-542", "capec_name": "Targeted Malware", "family": "malware"},
-      {"attack_type": "MITM", "capec_id": "CAPEC-94", "capec_name": "Adversary in the Middle (AiTM)", "family": "mitm"}
+      {"attack_type": "DDoS_UDP", "capec_id": "CAPEC-486", "capec_name": "UDP Flood"},
+      {"attack_type": "DDoS_ICMP", "capec_id": "CAPEC-487", "capec_name": "ICMP Flood"},
+      {"attack_type": "DDoS_TCP", "capec_id": "CAPEC-482", "capec_name": "TCP Flood"},
+      {"attack_type": "DDoS_HTTP", "capec_id": "CAPEC-488", "capec_name": "HTTP Flood"},
+      {"attack_type": "SQL_injection", "capec_id": "CAPEC-66", "capec_name": "SQL Injection"},
+      {"attack_type": "XSS", "capec_id": "CAPEC-63", "capec_name": "Cross-Site Scripting (XSS)"},
+      {"attack_type": "Uploading", "capec_id": "CAPEC-242", "capec_name": "Code Injection"},
+      {"attack_type": "Password", "capec_id": "CAPEC-49", "capec_name": "Password Brute Forcing"},
+      {"attack_type": "Vulnerability_scanner", "capec_id": "CAPEC-310", "capec_name": "Scanning for Vulnerable Software"},
+      {"attack_type": "Port_Scanning", "capec_id": "CAPEC-300", "capec_name": "Port Scanning"},
+      {"attack_type": "Fingerprinting", "capec_id": "CAPEC-224", "capec_name": "Fingerprinting"},
+      {"attack_type": "Backdoor", "capec_id": "CAPEC-523", "capec_name": "Malicious Software Implanted"},
+      {"attack_type": "Ransomware", "capec_id": "CAPEC-542", "capec_name": "Targeted Malware"},
+      {"attack_type": "MITM", "capec_id": "CAPEC-94", "capec_name": "Adversary in the Middle (AiTM)"}
     ]
   },
   "schema_profile_actions": {

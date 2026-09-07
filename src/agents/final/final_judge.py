@@ -8,12 +8,12 @@ La auditoria E2E completa llega en la Fase 5 (auditor).
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from src.contracts.attack_taxonomy import (
+    MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
-    attack_classes_for_taxonomy,
-    broad_family_for_attack_type,
 )
 from src.agents.final.base import FinalAgent
 from src.contracts.agents import JudgeOutput
@@ -41,9 +41,10 @@ class FinalJudge(FinalAgent):
         model_task = str(
             classification.get("model_task")
             or classification.get("score_type")
-            or "attack_family"
+            or "attack_type"
         )
-        subtype_classes: tuple[str, ...] = ()
+        attack_classes = MULTIDATASET_ATTACK_CLASSES
+        classification_confidence = 0.0
         try:
             classification_threshold = float(
                 classification.get(
@@ -57,27 +58,65 @@ class FinalJudge(FinalAgent):
             if not 0.0 <= classification_threshold <= 1.0:
                 classification_threshold = REVIEW_CLASSIFICATION_CONFIDENCE
                 issues.append("classification_threshold_invalid")
-        if classification and model_task not in {"attack_family", "attack_subtype"}:
+        if classification and model_task != "attack_type":
             issues.append("classification_model_task_invalid")
-        if classification and model_task == "attack_subtype":
-            subtype_value = classification.get("attack_subtype")
-            if not subtype_value:
-                issues.append("classification_subtype_missing")
-            try:
-                subtype_classes = attack_classes_for_taxonomy(
-                    classification.get("taxonomy_version")
-                )
-            except ValueError:
+        if classification:
+            attack_type = classification.get("attack_type")
+            if not attack_type:
+                issues.append("classification_attack_type_missing")
+            if classification.get("taxonomy_version") != MULTIDATASET_TAXONOMY_VERSION:
                 issues.append("classification_taxonomy_version_invalid")
+            if attack_type and str(attack_type) not in attack_classes:
+                issues.append("classification_attack_type_outside_taxonomy")
+
+            try:
+                classification_confidence = float(
+                    classification.get("confidence", 0.0)
+                )
+            except (TypeError, ValueError):
+                issues.append("classification_confidence_invalid")
             else:
-                if subtype_value and str(subtype_value) not in subtype_classes:
-                    issues.append("classification_subtype_outside_taxonomy")
-        if (
-            classification
-            and model_task == "attack_family"
-            and classification.get("attack_subtype") is not None
-        ):
-            issues.append("classification_subtype_unexpected_for_family_model")
+                if not math.isfinite(classification_confidence) or not (
+                    0.0 <= classification_confidence <= 1.0
+                ):
+                    issues.append("classification_confidence_invalid")
+                    classification_confidence = 0.0
+
+            raw_top_scores = classification.get("top_scores")
+            top_scores: dict[str, float] = {}
+            top_scores_valid = isinstance(raw_top_scores, dict)
+            if top_scores_valid:
+                for label, raw_score in raw_top_scores.items():
+                    if (
+                        not isinstance(label, str)
+                        or label not in attack_classes
+                        or isinstance(raw_score, bool)
+                    ):
+                        top_scores_valid = False
+                        break
+                    try:
+                        score = float(raw_score)
+                    except (TypeError, ValueError):
+                        top_scores_valid = False
+                        break
+                    if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+                        top_scores_valid = False
+                        break
+                    top_scores[label] = score
+
+            if top_scores_valid and len(top_scores) == 3:
+                top_label, top_confidence = max(
+                    top_scores.items(), key=lambda item: item[1]
+                )
+                top_scores_valid = (
+                    top_label == attack_type
+                    and math.isfinite(classification_confidence)
+                    and abs(top_confidence - classification_confidence) <= 1e-6
+                )
+            else:
+                top_scores_valid = False
+            if not top_scores_valid:
+                issues.append("classification_top_scores_invalid")
         standardizer_abstained = bool(ingest.get("abstain"))
         detector_abstained = bool(detection.get("abstain"))
         if errors:
@@ -92,7 +131,9 @@ class FinalJudge(FinalAgent):
                 issues.append("mapping_confidence_below_review_threshold")
             if not detection:
                 issues.append("detection_missing")
-            elif detection.get("is_malicious") is not None:
+            elif detection.get("is_malicious") is None:
+                issues.append("detection_verdict_missing")
+            else:
                 probability = float(detection.get("probability", 0.0) or 0.0)
                 if bool(detection.get("is_malicious")) != (probability >= 0.5):
                     issues.append("detection_label_probability_mismatch")
@@ -102,8 +143,7 @@ class FinalJudge(FinalAgent):
             not detector_abstained
             and detection.get("is_malicious")
             and classification
-            and float(classification.get("confidence", 1.0) or 0.0)
-            < classification_threshold
+            and classification_confidence < classification_threshold
         ):
             issues.append("classification_confidence_below_review_threshold")
         if (
@@ -112,44 +152,24 @@ class FinalJudge(FinalAgent):
             and not classification
         ):
             issues.append("malicious_without_classification")
-        if (
-            not detector_abstained
-            and detection.get("is_malicious")
-            and str(classification.get("attack_family") or "").strip().lower()
-            in {"benign", "normal"}
-        ):
-            issues.append("malicious_classified_as_benign")
-        subtype = classification.get("attack_subtype")
-        if (
-            not detector_abstained
-            and detection.get("is_malicious")
-            and subtype
-            and str(subtype) in subtype_classes
-        ):
-            try:
-                expected_family = broad_family_for_attack_type(str(subtype))
-            except ValueError:
-                issues.append("classification_subtype_outside_taxonomy")
-            else:
-                if classification.get("attack_family") != expected_family:
-                    issues.append("classification_subtype_family_mismatch")
+        attack_type = classification.get("attack_type")
         if (
             not detector_abstained
             and detection.get("is_malicious")
             and not explanation
         ):
             issues.append("malicious_without_mitigation")
+        if detection.get("is_malicious") is False and classification:
+            issues.append("benign_with_classification")
         if (
             not detector_abstained
             and detection.get("is_malicious")
-            and model_task == "attack_subtype"
-            and subtype
+            and model_task == "attack_type"
+            and attack_type
             and explanation
         ):
-            if explanation.get("attack_subtype") != subtype:
-                issues.append("mitigation_attack_subtype_mismatch")
-            if explanation.get("attack_family") != classification.get("attack_family"):
-                issues.append("mitigation_attack_family_mismatch")
+            if explanation.get("attack_type") != attack_type:
+                issues.append("mitigation_attack_type_mismatch")
             if explanation.get("taxonomy_version") != classification.get(
                 "taxonomy_version"
             ):
@@ -174,17 +194,20 @@ class FinalJudge(FinalAgent):
         if standardizer_abstained or detector_abstained:
             final_label = None
             final_confidence = 0.0
-        elif model_task == "attack_subtype" and classification.get("attack_subtype"):
-            # La confianza del clasificador tipado corresponde al subtipo, no a
-            # la probabilidad agregada de su familia amplia.
-            final_label = str(classification["attack_subtype"])
-            final_confidence = float(classification.get("confidence", 0.0) or 0.0)
-        elif model_task == "attack_family" and classification.get("attack_family"):
-            final_label = str(classification["attack_family"])
-            final_confidence = float(classification.get("confidence", 0.0) or 0.0)
-        elif detection:
-            final_label = "malicious" if detection.get("is_malicious") else "benign"
-            final_confidence = probability if detection.get("is_malicious") else 1.0 - probability
+        elif (
+            detection.get("is_malicious") is True
+            and classification.get("attack_type")
+        ):
+            # La etiqueta final es el tipo concreto predicho entre los 16
+            # desplegados; el flujo no deriva una familia amplia paralela.
+            final_label = str(classification["attack_type"])
+            final_confidence = classification_confidence
+        elif detection.get("is_malicious") is True:
+            final_label = "malicious"
+            final_confidence = probability
+        elif detection.get("is_malicious") is False:
+            final_label = "benign"
+            final_confidence = 1.0 - probability
         else:
             final_label = None
             final_confidence = 0.0

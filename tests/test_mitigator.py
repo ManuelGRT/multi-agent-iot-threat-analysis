@@ -2,10 +2,10 @@
 """Tests del agente de mitigacion Fase 4: catalogo + LLM anclado.
 
 Criterios de aceptacion del plan:
-(a) modo determinista devuelve mitigaciones y referencias correctas por familia;
+(a) modo determinista devuelve mitigaciones y referencias correctas por tipo;
 (b) modo LLM (mockeado) nunca produce referencias fuera del catalogo sin
     marcarlas ``llm_suggested``;
-(c) benign -> mitigaciones de monitorizacion minima.
+(c) benign -> mitigacion no aplicable, sin consultar el catalogo.
 
 Ademas: cobertura del mapeo CAPEC del TFM de Jorge (su unica documentacion de
 mitigacion) — este catalogo debe ser superset de su Tabla 3.4.
@@ -28,7 +28,6 @@ from src.agents.final.llm_mitigator import (
 from src.contracts.attack_taxonomy import (
     MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
-    broad_family_for_attack_type,
 )
 from src.contracts.case import CaseResult
 from src.mcp.client import MCPToolClient
@@ -40,17 +39,6 @@ CATALOG_PATH = (
     Path(__file__).resolve().parents[1] / "src" / "mcp" / "data" / "threat_intel_catalog.json"
 )
 CATALOG = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-
-ATTACK_FAMILIES = [
-    "ddos",
-    "scanning",
-    "botnet",
-    "bruteforce",
-    "injection",
-    "malware",
-    "exfiltration",
-    "mitm",
-]
 
 EXPECTED_TYPE_REFERENCE_IDS = {
     "Backdoor": {"T1105", "T1204", "CAPEC-523", "M1049"},
@@ -72,37 +60,40 @@ EXPECTED_TYPE_REFERENCE_IDS = {
 }
 
 
-def malicious_state(family: str = "ddos", confidence: float = 0.95) -> dict:
-    return {
-        "canonical_event": dict(CANONICAL_EVENT),
-        "detection_output": {"is_malicious": True, "probability": 0.97},
-        "classification_output": {"attack_family": family, "confidence": confidence},
-        "trace": [],
-    }
-
-
-def malicious_subtype_state(
-    attack_type: str, confidence: float = 0.95
+def malicious_state(
+    attack_type: str = "DDoS_TCP", confidence: float = 0.95
 ) -> dict:
+    alternatives = [
+        label for label in MULTIDATASET_ATTACK_CLASSES if label != attack_type
+    ][:2]
+    remaining = max(0.0, 1.0 - confidence)
+    top_scores = {
+        attack_type: confidence,
+        alternatives[0]: remaining * 0.6,
+        alternatives[1]: remaining * 0.4,
+    }
     return {
         "canonical_event": dict(CANONICAL_EVENT),
         "ingest_output": {"mapping_confidence": 0.95},
-        "detection_output": {
-            "is_malicious": True,
-            "probability": 0.97,
-            "abstain": False,
-        },
+        "detection_output": {"is_malicious": True, "probability": 0.97},
         "classification_output": {
-            "attack_family": broad_family_for_attack_type(attack_type),
-            "attack_subtype": attack_type,
+            "attack_type": attack_type,
             "confidence": confidence,
             "decision_threshold": 0.65,
-            "model_task": "attack_subtype",
+            "model_task": "attack_type",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
-            "top_scores": {attack_type: confidence},
+            "top_scores": top_scores,
         },
         "trace": [],
     }
+
+
+def malicious_attack_type_state(
+    attack_type: str, confidence: float = 0.95
+) -> dict:
+    """Alias descriptivo conservado para las pruebas específicas por tipo."""
+
+    return malicious_state(attack_type, confidence)
 
 
 def flattened_reference_ids(output: dict) -> set[str]:
@@ -141,39 +132,20 @@ def llm_with_stub(payload: dict | None = None, error: Exception | None = None) -
 
 
 # ---------------------------------------------------------------------------
-# (a) modo determinista: mitigaciones y referencias correctas por familia
+# (a) modo determinista: mitigaciones y referencias correctas por tipo
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("family", ATTACK_FAMILIES)
-def test_catalog_mode_returns_expected_mitigations_and_references(family):
-    update = FinalMitigator(client=client).run(malicious_state(family))
-    output = update["explanation_output"]
-    entry = CATALOG["families"][family]
-
-    expected_mitigations = [
-        *entry["mitigations"].get("containment", []),
-        *entry["mitigations"].get("eradication", []),
-        *entry["mitigations"].get("prevention", []),
-    ]
-    for text in expected_mitigations:
-        assert text in output["mitigations"], f"{family}: falta '{text}'"
-
-    reference_ids = {
-        ref.get("attack_id") or ref.get("capec_id") for ref in output["references"]
-    }
-    for technique in entry["attack_techniques"]:
-        assert technique["id"] in reference_ids
-    for pattern in entry["capec_patterns"]:
-        assert pattern["id"] in reference_ids
-    assert all(ref["source"] == "catalog" for ref in output["references"])
-    assert all(item["source"] == "catalog" for item in output["mitigation_items"])
-    assert output["source"] == "catalog"
+def test_catalog_v3_has_no_broad_family_fallback_data():
+    assert CATALOG["version"] == "3.0"
+    assert "families" not in CATALOG
+    assert set(CATALOG["attack_types"]) == set(MULTIDATASET_ATTACK_CLASSES)
+    assert all("family" not in entry for entry in CATALOG["attack_types"].values())
 
 
 @pytest.mark.parametrize("attack_type", MULTIDATASET_ATTACK_CLASSES)
 def test_catalog_mode_is_specific_and_complete_for_all_16_attack_types(attack_type):
     stub = StubClient()
-    state = malicious_subtype_state(attack_type)
+    state = malicious_attack_type_state(attack_type)
     update = FinalMitigator(client=stub).run(state)
     output = update["explanation_output"]
     entry = CATALOG["attack_types"][attack_type]
@@ -190,8 +162,9 @@ def test_catalog_mode_is_specific_and_complete_for_all_16_attack_types(attack_ty
     assert all(ref["source"] == "catalog" for ref in output["references"])
 
     assert output["source"] == "catalog"
-    assert output["attack_family"] == broad_family_for_attack_type(attack_type)
-    assert output["attack_subtype"] == attack_type
+    assert output["attack_type"] == attack_type
+    assert "attack_family" not in output
+    assert "attack_subtype" not in output
     assert output["catalog_scope"] == "attack_type"
     assert output["catalog_version"] == CATALOG["version"]
     assert output["catalog_taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
@@ -204,47 +177,49 @@ def test_catalog_mode_is_specific_and_complete_for_all_16_attack_types(attack_ty
         for server, tool, arguments in stub.call_arguments
         if (server, tool) == ("threat_intel", "suggest_mitigations")
     )
-    assert threat_call["family"] == broad_family_for_attack_type(attack_type)
     assert threat_call["attack_type"] == attack_type
+    assert "family" not in threat_call
 
 
-def test_catalog_mode_unknown_family_requires_review():
-    update = FinalMitigator(client=client).run(malicious_state("familia_marciana"))
-    assert update["explanation_output"]["requires_human_review"] is True
+def test_catalog_mode_missing_attack_type_requires_review_without_tool_call():
+    stub = StubClient()
+    state = malicious_state()
+    state["classification_output"]["attack_type"] = None
+
+    update = FinalMitigator(client=stub).run(state)
+    output = update["explanation_output"]
+
+    assert output["attack_type"] is None
+    assert output["requires_human_review"] is True
+    assert output["review_reasons"] == ["classification_attack_type_missing"]
     assert update["needs_human_review"] is True
+    assert not any(
+        server == "threat_intel" and tool == "suggest_mitigations"
+        for server, tool, _ in stub.call_arguments
+    )
 
 
 def test_explicit_unknown_attack_type_never_falls_back_to_broad_family():
-    state = malicious_subtype_state("DDoS_TCP")
-    state["classification_output"]["attack_subtype"] = "DDoS_QUIC"
+    state = malicious_attack_type_state("DDoS_TCP")
+    state["classification_output"]["attack_type"] = "DDoS_QUIC"
 
     update = FinalMitigator(client=client).run(state)
     output = update["explanation_output"]
 
-    assert output["attack_family"] == "unknown_attack"
-    assert output["attack_subtype"] is None
-    assert output["catalog_scope"] == "family"
+    assert output["attack_type"] == "DDoS_QUIC"
+    assert output["catalog_scope"] is None
     assert output["requires_human_review"] is True
-    assert {
-        "unknown_attack",
-        "catalog_attack_type_mismatch",
-        "catalog_attack_type_scope_missing",
-        "catalog_attack_family_mismatch",
-    } <= set(output["review_reasons"])
+    assert output["review_reasons"] == ["catalog_attack_type_unavailable"]
+    assert output["mitigations"] == ["escalate_to_analyst"]
 
 
-def test_attack_type_family_mismatch_is_not_silently_approved():
-    state = malicious_subtype_state("DDoS_TCP")
-    state["classification_output"]["attack_family"] = "malware"
-
-    update = FinalMitigator(client=client).run(state)
-    output = update["explanation_output"]
-
-    assert output["attack_subtype"] == "DDoS_TCP"
-    assert output["attack_family"] == "ddos"
-    assert output["catalog_scope"] == "attack_type"
-    assert output["requires_human_review"] is True
-    assert "catalog_attack_family_mismatch" in output["review_reasons"]
+@pytest.mark.parametrize("invalid_type", ["ddos", "DDoS TCP", "C2", "unknown"])
+def test_catalog_rejects_family_names_and_aliases(invalid_type):
+    result = client.call(
+        "threat_intel", "suggest_mitigations", attack_type=invalid_type
+    )
+    assert result["ok"] is False
+    assert "fuera de la taxonomia operativa" in result["error"]
 
 
 # ---------------------------------------------------------------------------
@@ -259,15 +234,13 @@ def test_benign_gets_minimal_monitoring_only():
     }
     update = FinalMitigator(client=client).run(state)
     output = update["explanation_output"]
-    benign_expected = CATALOG["families"]["benign"]["mitigations"]["prevention"]
-    for text in benign_expected:
-        assert text in output["mitigations"]
     assert "benigno" in output["risk_summary"]
+    assert output["mitigations"] == []
+    assert output["references"] == []
+    assert output["attack_type"] is None
+    assert output["source"] == "rule_based"
     assert output["requires_human_review"] is False
-    # sin acciones de contencion/erradicacion agresivas
-    phases = {item["phase"] for item in output["mitigation_items"]}
-    assert "containment" not in phases
-    assert "eradication" not in phases
+    assert not any(entry.get("tool") == "suggest_mitigations" for entry in update["trace"])
 
 
 def test_benign_never_calls_llm_even_if_configured():
@@ -279,7 +252,7 @@ def test_benign_never_calls_llm_even_if_configured():
     }
     update = FinalMitigator(client=client, llm=llm).run(state)
     assert llm.agent.calls == []
-    assert update["explanation_output"]["source"] == "catalog"
+    assert update["explanation_output"]["source"] == "rule_based"
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +289,7 @@ def five_catalog_anchored_payload(
 
 def test_llm_contextualization_produces_hybrid_anchored_output():
     llm = llm_with_stub(payload=hybrid_payload_ok())
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
 
     assert output["source"] == "hybrid"
@@ -331,8 +304,8 @@ def test_llm_contextualization_produces_hybrid_anchored_output():
     assert all(item["context"] and item["context_trusted"] is False for item in contextualized)
 
     # las mitigaciones del catalogo no cubiertas por el LLM entran literales
-    ddos = CATALOG["families"]["ddos"]["mitigations"]
-    for text in [*ddos["eradication"], *ddos["prevention"]]:
+    typed_entry = CATALOG["attack_types"]["DDoS_TCP"]["mitigations"]
+    for text in [*typed_entry["eradication"], *typed_entry["prevention"]]:
         assert any(item["text"] == text and item["source"] == "catalog" for item in items)
 
     # referencias: solo catalogo, todas marcadas catalog
@@ -352,13 +325,14 @@ def test_all_16_attack_types_are_contextualized_and_approved_when_anchored(
             requires_human_review=True,
         )
     )
-    state = malicious_subtype_state(attack_type)
+    state = malicious_attack_type_state(attack_type)
     update = FinalMitigator(client=stub, llm=llm).run(state)
     output = update["explanation_output"]
 
     assert output["source"] == "hybrid"
-    assert output["attack_family"] == broad_family_for_attack_type(attack_type)
-    assert output["attack_subtype"] == attack_type
+    assert output["attack_type"] == attack_type
+    assert "attack_family" not in output
+    assert "attack_subtype" not in output
     assert output["catalog_scope"] == "attack_type"
     assert output["first_five_catalog_anchored"] is True
     assert output.get("has_llm_suggested", False) is False
@@ -371,10 +345,9 @@ def test_all_16_attack_types_are_contextualized_and_approved_when_anchored(
     assert all(reference["source"] == "catalog" for reference in output["references"])
 
     sent = llm.agent.calls[0]["user_payload"]
-    assert sent["classification"]["attack_subtype"] == attack_type
-    assert sent["classification"]["attack_family"] == broad_family_for_attack_type(
-        attack_type
-    )
+    assert sent["classification"]["attack_type"] == attack_type
+    assert "attack_family" not in sent["classification"]
+    assert "attack_subtype" not in sent["classification"]
     assert (
         sent["classification"]["taxonomy_version"]
         == MULTIDATASET_TAXONOMY_VERSION
@@ -397,7 +370,7 @@ def test_first_five_catalog_anchored_allow_judge_approval_with_later_suggestion(
     )
     update = FinalMitigator(
         client=client, llm=llm_with_stub(payload=payload)
-    ).run(malicious_state("ddos"))
+    ).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is True
@@ -410,7 +383,7 @@ def test_first_five_catalog_anchored_allow_judge_approval_with_later_suggestion(
         for item in output["mitigation_items"]
     )
 
-    judge_state = malicious_state("ddos")
+    judge_state = malicious_state("DDoS_TCP")
     judge_state["ingest_output"] = {"mapping_confidence": 0.95}
     judge_state.update(update)
     judged = FinalJudge(client=client).run(judge_state)
@@ -433,7 +406,7 @@ def test_unanchored_fifth_recommendation_still_requires_human_review():
     }
     update = FinalMitigator(
         client=client, llm=llm_with_stub(payload=payload)
-    ).run(malicious_state("ddos"))
+    ).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is False
@@ -446,7 +419,7 @@ def test_fewer_than_five_do_not_override_explicit_llm_review_request():
     payload["mitigations"] = payload["mitigations"][:4]
     update = FinalMitigator(
         client=client, llm=llm_with_stub(payload=payload)
-    ).run(malicious_state("ddos"))
+    ).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is False
@@ -461,7 +434,7 @@ def test_first_five_anchored_do_not_hide_untrusted_additional_reference():
     ]
     update = FinalMitigator(
         client=client, llm=llm_with_stub(payload=payload)
-    ).run(malicious_state("ddos"))
+    ).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is True
@@ -478,7 +451,7 @@ def test_llm_cannot_smuggle_references_outside_catalog():
         {"attack_id": "T1498", "name": "Network Denial of Service (duplicada)"},
     ]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     references = update["explanation_output"]["references"]
 
     by_id = {(ref.get("attack_id") or ref.get("capec_id")): ref for ref in references}
@@ -490,7 +463,9 @@ def test_llm_cannot_smuggle_references_outside_catalog():
     assert sum(1 for ref in references if (ref.get("attack_id") == "T1498")) == 1
     # y el resto del catalogo sigue intacto
     catalog_ids = catalog_reference_ids(
-        client.call("threat_intel", "suggest_mitigations", family="ddos")["references"]
+        client.call(
+            "threat_intel", "suggest_mitigations", attack_type="DDoS_TCP"
+        )["references"]
     )
     present = {ref.get("attack_id") or ref.get("capec_id") for ref in references}
     assert catalog_ids <= present
@@ -502,7 +477,7 @@ def test_llm_free_mitigations_are_marked_llm_suggested():
     payload["mitigations"].append({"text": "regla extra sin base_id"})
     payload["mitigations"].append({"base_id": 999, "text": "base_id inexistente"})
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     items = update["explanation_output"]["mitigation_items"]
 
     suggested = {item["text"] for item in items if item["source"] == "llm_suggested"}
@@ -515,8 +490,8 @@ def test_llm_free_mitigations_are_marked_llm_suggested():
 
 def test_llm_failure_falls_back_to_catalog_completely():
     llm = llm_with_stub(error=TimeoutError("llm caido"))
-    with_llm = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
-    without_llm = FinalMitigator(client=client).run(malicious_state("ddos"))
+    with_llm = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
+    without_llm = FinalMitigator(client=client).run(malicious_state("DDoS_TCP"))
 
     assert with_llm["explanation_output"]["source"] == "catalog"
     assert (
@@ -535,7 +510,7 @@ def test_llm_failure_falls_back_to_catalog_completely():
 
 def test_llm_payload_has_no_target_leakage_nor_provenance():
     llm = llm_with_stub(payload=hybrid_payload_ok())
-    state = malicious_state("ddos")
+    state = malicious_state("DDoS_TCP")
     # inyectamos deliberadamente campos prohibidos: el allowlist debe filtrarlos
     state["canonical_event"]["origin"] = {"source_name": "EDGE_IIOTSET"}
     state["canonical_event"]["provenance"] = {"dataset": "EDGE_IIOTSET", "row_id": 4}
@@ -557,7 +532,7 @@ def test_llm_payload_has_no_target_leakage_nor_provenance():
 
 def test_llm_trace_records_both_steps():
     llm = llm_with_stub(payload=hybrid_payload_ok())
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     tools = [entry.get("tool") for entry in update["trace"]]
     assert "suggest_mitigations" in tools
     assert "llm_contextualize" in tools
@@ -571,7 +546,7 @@ def test_llm_risk_summary_with_invented_ids_is_discarded():
     payload = hybrid_payload_ok()
     payload["risk_summary"] = "Aplicar la tecnica T1337 y el patron CAPEC-777 cuanto antes."
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
 
     assert "T1337" not in output["risk_summary"]
@@ -588,13 +563,15 @@ def test_llm_item_text_with_invented_id_is_downgraded():
         {"base_id": 1, "text": "bloquear conforme a la tecnica T4242 el origen"},
     ]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     items = update["explanation_output"]["mitigation_items"]
 
     downgraded = next(item for item in items if "T4242" in item["text"])
     assert downgraded["source"] == "llm_suggested"
     # la mitigacion base del catalogo reentra literal como catalog
-    ddos_containment = CATALOG["families"]["ddos"]["mitigations"]["containment"][0]
+    ddos_containment = CATALOG["attack_types"]["DDoS_TCP"]["mitigations"][
+        "containment"
+    ][0]
     assert any(
         item["text"] == ddos_containment and item["source"] == "catalog" for item in items
     )
@@ -607,7 +584,7 @@ def test_llm_item_citing_catalog_ids_is_not_downgraded():
         {"base_id": 4, "text": "M1037 Filter Network Traffic aplicado al segmento del sensor"},
     ]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     items = update["explanation_output"]["mitigation_items"]
     contextualized = next(item for item in items if "segmento del sensor" in item["context"])
     # M1037 esta en el catalogo de ddos: la contextualizacion es legitima
@@ -622,7 +599,7 @@ def test_reference_from_sibling_attack_type_is_not_treated_as_catalog_anchored()
     update = FinalMitigator(
         client=client,
         llm=llm_with_stub(payload=payload),
-    ).run(malicious_subtype_state("DDoS_HTTP"))
+    ).run(malicious_attack_type_state("DDoS_HTTP"))
     output = update["explanation_output"]
 
     crossed = next(
@@ -646,7 +623,7 @@ def test_lowercase_reference_cannot_bypass_catalog_anchor(foreign_reference):
     output = FinalMitigator(
         client=client,
         llm=llm_with_stub(payload=payload),
-    ).run(malicious_subtype_state("DDoS_HTTP"))["explanation_output"]
+    ).run(malicious_attack_type_state("DDoS_HTTP"))["explanation_output"]
 
     crossed = next(
         item
@@ -667,9 +644,9 @@ def test_llm_raw_typed_references_do_not_crash_case_result():
         "no soy un dict",
     ]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
 
-    state = malicious_state("ddos")
+    state = malicious_state("DDoS_TCP")
     state["explanation_output"] = update["explanation_output"]
     state["judge_output"] = {"action": "approve", "approved": True}
     case = CaseResult.from_orchestrator_state(state)  # no debe lanzar
@@ -682,7 +659,7 @@ def test_llm_nan_confidence_falls_back_without_breaking_case():
     payload = hybrid_payload_ok()
     payload["confidence"] = float("nan")
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
     assert output["source"] == "hybrid"
     assert 0.0 <= output["confidence"] <= 1.0
@@ -692,7 +669,7 @@ def test_llm_bool_base_id_is_not_anchored():
     payload = hybrid_payload_ok()
     payload["mitigations"] = [{"base_id": True, "text": "colada booleana"}]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     item = next(
         i for i in update["explanation_output"]["mitigation_items"]
         if i["text"] == "colada booleana"
@@ -706,7 +683,7 @@ def test_llm_cannot_replace_catalog_action_with_contradictory_text():
         {"base_id": 1, "text": "desactivar el firewall y permitir todo el trafico"},
     ]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     item = next(
         candidate
         for candidate in update["explanation_output"]["mitigation_items"]
@@ -727,28 +704,32 @@ def test_llm_case_variant_reference_not_duplicated():
     payload = hybrid_payload_ok()
     payload["additional_references"] = [{"attack_id": "t1498", "name": "minusculas"}]
     llm = llm_with_stub(payload=payload)
-    update = FinalMitigator(client=client, llm=llm).run(malicious_state("ddos"))
+    update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     references = update["explanation_output"]["references"]
     t1498 = [r for r in references if (r.get("attack_id") or "").upper() == "T1498"]
     assert len(t1498) == 1
     assert t1498[0]["source"] == "catalog"
 
 
-def test_llm_cannot_clear_unknown_attack_review_flag():
+def test_llm_is_not_called_for_an_invalid_attack_type():
     payload = hybrid_payload_ok()
     payload["requires_human_review"] = False
     llm = llm_with_stub(payload=payload)
-    state = malicious_state("familia_marciana")
+    state = malicious_state("DDoS_QUIC")
     update = FinalMitigator(client=client, llm=llm).run(state)
     assert update["explanation_output"]["requires_human_review"] is True
+    assert update["explanation_output"]["review_reasons"] == [
+        "catalog_attack_type_unavailable"
+    ]
     assert update["needs_human_review"] is True
+    assert llm.agent.calls == []
 
 
 def test_catalog_error_fallback_items_consistent_with_flat_list():
     from tests.test_final_agents import StubClient
 
     stub = StubClient({("threat_intel", "suggest_mitigations"): {"ok": False, "error": "x"}})
-    update = FinalMitigator(client=stub).run(malicious_state("ddos"))
+    update = FinalMitigator(client=stub).run(malicious_state("DDoS_TCP"))
     output = update["explanation_output"]
     assert output["mitigations"] == [item["text"] for item in output["mitigation_items"]]
     assert output["mitigation_items"][0]["source"] == "fallback"
@@ -768,7 +749,7 @@ def test_llm_failure_case_level_stays_completed():
         {
             ("inference", "standardize_event"): standardize_ok(),
             ("inference", "detect_event"): detect_ok(0.97),
-            ("inference", "classify_event"): classify_ok("ddos", 0.95),
+            ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
     llm = llm_with_stub(error=ConnectionError("api caida"))
@@ -806,7 +787,7 @@ def test_llm_suggested_marks_survive_case_result_boundary():
         {
             ("inference", "standardize_event"): standardize_ok(),
             ("inference", "detect_event"): detect_ok(0.97),
-            ("inference", "classify_event"): classify_ok("ddos", 0.95),
+            ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
     agents = FinalAgentBundle(
@@ -834,7 +815,9 @@ def test_llm_suggested_marks_survive_case_result_boundary():
 # ---------------------------------------------------------------------------
 
 def anchor_fixture():
-    result = client.call("threat_intel", "suggest_mitigations", family="ddos")
+    result = client.call(
+        "threat_intel", "suggest_mitigations", attack_type="DDoS_TCP"
+    )
     base_items = build_base_items(result)
     from src.agents.final.final_mitigator import catalog_references
 
@@ -915,22 +898,17 @@ def test_catalog_covers_all_jorge_capec_mappings():
         assert row["extra_attack_mitigations"], row
 
 
-def test_edge_attack_type_aliases_resolve_to_catalog_families():
-    for attack_type, family in [
-        ("DDoS_UDP", "ddos"),
-        ("DDoS_ICMP", "ddos"),
-        ("SQL_injection", "injection"),
-        ("XSS", "injection"),
-        ("Uploading", "injection"),
-        ("Password", "bruteforce"),
-        ("Vulnerability_scanner", "scanning"),
-        ("Fingerprinting", "scanning"),
-        ("Backdoor", "malware"),
-        ("Ransomware", "malware"),
-        ("MITM", "mitm"),
-    ]:
-        resolved = client.call("threat_intel", "suggest_mitigations", family=attack_type)
-        assert resolved["family"] == family, f"{attack_type} -> {resolved['family']}"
+def test_edge_attack_types_require_the_exact_contractual_spelling():
+    exact = client.call(
+        "threat_intel", "suggest_mitigations", attack_type="DDoS_UDP"
+    )
+    alias = client.call(
+        "threat_intel", "suggest_mitigations", attack_type="ddos-udp"
+    )
+
+    assert exact["ok"] is True
+    assert exact["attack_type"] == "DDoS_UDP"
+    assert alias["ok"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -951,7 +929,7 @@ def test_run_case_with_llm_mitigator_produces_hybrid_case():
         {
             ("inference", "standardize_event"): standardize_ok(),
             ("inference", "detect_event"): detect_ok(0.97),
-            ("inference", "classify_event"): classify_ok("ddos", 0.95),
+            ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
     llm = llm_with_stub(payload=hybrid_payload_ok())

@@ -478,7 +478,7 @@ def detect_batch(canonical_events: list[dict[str, Any]]) -> dict[str, Any]:
 
 @tool_result
 def classify_event(canonical_event: dict[str, Any], top_k: int = 3) -> dict[str, Any]:
-    """Clasificacion de tipo y familia de ataque sobre un CanonicalEvent."""
+    """Clasificacion directa de uno de los 16 tipos de ataque."""
     return model_registry.classify(
         _validated_canonical_payload(canonical_event),
         top_k=top_k,
@@ -497,31 +497,6 @@ def classify_batch(canonical_events: list[dict[str, Any]], top_k: int = 3) -> di
     return {"count": len(results), "results": results}
 
 
-@tool_result
-def get_family_scores(canonical_event: dict[str, Any]) -> dict[str, Any]:
-    """Puntuaciones completas y agregadas por familia amplia."""
-    result = model_registry.classify(
-        _validated_canonical_payload(canonical_event),
-        top_k=100,
-    )
-    family_scores = dict(result.get("family_scores") or result.get("top_scores") or {})
-    if not family_scores:
-        raise ValueError("El clasificador no devolvio puntuaciones de familia")
-    family, confidence = max(family_scores.items(), key=lambda item: item[1])
-    return {
-        **result,
-        # Este tool conserva una semantica estable aunque el modelo activo
-        # estime familias directamente o prediga los 16 tipos multidataset.
-        "attack_subtype": None,
-        "attack_family": str(family),
-        "confidence": float(confidence),
-        "family_confidence": float(confidence),
-        "top_scores": family_scores,
-        "family_scores": family_scores,
-        "score_type": "attack_family",
-    }
-
-
 TOOLS = {
     "standardize_event": standardize_event,
     "standardize_batch": standardize_batch,
@@ -530,12 +505,23 @@ TOOLS = {
     "detect_batch": detect_batch,
     "classify_event": classify_event,
     "classify_batch": classify_batch,
-    "get_family_scores": get_family_scores,
 }
 register_tools(mcp_app, TOOLS)
 
 
+def _prepare_stdio_runtime() -> None:
+    """Importa XGBoost antes de arrancar el bucle stdio de FastMCP.
+
+    En Windows, importar XGBoost por primera vez mientras FastMCP atiende una
+    peticion puede bloquear la respuesta del transporte. Los artefactos siguen
+    cargandose de forma perezosa: una estandarizacion no paga el coste de abrir
+    modelos que no utiliza, y cada modelo se conserva durante toda la sesion.
+    """
+    import xgboost  # noqa: F401
+
+
 if __name__ == "__main__":
     if mcp_app is None:
-        raise SystemExit("SDK MCP no disponible: instala mcp[cli]>=1.2 (extra [mcp]).")
+        raise SystemExit("SDK MCP no disponible: instala el proyecto con 'pip install .'.")
+    _prepare_stdio_runtime()
     mcp_app.run()

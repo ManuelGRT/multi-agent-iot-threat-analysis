@@ -20,18 +20,26 @@ def test_read_only_runtime_resources_live_inside_package():
     data = package_data_dir()
 
     assert resolve_path("detection_model") == data / "models" / DETECTION_MODEL
-    assert resolve_path("family_model") == data / "models" / CLASSIFIER_MODEL
+    assert resolve_path("attack_type_model") == data / "models" / CLASSIFIER_MODEL
     assert resolve_path("detection_model").is_file()
-    assert resolve_path("family_model").is_file()
+    assert resolve_path("attack_type_model").is_file()
     assert (data / "threat_intel_catalog.json").is_file()
 
 
 def test_packaged_classifier_is_the_reviewed_balanced_16_type_artifact():
-    model_path = resolve_path("family_model")
+    model_path = resolve_path("attack_type_model")
 
     assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
         CLASSIFIER_MODEL_SHA256
     )
+
+
+def test_attack_type_model_override_uses_only_the_new_variable(tmp_path, monkeypatch):
+    override = tmp_path / "attack-type-model.joblib"
+    monkeypatch.setenv("TFM_ATTACK_TYPE_MODEL", str(override))
+    monkeypatch.setenv("TFM_FAMILY_MODEL", str(tmp_path / "legacy.joblib"))
+
+    assert resolve_path("attack_type_model") == override
 
 
 def test_operational_state_uses_configurable_writable_directory(tmp_path, monkeypatch):
@@ -65,3 +73,12 @@ def test_test_runner_is_not_a_runtime_dependency():
 
     assert not any(requirement.startswith("pytest") for requirement in project["dependencies"])
     assert any(requirement.startswith("pytest") for requirement in project["optional-dependencies"]["test"])
+
+
+def test_mcp_sdk_is_a_productive_runtime_dependency():
+    project = tomllib.loads((REPO / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
+
+    assert any(requirement.startswith("mcp[cli]") for requirement in project["dependencies"])
+    assert "mcp" not in project["optional-dependencies"]

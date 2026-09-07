@@ -15,6 +15,7 @@ from src.orchestration.mcp_graph import (
     CasePersistenceError,
     FinalAgentBundle,
     build_final_graph,
+    default_final_agents,
     run_case,
 )
 from tests.test_final_agents import (
@@ -38,6 +39,30 @@ FINAL_AGENT_NAMES = [
     "final_judge",
 ]
 
+STDIO_E2E_EVENT = {
+    "event_id": "evt-stdio-e2e",
+    "modality": "network_flow",
+    "src_ip": "192.168.0.128",
+    "dst_ip": "192.168.0.170",
+    "src_port": 60210,
+    "dst_port": 4321,
+    "transport_proto": "TCP",
+    "packet_count": 1,
+    "byte_count": 208,
+    "duration_ms": 1.0,
+    "telemetry": {
+        "tcp.flags": 24.0,
+        "tcp.flags.ack": 1.0,
+        "tcp.len": 208.0,
+        "tcp.dstport": 4321.0,
+        "tcp.srcport": 60210.0,
+    },
+    "schema_profile": "network_packet",
+    "semantic_text": "TCP packet with payload",
+    "provenance": {"dataset": "stdio_smoke", "split": "stream"},
+    "mapping_confidence": 0.95,
+}
+
 
 @pytest.fixture(autouse=True)
 def isolate_case_memory(tmp_path, monkeypatch):
@@ -50,7 +75,7 @@ def _models_loadable() -> bool:
         import xgboost  # noqa: F401
     except ImportError:
         return False
-    return resolve_path("detection_model").exists() and resolve_path("family_model").exists()
+    return resolve_path("detection_model").exists() and resolve_path("attack_type_model").exists()
 
 
 def stub_bundle(overrides: dict) -> FinalAgentBundle:
@@ -83,7 +108,7 @@ def test_malicious_case_traverses_all_final_agents():
         {
             ("inference", "standardize_event"): standardize_ok(),
             ("inference", "detect_event"): detect_ok(0.97),
-            ("inference", "classify_event"): classify_ok("ddos", 0.95),
+            ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
     case = run_case({"dataset": "iot23", "row": {"proto": "tcp"}}, agents=agents)
@@ -95,7 +120,7 @@ def test_malicious_case_traverses_all_final_agents():
         assert name in agents_in_trace, f"falta {name} en la traza"
     assert len(case.trace) >= 5
     assert case.judge.action == "approve"
-    assert case.classification.attack_family == "ddos"
+    assert case.classification.attack_type == "DDoS_TCP"
     assert case.explanation.references, "el mitigador debe adjuntar referencias"
 
 
@@ -140,7 +165,7 @@ def test_benign_case_skips_classification_but_is_judged():
     assert "final_classifier" not in agents_in_trace
     assert "final_judge" in agents_in_trace
     assert case.detection.is_malicious is False
-    assert case.classification.attack_family is None
+    assert case.classification.attack_type is None
     assert case.judge.final_label == "benign"
 
 
@@ -261,6 +286,22 @@ def test_build_final_graph_invocable_directly():
     assert final_state["judge_output"]["action"] == "approve"
 
 
+def test_build_final_graph_requires_an_explicit_lifecycle_owner():
+    with pytest.raises(ValueError, match="requiere agents o client"):
+        build_final_graph()
+
+    with pytest.raises(ValueError, match="tambien debe inyectarse"):
+        run_case({"dataset": "iot23"}, graph=object())
+
+
+def test_default_agents_use_stdio_and_demo_can_select_inprocess(monkeypatch):
+    monkeypatch.delenv("MCP_CLIENT_MODE", raising=False)
+    assert default_final_agents().client.mode == "stdio"
+
+    monkeypatch.setenv("MCP_CLIENT_MODE", "inprocess")
+    assert default_final_agents().client.mode == "inprocess"
+
+
 # ---------------------------------------------------------------------------
 # persistencia en memoria de casos
 # ---------------------------------------------------------------------------
@@ -271,7 +312,7 @@ def test_run_case_persists_to_case_memory(tmp_path, monkeypatch):
         {
             ("inference", "standardize_event"): standardize_ok(),
             ("inference", "detect_event"): detect_ok(0.97),
-            ("inference", "classify_event"): classify_ok("ddos", 0.95),
+            ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
     case = run_case({"dataset": "iot23", "row": {"proto": "tcp"}}, agents=agents, persist=True)
@@ -280,8 +321,112 @@ def test_run_case_persists_to_case_memory(tmp_path, monkeypatch):
     stored = memory.call("case_memory", "get_case", case_id=case.case_id)
     assert stored["ok"], stored.get("error")
     assert stored["status"] == "completed"
-    assert stored["case"]["classification"]["attack_family"] == "ddos"
+    assert stored["case"]["classification"]["attack_type"] == "DDoS_TCP"
     assert len(stored["trace"]) == len(case.trace)
+
+
+def test_run_case_closes_its_own_client_after_final_persistence(monkeypatch):
+    import src.orchestration.mcp_graph as mcp_graph
+
+    operations: list[str] = []
+
+    class LifecycleStub(StubClient):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.close()
+            return False
+
+        def call(self, server, tool, **arguments):
+            operations.append(tool)
+            return super().call(server, tool, **arguments)
+
+        def close(self):
+            operations.append("close")
+
+    lifecycle = LifecycleStub(
+        {
+            ("inference", "standardize_event"): standardize_ok(),
+            ("inference", "detect_event"): detect_ok(0.02),
+            ("case_memory", "create_case"): {"ok": True},
+            ("case_memory", "append_trace"): {"ok": True},
+            ("case_memory", "update_case"): {"ok": True},
+        }
+    )
+    monkeypatch.setattr(mcp_graph, "MCPToolClient", lambda: lifecycle)
+
+    case = run_case(
+        {"dataset": "iot23", "row": {"proto": "tcp"}}, persist=True
+    )
+
+    assert case.status == "completed"
+    assert operations.count("close") == 1
+    assert operations[-2:] == ["update_case", "close"]
+
+
+def test_run_case_closes_its_own_client_when_persistence_fails(monkeypatch):
+    import src.orchestration.mcp_graph as mcp_graph
+
+    operations: list[str] = []
+
+    class LifecycleStub(StubClient):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.close()
+            return False
+
+        def call(self, server, tool, **arguments):
+            operations.append(tool)
+            return super().call(server, tool, **arguments)
+
+        def close(self):
+            operations.append("close")
+
+    lifecycle = LifecycleStub(
+        {
+            ("inference", "standardize_event"): standardize_ok(),
+            ("inference", "detect_event"): detect_ok(0.02),
+            ("case_memory", "create_case"): {"ok": True},
+            ("case_memory", "append_trace"): {
+                "ok": False,
+                "error": "fallo simulado",
+            },
+        }
+    )
+    monkeypatch.setattr(mcp_graph, "MCPToolClient", lambda: lifecycle)
+
+    with pytest.raises(CasePersistenceError, match="append_trace"):
+        run_case(
+            {"dataset": "iot23", "row": {"proto": "tcp"}}, persist=True
+        )
+
+    assert operations[-1] == "close"
+    assert operations.count("close") == 1
+
+
+def test_run_case_does_not_close_an_injected_client():
+    class LifecycleStub(StubClient):
+        close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    lifecycle = LifecycleStub(
+        {
+            ("inference", "standardize_event"): standardize_ok(),
+            ("inference", "detect_event"): detect_ok(0.02),
+        }
+    )
+
+    case = run_case(
+        {"dataset": "iot23", "row": {"proto": "tcp"}}, client=lifecycle
+    )
+
+    assert case.status == "completed"
+    assert lifecycle.close_calls == 0
 
 
 def test_run_case_collision_does_not_overwrite_existing_case(tmp_path, monkeypatch):
@@ -356,6 +501,7 @@ def test_run_case_stops_on_persistence_error(failing_tool):
 def test_edge_iiotset_event_full_pipeline_with_prepared_models():
     """Un ataque Edge-IIoTset recorre standardize->detect->classify->explain->judge."""
     chosen = None
+    inprocess_client = MCPToolClient(mode="inprocess")
     with EDGE_STANDARDIZED.open("r", encoding="utf-8") as fh:
         for _ in range(40):
             line = fh.readline()
@@ -367,7 +513,10 @@ def test_edge_iiotset_event_full_pipeline_with_prepared_models():
             event = row.get("canonical_event") or {}
             if float(event.get("mapping_confidence", 0.0) or 0.0) < 0.5:
                 continue
-            case = run_case({"dataset": "edge_iiotset", "canonical_event": event})
+            case = run_case(
+                {"dataset": "edge_iiotset", "canonical_event": event},
+                client=inprocess_client,
+            )
             agents_in_trace = [entry.agent for entry in case.trace]
             if all(name in agents_in_trace for name in FINAL_AGENT_NAMES):
                 chosen = (row, case)
@@ -379,7 +528,7 @@ def test_edge_iiotset_event_full_pipeline_with_prepared_models():
     assert len(case.trace) >= 5
     assert case.detection.is_malicious is True
     assert case.detection.probability > 0.6
-    assert case.classification.attack_family is not None
+    assert case.classification.attack_type is not None
     assert case.classification.top_scores
     assert case.explanation.mitigations
     assert case.explanation.references
@@ -390,10 +539,64 @@ def test_edge_iiotset_event_full_pipeline_with_prepared_models():
 
     # determinismo: repetir el caso da el mismo resultado
     repeat = run_case(
-        {"dataset": "edge_iiotset", "canonical_event": row["canonical_event"]}
+        {"dataset": "edge_iiotset", "canonical_event": row["canonical_event"]},
+        client=inprocess_client,
     )
     assert repeat.detection.probability == pytest.approx(case.detection.probability)
-    assert repeat.classification.attack_family == case.classification.attack_family
+    assert repeat.classification.attack_type == case.classification.attack_type
+
+
+@pytest.mark.skipif(not _models_loadable(), reason="modelos productivos no disponibles")
+def test_real_stdio_client_runs_full_graph_and_persists(tmp_path, monkeypatch):
+    """Aceptacion: el grafo completo atraviesa los tres servidores MCP reales."""
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "stdio-cases.db"))
+    monkeypatch.setenv(
+        "TFM_STANDARDIZATION_CACHE_DB", str(tmp_path / "stdio-cache.db")
+    )
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    with MCPToolClient(mode="stdio", timeout_seconds=30) as client:
+        case = run_case(
+            {"dataset": "stdio_smoke", "canonical_event": STDIO_E2E_EVENT},
+            case_id="case-stdio-e2e",
+            client=client,
+            use_llm_mitigator=False,
+            persist=True,
+        )
+        stored = client.call(
+            "case_memory", "get_case", case_id=case.case_id, include_trace=True
+        )
+        assert set(client._stdio_workers) == {
+            "inference",
+            "threat_intel",
+            "case_memory",
+        }
+        assert client._retired_stdio_workers == []
+
+    assert case.status == "completed"
+    assert [entry.agent for entry in case.trace] == [
+        "orchestrator",
+        "final_standardizer",
+        "final_detector",
+        "final_classifier",
+        "final_mitigator",
+        "final_judge",
+    ]
+    assert case.standardization.source == "prestandardized"
+    assert case.detection.is_malicious is True
+    assert case.detection.probability > 0.6
+    assert case.classification.attack_type == "Backdoor"
+    assert (
+        case.classification.confidence
+        >= case.classification.decision_threshold
+    )
+    assert case.explanation.source == "catalog"
+    assert case.explanation.references
+    assert case.judge.approved is True
+    assert stored["ok"] is True
+    assert stored["case"]["case_id"] == case.case_id
+    assert stored["status"] == case.status
+    assert len(stored["trace"]) == len(case.trace)
+    assert client.closed is True
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +617,7 @@ def test_cases_analyze_endpoint_returns_and_persists_case_result(monkeypatch):
         assert kwargs == {"use_llm_mitigator": True, "persist": True}
         case = run_case(
             {"dataset": raw_input["dataset"], "canonical_event": dict(CANONICAL_EVENT)},
+            client=MCPToolClient(mode="inprocess"),
             use_llm_mitigator=False,
             persist=True,
         )
@@ -471,6 +675,10 @@ def test_cases_analyze_rejects_raw_and_canonical_input_combination():
 def test_cases_analyze_raw_llm_failure_returns_reviewable_case(monkeypatch):
     import src.mcp.inference_server as inference_server
 
+    # Esta prueba sustituye una dependencia Python local; no pretende validar
+    # el transporte stdio, que se cubre en test_mcp_servers.py.
+    monkeypatch.setenv("MCP_CLIENT_MODE", "inprocess")
+
     class FailingParser:
         async def parse(self, _raw_input):
             raise TimeoutError("Mistral no responde")
@@ -499,6 +707,9 @@ def test_cases_analyze_raw_llm_failure_returns_reviewable_case(monkeypatch):
 def test_cases_analyze_empty_llm_extraction_abstains_before_detector(monkeypatch):
     import src.mcp.inference_server as inference_server
     from src.agents.llm_ingest_parser import LLMIngestParser
+
+    # El parser simulado debe vivir en el mismo proceso que el servidor.
+    monkeypatch.setenv("MCP_CLIENT_MODE", "inprocess")
 
     class EmptyExtractionAgent:
         model = "mistral-small-2603"

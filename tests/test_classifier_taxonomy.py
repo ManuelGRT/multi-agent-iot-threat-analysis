@@ -5,11 +5,9 @@ import pytest
 from src.contracts.attack_taxonomy import (
     JORGE_ALL_CLASSES,
     JORGE_ATTACK_CLASSES,
-    JORGE_TO_BROAD_FAMILY,
     MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
     attack_classes_for_taxonomy,
-    broad_family_for_attack_type,
     multidataset_taxonomy_report,
     resolve_jorge_class,
     resolve_multidataset_class,
@@ -22,7 +20,6 @@ def test_jorge_taxonomy_has_14_attacks_and_normal_only_in_reference_view():
     assert len(set(JORGE_ATTACK_CLASSES)) == 14
     assert "Normal" not in JORGE_ATTACK_CLASSES
     assert JORGE_ALL_CLASSES == ("Normal", *JORGE_ATTACK_CLASSES)
-    assert set(JORGE_TO_BROAD_FAMILY) == set(JORGE_ATTACK_CLASSES)
 
 
 @pytest.mark.parametrize(
@@ -107,13 +104,7 @@ def test_ambiguous_or_external_labels_are_never_forced_into_jorge_class(
     assert result.attack_type is None
 
 
-def test_broad_family_derivation_is_complete_and_versioned():
-    assert broad_family_for_attack_type("DDoS_TCP") == "ddos"
-    assert broad_family_for_attack_type("Port_Scanning") == "scanning"
-    assert broad_family_for_attack_type("XSS") == "injection"
-    with pytest.raises(ValueError, match="fuera de la taxonomia"):
-        broad_family_for_attack_type("botnet")
-
+def test_attack_type_taxonomy_report_is_versioned():
     report = taxonomy_report()
     assert report["normal_policy"] == "binary_detector_only"
     bot_rules = report["native_rules"]["bot_iot"]
@@ -153,8 +144,6 @@ def test_multidataset_taxonomy_preserves_jorge_and_adds_two_classes():
     assert MULTIDATASET_ATTACK_CLASSES[:14] == JORGE_ATTACK_CLASSES
     assert MULTIDATASET_ATTACK_CLASSES[14:] == ("DoS", "Command_and_Control")
     assert len(MULTIDATASET_ATTACK_CLASSES) == 16
-    assert broad_family_for_attack_type("DoS") == "ddos"
-    assert broad_family_for_attack_type("Command_and_Control") == "botnet"
     assert attack_classes_for_taxonomy(MULTIDATASET_TAXONOMY_VERSION) == (
         MULTIDATASET_ATTACK_CLASSES
     )

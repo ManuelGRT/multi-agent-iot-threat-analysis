@@ -13,6 +13,7 @@ Rutas de abstencion (revision humana):
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 
@@ -88,7 +89,7 @@ def default_final_agents(
     use_llm_mitigator: bool | None = None,
     mitigator_llm: LLMMitigationAgent | None = None,
 ) -> FinalAgentBundle:
-    client = client or MCPToolClient(mode="inprocess")
+    client = client or MCPToolClient()
     llm = mitigator_llm
     if llm is None:
         enabled = (
@@ -161,7 +162,17 @@ def build_final_graph(
     agents: FinalAgentBundle | None = None,
     client: MCPToolClient | None = None,
 ):
-    """Compila el grafo final (langgraph si esta disponible, local si no)."""
+    """Compila el grafo final (langgraph si esta disponible, local si no).
+
+    El llamador debe inyectar los agentes o un cliente cuyo ciclo de vida
+    controle. Para la ejecucion autocontenida de un caso debe usarse
+    :func:`run_case`, que gestiona automaticamente el cierre.
+    """
+    if agents is None and client is None:
+        raise ValueError(
+            "build_final_graph requiere agents o client; usa run_case para "
+            "la gestion automatica del ciclo de vida MCP"
+        )
     agents = agents or default_final_agents(client=client)
     if StateGraph is None:
         return FinalLocalOrchestrator(agents)
@@ -258,38 +269,57 @@ def run_case(
     Con ``persist=True`` registra el caso en el servidor MCP de memoria de
     casos (create_case + append_trace por entrada + update_case final). Si una
     operacion falla lanza ``CasePersistenceError`` y no continua escribiendo.
+
+    Cuando no se inyectan agentes ni cliente, esta funcion es propietaria del
+    cliente MCP: mantiene sus sesiones ``stdio`` durante todo el caso y las
+    cierra en un ambito garantizado despues de la persistencia. Los recursos
+    inyectados pertenecen al llamador y pueden reutilizarse bajo su
+    responsabilidad.
     """
-    agents = agents or default_final_agents(
-        client=client, use_llm_mitigator=use_llm_mitigator
-    )
-    graph = graph or build_final_graph(agents=agents)
-    case_id = case_id or new_case_id()
+    if graph is not None and agents is None:
+        raise ValueError(
+            "Al inyectar graph tambien debe inyectarse el bundle agents que "
+            "contiene su cliente MCP"
+        )
+    owned_client: MCPToolClient | None = None
+    if agents is None and client is None:
+        owned_client = MCPToolClient()
+        client = owned_client
+    client_scope = owned_client if owned_client is not None else nullcontext()
+    with client_scope:
+        agents = agents or default_final_agents(
+            client=client, use_llm_mitigator=use_llm_mitigator
+        )
+        graph = graph or build_final_graph(agents=agents)
+        case_id = case_id or new_case_id()
 
-    opening = TraceEntry(
-        agent="orchestrator",
-        tool=None,
-        status="started",
-        detail={"dataset": raw_input.get("dataset")},
-    )
-    opening.finish(status="ok", summary=f"caso {case_id} creado")
-    state: OrchestratorState = {
-        "case_id": case_id,
-        "raw_input": raw_input,
-        "route": "standardize",
-        "trace": [opening.model_dump(mode="json")],
-    }
+        opening = TraceEntry(
+            agent="orchestrator",
+            tool=None,
+            status="started",
+            detail={"dataset": raw_input.get("dataset")},
+        )
+        opening.finish(status="ok", summary=f"caso {case_id} creado")
+        state: OrchestratorState = {
+            "case_id": case_id,
+            "raw_input": raw_input,
+            "route": "standardize",
+            "trace": [opening.model_dump(mode="json")],
+        }
 
-    try:
-        final_state = graph.invoke(state, config={"recursion_limit": max_steps})
-    except Exception as exc:  # el caso siempre devuelve un resultado auditable
-        failed = dict(state)
-        errors = list(failed.get("errors") or [])
-        errors.append(f"orchestrator: {type(exc).__name__}: {exc}")
-        failed["errors"] = errors
-        final_state = failed
+        try:
+            final_state = graph.invoke(
+                state, config={"recursion_limit": max_steps}
+            )
+        except Exception as exc:  # siempre devuelve un resultado auditable
+            failed = dict(state)
+            errors = list(failed.get("errors") or [])
+            errors.append(f"orchestrator: {type(exc).__name__}: {exc}")
+            failed["errors"] = errors
+            final_state = failed
 
-    result = CaseResult.from_orchestrator_state(final_state, case_id=case_id)
+        result = CaseResult.from_orchestrator_state(final_state, case_id=case_id)
 
-    if persist:
-        _persist_case(agents.client, result, raw_input)
-    return result
+        if persist:
+            _persist_case(agents.client, result, raw_input)
+        return result

@@ -97,8 +97,8 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         / "models"
         / "xgboost_detection_validation_2026_20260822.joblib"
     ),
-    "family_model": lambda: Path(
-        os.getenv("TFM_FAMILY_MODEL")
+    "attack_type_model": lambda: Path(
+        os.getenv("TFM_ATTACK_TYPE_MODEL")
         or package_data_dir()
         / "models"
         / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"

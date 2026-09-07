@@ -1,11 +1,11 @@
 # src/mcp/threat_intel_server.py
-"""Servidor MCP de threat intel: tipo/familia -> ATT&CK, CAPEC y mitigaciones.
+"""Servidor MCP de threat intel: tipo de ataque -> ATT&CK, CAPEC y mitigaciones.
 
 El clasificador operativo puede devolver uno de los dieciseis tipos de la
-taxonomia multidataset. El catalogo conserva las familias amplias para
-compatibilidad con el modelo historico, pero una prediccion tipada se resuelve
-siempre contra su entrada especifica; nunca se degrada silenciosamente a una
-familia generica.
+taxonomia multidataset. Todas las consultas operativas exigen ese tipo y se
+resuelven exclusivamente contra su entrada especifica. Un tipo ausente o fuera
+de la taxonomia produce un error controlado; nunca se degrada silenciosamente
+a una familia generica.
 """
 from __future__ import annotations
 
@@ -24,44 +24,11 @@ from src.contracts.attack_taxonomy import (
     MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
     SUPPORTED_ATTACK_TAXONOMY_VERSIONS,
-    broad_family_for_attack_type,
-    normalise_taxonomy_token,
 )
 
 mcp_app = FastMCP("mcp-threat-intel") if FastMCP is not None else None
 
 CATALOG_PATH = Path(__file__).resolve().parent / "data" / "threat_intel_catalog.json"
-
-# Alias de familias que pueden llegar del clasificador o de labels crudas.
-# Incluye los 14 attack types de Edge-IIoTset que usaba el TFM de Jorge.
-FAMILY_ALIASES = {
-    "normal": "benign",
-    "no_attack": "benign",
-    "dos": "ddos",
-    "ddos_attack": "ddos",
-    "ddos_udp": "ddos",
-    "ddos_icmp": "ddos",
-    "ddos_tcp": "ddos",
-    "ddos_http": "ddos",
-    "brute_force": "bruteforce",
-    "password": "bruteforce",
-    "port_scanning": "scanning",
-    "reconnaissance": "scanning",
-    "recon": "scanning",
-    "vulnerability_scanner": "scanning",
-    "fingerprinting": "scanning",
-    "mirai": "botnet",
-    "man_in_the_middle": "mitm",
-    "data_exfiltration": "exfiltration",
-    "sql_injection": "injection",
-    "xss": "injection",
-    "uploading": "injection",
-    "backdoor": "malware",
-    "ransomware": "malware",
-    "command_and_control": "botnet",
-    "c_c": "botnet",
-    "unknown": "unknown_attack",
-}
 
 REFERENCE_ID_FIELDS = {
     "attack_techniques": "attack_technique_ids",
@@ -69,15 +36,11 @@ REFERENCE_ID_FIELDS = {
     "attack_mitigation_refs": "attack_mitigation_ref_ids",
 }
 
-ATTACK_TYPE_ALIASES = {
-    "c_c": "Command_and_Control",
-    "c2": "Command_and_Control",
-    "command_control": "Command_and_Control",
-}
-
-
 def _validate_catalog(catalog: dict[str, Any]) -> None:
     """Falla de forma cerrada si el catalogo no cubre el contrato de 16 tipos."""
+
+    if "families" in catalog:
+        raise ValueError("El catalogo operativo no debe contener familias amplias")
 
     taxonomy = catalog.get("attack_taxonomy") or {}
     if taxonomy.get("version") != MULTIDATASET_TAXONOMY_VERSION:
@@ -103,15 +66,14 @@ def _validate_catalog(catalog: dict[str, Any]) -> None:
             f"Cobertura de tipos incompleta: missing={missing} extra={extra}"
         )
 
-    families = catalog.get("families") or {}
+    reference_catalog = catalog.get("reference_catalog") or {}
+    if set(reference_catalog) != set(REFERENCE_ID_FIELDS):
+        raise ValueError("El catalogo global de referencias esta incompleto")
     for attack_type in MULTIDATASET_ATTACK_CLASSES:
         entry = attack_types[attack_type]
-        family = entry.get("family")
-        expected_family = broad_family_for_attack_type(attack_type)
-        if family != expected_family or family not in families:
+        if "family" in entry:
             raise ValueError(
-                f"Familia invalida para {attack_type}: {family!r}; "
-                f"esperada={expected_family!r}"
+                f"{attack_type} no debe contener un mapeo a familia amplia"
             )
 
         mitigations = entry.get("mitigations") or {}
@@ -123,19 +85,35 @@ def _validate_catalog(catalog: dict[str, Any]) -> None:
                 f"{attack_type} debe aportar al menos cinco mitigaciones catalogadas"
             )
 
-        parent = families[family]
         for group, id_field in REFERENCE_ID_FIELDS.items():
             requested_ids = entry.get(id_field) or []
-            available_ids = {
-                str(reference.get("id"))
-                for reference in (parent.get(group) or [])
-                if reference.get("id")
-            }
+            registry = reference_catalog.get(group) or {}
+            available_ids = set(registry)
+            if any(
+                not isinstance(reference, dict)
+                or reference.get("id") != reference_id
+                for reference_id, reference in registry.items()
+            ):
+                raise ValueError(f"Registro global {group} invalido")
             if not requested_ids or not set(requested_ids) <= available_ids:
                 raise ValueError(
                     f"Referencias {group} invalidas para {attack_type}: "
                     f"{requested_ids!r}"
                 )
+
+    for group, id_field in REFERENCE_ID_FIELDS.items():
+        used_ids = {
+            reference_id
+            for entry in attack_types.values()
+            for reference_id in (entry.get(id_field) or [])
+        }
+        registered_ids = set(reference_catalog[group])
+        if registered_ids != used_ids:
+            raise ValueError(
+                f"Registro global {group} no minimal: "
+                f"unused={sorted(registered_ids - used_ids)} "
+                f"missing={sorted(used_ids - registered_ids)}"
+            )
 
 
 @lru_cache(maxsize=1)
@@ -146,103 +124,51 @@ def _catalog() -> dict[str, Any]:
     return catalog
 
 
-def normalize_family(family: str | None) -> str:
-    key = normalise_taxonomy_token(family or "unknown_attack")
-    key = FAMILY_ALIASES.get(key, key)
-    if key not in _catalog()["families"]:
-        return "unknown_attack"
-    return key
-
-
 def normalize_attack_type(attack_type: str | None) -> str | None:
-    """Normaliza solo alias ortograficos de las 16 clases, sin agruparlas."""
+    """Acepta exclusivamente una de las 16 etiquetas contractuales exactas."""
 
-    key = normalise_taxonomy_token(attack_type)
-    if not key:
+    if attack_type is None:
         return None
-    index = {
-        normalise_taxonomy_token(label): label
-        for label in MULTIDATASET_ATTACK_CLASSES
-    }
-    return ATTACK_TYPE_ALIASES.get(key) or index.get(key)
+    value = str(attack_type)
+    return value if value in MULTIDATASET_ATTACK_CLASSES else None
 
 
 def _select_references(
-    parent: dict[str, Any],
+    reference_catalog: dict[str, Any],
     attack_entry: dict[str, Any],
     group: str,
 ) -> list[dict[str, Any]]:
     requested = attack_entry.get(REFERENCE_ID_FIELDS[group]) or []
-    by_id = {
-        str(item["id"]): item
-        for item in (parent.get(group) or [])
-        if item.get("id")
-    }
+    by_id = reference_catalog[group]
     return [dict(by_id[reference_id]) for reference_id in requested]
 
 
-def _resolve_catalog_entry(
-    family: str | None,
-    attack_type: str | None = None,
-) -> dict[str, Any]:
-    """Resuelve una entrada especifica o el fallback familiar compatible."""
+def _resolve_catalog_entry(attack_type: str | None) -> dict[str, Any]:
+    """Resuelve estrictamente una entrada de las 16 clases operativas."""
 
     catalog = _catalog()
-    explicit_attack_type = attack_type is not None
-    # ``family`` pertenece al contrato historico y puede colisionar con el
-    # nombre de un tipo (por ejemplo ``mitm``). Solo el argumento explicito
-    # ``attack_type`` activa el catalogo de las 16 clases.
-    canonical_attack_type = (
-        normalize_attack_type(attack_type) if explicit_attack_type else None
-    )
+    if attack_type is None or not str(attack_type).strip():
+        raise ValueError("attack_type es obligatorio para consultar el catalogo")
+    canonical_attack_type = normalize_attack_type(attack_type)
+    if canonical_attack_type is None:
+        raise ValueError(
+            f"Tipo de ataque fuera de la taxonomia operativa: {attack_type!r}"
+        )
 
-    if explicit_attack_type and canonical_attack_type is None:
-        unknown = catalog["families"]["unknown_attack"]
-        return {
-            "family": "unknown_attack",
-            "attack_type": None,
-            "catalog_scope": "family",
-            "family_consistent": False,
-            "entry": unknown,
-        }
-
-    if canonical_attack_type is not None:
-        attack_entry = catalog["attack_types"][canonical_attack_type]
-        canonical_family = str(attack_entry["family"])
-        requested_family = normalize_family(family)
-        parent = catalog["families"][canonical_family]
-        materialized = {
-            "mitigations": attack_entry["mitigations"],
-            "note": attack_entry.get("note"),
-            "reference_quality": attack_entry.get("reference_quality") or {},
-        }
-        for group in REFERENCE_ID_FIELDS:
-            materialized[group] = _select_references(parent, attack_entry, group)
-        return {
-            "family": canonical_family,
-            "attack_type": canonical_attack_type,
-            "catalog_scope": "attack_type",
-            "family_consistent": requested_family == canonical_family,
-            "entry": materialized,
-        }
-
-    canonical_family = normalize_family(family)
-    return {
-        "family": canonical_family,
-        "attack_type": None,
-        "catalog_scope": "family",
-        "family_consistent": canonical_family != "unknown_attack",
-        "entry": catalog["families"][canonical_family],
+    attack_entry = catalog["attack_types"][canonical_attack_type]
+    materialized = {
+        "mitigations": attack_entry["mitigations"],
+        "note": attack_entry.get("note"),
+        "reference_quality": attack_entry.get("reference_quality") or {},
     }
-
-
-@tool_result
-def list_families() -> dict[str, Any]:
-    """Familias cubiertas por el catalogo."""
-    catalog = _catalog()
+    for group in REFERENCE_ID_FIELDS:
+        materialized[group] = _select_references(
+            catalog["reference_catalog"], attack_entry, group
+        )
     return {
-        "families": sorted(catalog["families"].keys()),
-        "version": catalog["version"],
+        "attack_type": canonical_attack_type,
+        "catalog_scope": "attack_type",
+        "entry": materialized,
     }
 
 
@@ -253,10 +179,6 @@ def list_attack_types() -> dict[str, Any]:
     catalog = _catalog()
     return {
         "attack_types": list(MULTIDATASET_ATTACK_CLASSES),
-        "families_by_attack_type": {
-            attack_type: catalog["attack_types"][attack_type]["family"]
-            for attack_type in MULTIDATASET_ATTACK_CLASSES
-        },
         "taxonomy_version": catalog["attack_taxonomy"]["version"],
         "compatible_taxonomy_versions": list(
             catalog["attack_taxonomy"]["compatible_versions"]
@@ -266,18 +188,14 @@ def list_attack_types() -> dict[str, Any]:
 
 
 @tool_result
-def map_family_to_attack(
-    family: str, attack_type: str | None = None
-) -> dict[str, Any]:
-    """Tecnicas ATT&CK asociadas al tipo; usa familia solo como fallback."""
+def map_attack_type_to_attack(attack_type: str) -> dict[str, Any]:
+    """Tecnicas ATT&CK asociadas estrictamente a un tipo operativo."""
 
-    resolved = _resolve_catalog_entry(family, attack_type)
+    resolved = _resolve_catalog_entry(attack_type)
     entry = resolved["entry"]
     return {
-        "family": resolved["family"],
         "attack_type": resolved["attack_type"],
         "catalog_scope": resolved["catalog_scope"],
-        "requested_family": family,
         "requested_attack_type": attack_type,
         "attack_techniques": entry.get("attack_techniques", []),
         "attack_mitigation_refs": entry.get("attack_mitigation_refs", []),
@@ -285,18 +203,14 @@ def map_family_to_attack(
 
 
 @tool_result
-def map_family_to_capec(
-    family: str, attack_type: str | None = None
-) -> dict[str, Any]:
-    """Patrones CAPEC asociados al tipo; usa familia solo como fallback."""
+def map_attack_type_to_capec(attack_type: str) -> dict[str, Any]:
+    """Patrones CAPEC asociados estrictamente a un tipo operativo."""
 
-    resolved = _resolve_catalog_entry(family, attack_type)
+    resolved = _resolve_catalog_entry(attack_type)
     entry = resolved["entry"]
     return {
-        "family": resolved["family"],
         "attack_type": resolved["attack_type"],
         "catalog_scope": resolved["catalog_scope"],
-        "requested_family": family,
         "requested_attack_type": attack_type,
         "capec_patterns": entry.get("capec_patterns", []),
     }
@@ -304,14 +218,13 @@ def map_family_to_capec(
 
 @tool_result
 def suggest_mitigations(
-    family: str,
+    attack_type: str,
     schema_profile: str | None = None,
-    attack_type: str | None = None,
 ) -> dict[str, Any]:
     """Mitigaciones del tipo predicho y acciones complementarias por perfil."""
 
     catalog = _catalog()
-    resolved = _resolve_catalog_entry(family, attack_type)
+    resolved = _resolve_catalog_entry(attack_type)
     entry = resolved["entry"]
     mitigations = entry.get("mitigations", {})
     profile_key = (schema_profile or "unknown").strip().lower()
@@ -324,11 +237,8 @@ def suggest_mitigations(
         *mitigations.get("prevention", []),
     ]
     return {
-        "family": resolved["family"],
         "attack_type": resolved["attack_type"],
         "catalog_scope": resolved["catalog_scope"],
-        "family_consistent": resolved["family_consistent"],
-        "requested_family": family,
         "requested_attack_type": attack_type,
         "catalog_version": catalog["version"],
         "taxonomy_version": catalog["attack_taxonomy"]["version"],
@@ -356,14 +266,11 @@ def get_multidataset_attack_type_coverage() -> dict[str, Any]:
     catalog = _catalog()
     rows: list[dict[str, Any]] = []
     for attack_type in MULTIDATASET_ATTACK_CLASSES:
-        resolved = _resolve_catalog_entry(
-            broad_family_for_attack_type(attack_type), attack_type
-        )
+        resolved = _resolve_catalog_entry(attack_type)
         entry = resolved["entry"]
         rows.append(
             {
                 "attack_type": attack_type,
-                "family": resolved["family"],
                 "catalog_scope": resolved["catalog_scope"],
                 "mitigations": sum(
                     len(items)
@@ -396,24 +303,30 @@ def get_multidataset_attack_type_coverage() -> dict[str, Any]:
 def get_jorge_capec_coverage() -> dict[str, Any]:
     """Cobertura del mapeo CAPEC del TFM de Jorge por este catalogo.
 
-    Para cada attack type de Edge-IIoTset que Jorge mapeo manualmente a CAPEC
-    (Tabla 3.4 de su TFM), indica que familia del catalogo lo cubre y si el
-    patron CAPEC esta presente. Lo consumen el auditor (F5) y la memoria.
+    Para cada tipo de Edge-IIoTset que Jorge mapeo manualmente a CAPEC
+    (Tabla 3.4 de su TFM), comprueba directamente su entrada tipada. Lo
+    consumen el auditor (F5) y la memoria.
     """
     catalog = _catalog()
     table = catalog.get("jorge_tfm_capec_table", {})
-    families = catalog["families"]
     rows: list[dict[str, Any]] = []
     for mapping in table.get("mappings", []):
-        family = mapping.get("family")
-        entry = families.get(family, {})
-        catalog_capec_ids = {p["id"] for p in entry.get("capec_patterns", [])}
+        attack_type = mapping.get("attack_type")
+        entry = catalog["attack_types"].get(attack_type, {})
+        catalog_capec_ids = set(entry.get("capec_pattern_ids") or [])
+        public_mapping = {
+            key: value for key, value in mapping.items() if key != "family"
+        }
         rows.append(
             {
-                **mapping,
+                **public_mapping,
                 "covered": mapping.get("capec_id") in catalog_capec_ids,
-                "extra_attack_techniques": [t["id"] for t in entry.get("attack_techniques", [])],
-                "extra_attack_mitigations": [m["id"] for m in entry.get("attack_mitigation_refs", [])],
+                "extra_attack_techniques": list(
+                    entry.get("attack_technique_ids") or []
+                ),
+                "extra_attack_mitigations": list(
+                    entry.get("attack_mitigation_ref_ids") or []
+                ),
             }
         )
     return {
@@ -426,10 +339,9 @@ def get_jorge_capec_coverage() -> dict[str, Any]:
 
 
 TOOLS = {
-    "list_families": list_families,
     "list_attack_types": list_attack_types,
-    "map_family_to_attack": map_family_to_attack,
-    "map_family_to_capec": map_family_to_capec,
+    "map_attack_type_to_attack": map_attack_type_to_attack,
+    "map_attack_type_to_capec": map_attack_type_to_capec,
     "suggest_mitigations": suggest_mitigations,
     "get_jorge_capec_coverage": get_jorge_capec_coverage,
     "get_multidataset_attack_type_coverage": get_multidataset_attack_type_coverage,
@@ -439,5 +351,5 @@ register_tools(mcp_app, TOOLS)
 
 if __name__ == "__main__":
     if mcp_app is None:
-        raise SystemExit("SDK MCP no disponible: instala mcp[cli]>=1.2 (extra [mcp]).")
+        raise SystemExit("SDK MCP no disponible: instala el proyecto con 'pip install .'.")
     mcp_app.run()

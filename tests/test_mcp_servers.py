@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
+import sqlite3
 import sys
-from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager, closing
 from datetime import timedelta
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -14,15 +17,17 @@ import pytest
 from src.contracts.attack_taxonomy import (
     MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
-    broad_family_for_attack_type,
 )
 from src.contracts.canonical import CanonicalEvent
 from src.mcp.client import (
+    CLIENT_MODE_ENV,
+    DEFAULT_CLIENT_MODE,
     DEFAULT_STDIO_TIMEOUT_SECONDS,
     MCPToolClient,
     SERVER_MODULES,
     _decode_stdio_result,
     list_tools_stdio,
+    resolve_mcp_client_mode,
 )
 
 client = MCPToolClient(mode="inprocess")
@@ -74,12 +79,12 @@ CANONICAL_EVENT = {
 
 def test_all_servers_expose_tools():
     expected = {
-        "inference": {"standardize_event", "detect_event", "classify_event", "get_family_scores"},
+        "inference": {"standardize_event", "detect_event", "classify_event"},
         "case_memory": {"create_case", "append_trace", "get_case", "retrieve_similar_cases"},
         "threat_intel": {
             "list_attack_types",
-            "map_family_to_attack",
-            "map_family_to_capec",
+            "map_attack_type_to_attack",
+            "map_attack_type_to_capec",
             "suggest_mitigations",
             "get_multidataset_attack_type_coverage",
         },
@@ -91,9 +96,9 @@ def test_all_servers_expose_tools():
 
 
 def test_tool_results_carry_trace_metadata():
-    result = client.call("threat_intel", "list_families")
+    result = client.call("threat_intel", "list_attack_types")
     assert result["ok"] is True
-    assert result["tool_name"] == "list_families"
+    assert result["tool_name"] == "list_attack_types"
     assert "tool_version" in result and "latency_ms" in result
 
 
@@ -107,59 +112,47 @@ def test_tool_errors_are_returned_not_raised(case_db):
 # threat intel
 # ---------------------------------------------------------------------------
 
-def test_threat_intel_covers_all_corpus_families():
-    corpus_families = ["benign", "injection", "ddos", "malware", "bruteforce", "scanning", "mitm"]
-    listed = client.call("threat_intel", "list_families")["families"]
-    for family in corpus_families:
-        assert family in listed
-
-
 def test_threat_intel_lists_exactly_the_16_operational_attack_types():
     result = client.call("threat_intel", "list_attack_types")
 
     assert result["ok"] is True
     assert tuple(result["attack_types"]) == MULTIDATASET_ATTACK_CLASSES
     assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
-    assert result["families_by_attack_type"] == {
-        attack_type: broad_family_for_attack_type(attack_type)
-        for attack_type in MULTIDATASET_ATTACK_CLASSES
-    }
+    assert result["version"] == "3.0"
+    assert "families" not in result
+    assert "families_by_attack_type" not in result
 
 
 @pytest.mark.parametrize("attack_type", MULTIDATASET_ATTACK_CLASSES)
 def test_threat_intel_resolves_specific_non_crossed_catalog_for_all_16_types(
     attack_type,
 ):
-    family = broad_family_for_attack_type(attack_type)
     expected_attack, expected_capec, expected_mitigations = (
         EXPECTED_TYPE_REFERENCES[attack_type]
     )
 
     attack = client.call(
         "threat_intel",
-        "map_family_to_attack",
-        family=family,
+        "map_attack_type_to_attack",
         attack_type=attack_type,
     )
     capec = client.call(
         "threat_intel",
-        "map_family_to_capec",
-        family=family,
+        "map_attack_type_to_capec",
         attack_type=attack_type,
     )
     result = client.call(
         "threat_intel",
         "suggest_mitigations",
-        family=family,
         attack_type=attack_type,
         schema_profile="network_flow",
     )
 
     for response in (attack, capec, result):
         assert response["ok"] is True
-        assert response["family"] == family
         assert response["attack_type"] == attack_type
         assert response["catalog_scope"] == "attack_type"
+        assert "family" not in response
 
     assert {item["id"] for item in attack["attack_techniques"]} == expected_attack
     assert {
@@ -177,7 +170,6 @@ def test_threat_intel_resolves_specific_non_crossed_catalog_for_all_16_types(
     assert {
         item["id"] for item in references["attack_mitigation_refs"]
     } == expected_mitigations
-    assert result["family_consistent"] is True
     assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
 
     by_phase = result["mitigations_by_phase"]
@@ -206,7 +198,7 @@ def test_threat_intel_reports_complete_multidataset_catalog_coverage():
         MULTIDATASET_ATTACK_CLASSES
     )
     for row in result["mappings"]:
-        assert row["family"] == broad_family_for_attack_type(row["attack_type"])
+        assert "family" not in row
         assert row["catalog_scope"] == "attack_type"
         assert row["mitigations"] >= 5
         assert row["attack_techniques"] > 0
@@ -217,7 +209,6 @@ def test_threat_intel_reports_complete_multidataset_catalog_coverage():
 @pytest.mark.parametrize(
     "alias",
     [
-        "Command_and_Control",
         "command-and-control",
         "command and control",
         "command_control",
@@ -225,35 +216,33 @@ def test_threat_intel_reports_complete_multidataset_catalog_coverage():
         "C2",
     ],
 )
-def test_command_and_control_attack_type_aliases_keep_specific_scope(alias):
+def test_command_and_control_aliases_are_rejected(alias):
     result = client.call(
         "threat_intel",
         "suggest_mitigations",
-        family="botnet",
         attack_type=alias,
+    )
+
+    assert result["ok"] is False
+    assert "fuera de la taxonomia operativa" in result["error"]
+
+
+def test_command_and_control_exact_type_keeps_specific_scope():
+    result = client.call(
+        "threat_intel",
+        "suggest_mitigations",
+        attack_type="Command_and_Control",
     )
 
     assert result["ok"] is True
     assert result["attack_type"] == "Command_and_Control"
-    assert result["family"] == "botnet"
     assert result["catalog_scope"] == "attack_type"
-    assert result["family_consistent"] is True
     assert {item["id"] for item in result["references"]["attack_techniques"]} == {
         "T1071"
     }
 
 
-def test_native_c_and_c_family_alias_preserves_legacy_family_scope():
-    result = client.call("threat_intel", "suggest_mitigations", family="C&C")
-
-    assert result["ok"] is True
-    assert result["attack_type"] is None
-    assert result["family"] == "botnet"
-    assert result["catalog_scope"] == "family"
-    assert result["family_consistent"] is True
-
-
-def test_specific_catalog_exposes_family_mismatch_instead_of_hiding_it():
+def test_family_argument_is_rejected_instead_of_affecting_type_selection():
     result = client.call(
         "threat_intel",
         "suggest_mitigations",
@@ -261,56 +250,56 @@ def test_specific_catalog_exposes_family_mismatch_instead_of_hiding_it():
         attack_type="DDoS_TCP",
     )
 
-    assert result["attack_type"] == "DDoS_TCP"
-    assert result["family"] == "ddos"
-    assert result["catalog_scope"] == "attack_type"
-    assert result["family_consistent"] is False
+    assert result["ok"] is False
+    assert "unexpected keyword argument 'family'" in result["error"]
 
 
-def test_unknown_explicit_attack_type_does_not_fall_back_to_requested_family():
+def test_unknown_explicit_attack_type_fails_without_fallback():
     result = client.call(
         "threat_intel",
         "suggest_mitigations",
-        family="ddos",
         attack_type="DDoS_QUIC",
     )
 
-    assert result["family"] == "unknown_attack"
-    assert result["attack_type"] is None
-    assert result["catalog_scope"] == "family"
-    assert result["family_consistent"] is False
-    assert not any(result["references"].values())
+    assert result["ok"] is False
+    assert "fuera de la taxonomia operativa" in result["error"]
 
 
-def test_threat_intel_mappings_ddos():
-    attack = client.call("threat_intel", "map_family_to_attack", family="ddos")
+def test_threat_intel_mappings_ddos_tcp_by_exact_type():
+    attack = client.call(
+        "threat_intel", "map_attack_type_to_attack", attack_type="DDoS_TCP"
+    )
     assert any(t["id"] == "T1498" for t in attack["attack_techniques"])
-    capec = client.call("threat_intel", "map_family_to_capec", family="ddos")
-    assert any(p["id"] == "CAPEC-125" for p in capec["capec_patterns"])
+    capec = client.call(
+        "threat_intel", "map_attack_type_to_capec", attack_type="DDoS_TCP"
+    )
+    assert any(p["id"] == "CAPEC-482" for p in capec["capec_patterns"])
 
 
 def test_threat_intel_suggest_mitigations_with_profile():
     result = client.call(
-        "threat_intel", "suggest_mitigations", family="bruteforce", schema_profile="network_flow"
+        "threat_intel",
+        "suggest_mitigations",
+        attack_type="Password",
+        schema_profile="network_flow",
     )
-    assert result["family"] == "bruteforce"
+    assert result["attack_type"] == "Password"
     assert result["mitigations_ordered"], "debe haber mitigaciones"
     assert result["profile_actions"], "debe haber acciones por perfil"
     assert result["references"]["attack_techniques"], "debe haber referencias ATT&CK"
 
 
-def test_threat_intel_alias_and_unknown():
-    assert client.call("threat_intel", "map_family_to_attack", family="Mirai")["family"] == "botnet"
-    assert (
-        client.call("threat_intel", "suggest_mitigations", family="algo_rarisimo")["family"]
-        == "unknown_attack"
+def test_threat_intel_missing_attack_type_is_rejected():
+    result = client.call("threat_intel", "suggest_mitigations")
+    assert result["ok"] is False
+    assert "missing 1 required positional argument" in result["error"]
+
+
+def test_threat_intel_normal_is_not_a_seventeenth_attack_type():
+    result = client.call(
+        "threat_intel", "suggest_mitigations", attack_type="Normal"
     )
-
-
-def test_threat_intel_benign_has_no_offensive_mitigations():
-    result = client.call("threat_intel", "suggest_mitigations", family="benign")
-    assert result["mitigations_by_phase"]["containment"] == []
-    assert result["mitigations_by_phase"]["eradication"] == []
+    assert result["ok"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +324,7 @@ def test_case_memory_lifecycle(case_db):
 
     payload = {
         "status": "completed",
-        "classification": {"attack_family": "ddos"},
+        "classification": {"attack_type": "DDoS_TCP"},
         "canonical_event": {"schema_profile": "network_flow"},
     }
     updated = client.call("case_memory", "update_case", case_id="case-test-1", payload=payload)
@@ -347,14 +336,51 @@ def test_case_memory_lifecycle(case_db):
     assert len(fetched["trace"]) == 2
     assert fetched["trace"][0]["agent"] == "detector"
 
-    similar = client.call("case_memory", "retrieve_similar_cases", attack_family="ddos")
+    similar = client.call(
+        "case_memory", "retrieve_similar_cases", attack_type="DDoS_TCP"
+    )
     assert similar["count"] == 1
+
+
+def test_case_memory_preserves_but_never_indexes_an_invalid_attack_type(case_db):
+    assert client.call(
+        "case_memory", "create_case", case_id="case-invalid-type", payload={}
+    )["ok"]
+    payload = {
+        "status": "completed",
+        "classification": {"attack_type": "invented_attack"},
+    }
+
+    updated = client.call(
+        "case_memory",
+        "update_case",
+        case_id="case-invalid-type",
+        payload=payload,
+    )
+    fetched = client.call(
+        "case_memory", "get_case", case_id="case-invalid-type", include_trace=False
+    )
+    listed = client.call("case_memory", "list_cases")
+    invalid_search = client.call(
+        "case_memory",
+        "retrieve_similar_cases",
+        attack_type="invented_attack",
+    )
+
+    assert updated["ok"] is True
+    assert fetched["case"]["classification"]["attack_type"] == "invented_attack"
+    indexed = next(
+        item for item in listed["cases"] if item["case_id"] == "case-invalid-type"
+    )
+    assert indexed["attack_type"] is None
+    assert invalid_search["ok"] is False
+    assert "Tipo de ataque no soportado" in invalid_search["error"]
 
 
 def test_case_memory_enforces_foreign_keys_and_rejects_orphan_writes(case_db):
     from src.mcp import case_memory_server
 
-    with case_memory_server._connect() as connection:
+    with case_memory_server._connection() as connection:
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
     orphan_trace = client.call(
@@ -374,6 +400,255 @@ def test_case_memory_enforces_foreign_keys_and_rejects_orphan_writes(case_db):
     )
     assert orphan_update["ok"] is False
     assert "Caso no encontrado: case-missing" in orphan_update["error"]
+
+
+def test_case_memory_migrates_legacy_index_to_exact_attack_type(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "legacy-cases.db"
+    payload = {
+        "case_id": "case-legacy",
+        "status": "completed",
+        # ``attack_subtype`` era el nombre publico anterior del mismo tipo
+        # exacto; no se usa la antigua familia para completar este valor.
+        "classification": {
+            "attack_family": "ddos",
+            "attack_subtype": "DDoS_TCP",
+            "confidence": 0.95,
+            "family_confidence": 0.95,
+            "decision_threshold": 0.65,
+            "family_scores": {"ddos": 0.95},
+            "model_task": "attack_subtype",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "top_scores": {
+                "DDoS_TCP": 0.95,
+                "DDoS_UDP": 0.03,
+                "DDoS_HTTP": 0.02,
+            },
+        },
+        "detection": {"is_malicious": True, "probability": 0.9},
+        "explanation": {
+            "attack_family": "ddos",
+            "attack_subtype": "DDoS_TCP",
+            "catalog_scope": "attack_type",
+            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "catalog_version": "test-v1",
+            "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+            "catalog_compatible_taxonomy_versions": [
+                MULTIDATASET_TAXONOMY_VERSION
+            ],
+        },
+        "judge": {
+            "action": "approve",
+            "approved": True,
+            "final_label": "DDoS_TCP",
+            "final_confidence": 0.95,
+        },
+        "canonical_event": {"schema_profile": "network_flow"},
+    }
+    with closing(sqlite3.connect(database)) as connection:
+        with connection:
+            connection.executescript(
+                """
+                CREATE TABLE cases (
+                    case_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    attack_family TEXT,
+                    schema_profile TEXT,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE traces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_id TEXT NOT NULL REFERENCES cases(case_id),
+                    seq INTEGER NOT NULL,
+                    entry TEXT NOT NULL
+                );
+                CREATE INDEX idx_cases_family ON cases(attack_family);
+                """
+            )
+            connection.execute(
+                "INSERT INTO cases VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "case-legacy",
+                    "2026-09-07T00:00:00+00:00",
+                    "2026-09-07T00:00:00+00:00",
+                    "completed",
+                    "ddos",
+                    "network_flow",
+                    json.dumps(payload),
+                ),
+            )
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(database))
+
+    similar = client.call(
+        "case_memory", "retrieve_similar_cases", attack_type="DDoS_TCP"
+    )
+
+    assert similar["ok"] is True
+    assert similar["count"] == 1
+    assert similar["cases"][0]["attack_type"] == "DDoS_TCP"
+
+    fetched = client.call(
+        "case_memory", "get_case", case_id="case-legacy", include_trace=False
+    )
+    assert fetched["ok"] is True
+    migrated_payload = fetched["case"]
+    assert migrated_payload["classification"]["attack_type"] == "DDoS_TCP"
+    assert migrated_payload["classification"]["model_task"] == "attack_type"
+    assert migrated_payload["explanation"]["attack_type"] == "DDoS_TCP"
+    for legacy_key in (
+        "attack_family",
+        "attack_subtype",
+        "family_confidence",
+        "family_scores",
+    ):
+        assert legacy_key not in migrated_payload["classification"]
+    assert "attack_family" not in migrated_payload["explanation"]
+    assert "attack_subtype" not in migrated_payload["explanation"]
+
+    # La ruta de lectura completa ya satisface el contrato publico nuevo.
+    from src.contracts.case import CaseResult
+    from src.agents.final.auditor import CaseAuditor
+
+    migrated_case = CaseResult.model_validate(migrated_payload)
+    assert migrated_case.classification.attack_type == "DDoS_TCP"
+    assert migrated_case.explanation.attack_type == "DDoS_TCP"
+    migration_report = CaseAuditor().audit(migrated_case)
+    assert migration_report.case_id == "case-legacy"
+    assert all(
+        check.passed
+        for check in migration_report.checks
+        if check.check
+        in {
+            "consistencia_modelo_por_tipo",
+            "consistencia_tipo_ataque_presente",
+            "consistencia_tipo_ataque_en_taxonomia",
+            "consistencia_top_scores_tipos",
+            "consistencia_tipo_ataque_vs_top_scores",
+        }
+    )
+    with closing(sqlite3.connect(database)) as connection:
+        columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(cases)")
+        }
+        indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(cases)")
+        }
+    assert "attack_type" in columns
+    assert "idx_cases_attack_type" in indexes
+    assert "idx_cases_family" not in indexes
+    with closing(sqlite3.connect(database)) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+
+    # Las tools deben haber cerrado sus conexiones: Windows permite borrar el
+    # fichero inmediatamente despues de la consulta.
+    database.unlink()
+
+
+def test_case_memory_migration_does_not_promote_broad_family_to_attack_type(
+    tmp_path, monkeypatch
+):
+    database = tmp_path / "legacy-family-only.db"
+    payload = {
+        "case_id": "case-family-only",
+        "status": "completed",
+        "detection": {"is_malicious": True, "probability": 0.9},
+        "classification": {
+            "attack_family": "ddos",
+            "attack_subtype": None,
+            "model_task": "attack_family",
+        },
+        "explanation": {
+            "attack_family": "ddos",
+            "catalog_scope": "family",
+        },
+    }
+    with closing(sqlite3.connect(database)) as connection:
+        with connection:
+            connection.executescript(
+                """
+                CREATE TABLE cases (
+                    case_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    attack_family TEXT,
+                    attack_type TEXT,
+                    schema_profile TEXT,
+                    payload TEXT NOT NULL
+                );
+                CREATE TABLE traces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_id TEXT NOT NULL REFERENCES cases(case_id),
+                    seq INTEGER NOT NULL,
+                    entry TEXT NOT NULL
+                );
+                CREATE INDEX idx_cases_family ON cases(attack_family);
+                """
+            )
+            connection.execute(
+                "INSERT INTO cases VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "case-family-only",
+                    "2026-09-07T00:00:00+00:00",
+                    "2026-09-07T00:00:00+00:00",
+                    "completed",
+                    "ddos",
+                    None,
+                    "network_flow",
+                    json.dumps(payload),
+                ),
+            )
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(database))
+
+    # Dos lecturas demuestran que la migracion es idempotente.
+    first = client.call(
+        "case_memory", "get_case", case_id="case-family-only", include_trace=False
+    )
+    second = client.call(
+        "case_memory", "get_case", case_id="case-family-only", include_trace=False
+    )
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert first["case"] == second["case"]
+    classification = first["case"]["classification"]
+    assert classification.get("attack_type") is None
+    assert "attack_family" not in classification
+    assert "attack_subtype" not in classification
+    assert classification["model_task"] == "attack_type"
+    assert first["case"]["explanation"]["catalog_scope"] is None
+
+    from src.agents.final.auditor import CaseAuditor
+    from src.contracts.case import CaseResult
+
+    report = CaseAuditor().audit(CaseResult.model_validate(first["case"]))
+    assert report.verdict == "reject"
+    assert any(
+        check.check == "consistencia_malicioso_con_tipo_ataque"
+        and not check.passed
+        for check in report.checks
+    )
+
+
+def test_legacy_unknown_subtype_is_not_added_to_attack_type_index():
+    from src.mcp.case_memory_server import _normalise_legacy_payload
+
+    payload, indexed_attack_type, changed = _normalise_legacy_payload(
+        {
+            "classification": {
+                "attack_subtype": "invented_attack",
+                "model_task": "attack_subtype",
+            }
+        }
+    )
+
+    assert changed is True
+    assert payload["classification"]["attack_type"] == "invented_attack"
+    assert payload["classification"]["model_task"] == "attack_type"
+    assert indexed_attack_type is None
 
 
 class FakeLLMParser:
@@ -773,7 +1048,7 @@ def _models_loadable() -> bool:
         return False
     from src.mcp.common import resolve_path
 
-    return resolve_path("detection_model").exists() and resolve_path("family_model").exists()
+    return resolve_path("detection_model").exists() and resolve_path("attack_type_model").exists()
 
 
 @pytest.mark.skipif(not _models_loadable(), reason="xgboost o modelos .joblib no disponibles")
@@ -785,12 +1060,15 @@ def test_detect_and_classify_with_prepared_models():
 
     classification = client.call("inference", "classify_event", canonical_event=CANONICAL_EVENT)
     assert classification["ok"], classification.get("error")
-    assert classification["model_task"] == "attack_subtype"
+    assert classification["model_task"] == "attack_type"
     assert classification["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
-    assert classification["attack_subtype"] in MULTIDATASET_ATTACK_CLASSES
-    assert classification["attack_family"] == broad_family_for_attack_type(
-        classification["attack_subtype"]
-    )
+    assert classification["attack_type"] in MULTIDATASET_ATTACK_CLASSES
+    assert not {
+        "attack_family",
+        "attack_subtype",
+        "family_confidence",
+        "family_scores",
+    } & classification.keys()
     assert 0.0 <= classification["confidence"] <= 1.0
     assert classification["decision_threshold"] == pytest.approx(0.65)
     assert len(classification["top_scores"]) == 3
@@ -839,6 +1117,24 @@ def test_feature_parity_with_training_script():
 # ---------------------------------------------------------------------------
 # protocolo MCP real (stdio)
 # ---------------------------------------------------------------------------
+
+def test_stdio_is_the_runtime_default_and_inprocess_requires_explicit_selection(
+    monkeypatch,
+):
+    monkeypatch.delenv(CLIENT_MODE_ENV, raising=False)
+
+    assert DEFAULT_CLIENT_MODE == "stdio"
+    assert resolve_mcp_client_mode() == "stdio"
+    assert MCPToolClient().mode == "stdio"
+
+    monkeypatch.setenv(CLIENT_MODE_ENV, " InProcess ")
+    assert resolve_mcp_client_mode() == "inprocess"
+    assert MCPToolClient().mode == "inprocess"
+    assert MCPToolClient(mode="stdio").mode == "stdio"
+
+    monkeypatch.setenv(CLIENT_MODE_ENV, "socket-magico")
+    with pytest.raises(ValueError, match="Modo MCP no soportado"):
+        MCPToolClient()
 
 def _stdio_result(text: str | None, *, is_error: bool = False):
     content = [] if text is None else [SimpleNamespace(type="text", text=text)]
@@ -890,6 +1186,7 @@ def test_stdio_timeout_is_finite_configurable_and_validated(monkeypatch):
 @pytest.mark.asyncio
 async def test_stdio_timeout_is_applied_to_session_and_tool_call(monkeypatch):
     observed: dict[str, object] = {}
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", "ruta-heredada.db")
 
     class FakeServerParameters:
         def __init__(self, **kwargs):
@@ -928,12 +1225,156 @@ async def test_stdio_timeout_is_applied_to_session_and_tool_call(monkeypatch):
     monkeypatch.setitem(sys.modules, "mcp.client.stdio", fake_mcp_stdio)
 
     stdio_client_instance = MCPToolClient(mode="stdio", timeout_seconds=0.01)
-    with pytest.raises(asyncio.TimeoutError):
-        await stdio_client_instance._call_stdio_async(
-            "threat_intel", "list_families", {}
-        )
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await stdio_client_instance._call_stdio_async(
+                "threat_intel", "list_attack_types", {}
+            )
+    finally:
+        stdio_client_instance.close()
 
     assert observed["read_timeout"] == timedelta(seconds=0.01)
+    assert observed["params"]["env"]["TFM_CASE_MEMORY_DB"] == "ruta-heredada.db"
+
+
+def test_stdio_client_reuses_one_session_and_serializes_threaded_calls(monkeypatch):
+    observed = {
+        "transport_enter": 0,
+        "transport_exit": 0,
+        "session_enter": 0,
+        "session_exit": 0,
+        "initialize": 0,
+        "calls": 0,
+        "lists": 0,
+        "in_flight": 0,
+        "max_in_flight": 0,
+        "owner_tasks": [],
+    }
+
+    class FakeServerParameters:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class FakeSession:
+        def __init__(self, read, write, read_timeout_seconds=None):
+            self.read_timeout_seconds = read_timeout_seconds
+
+        async def __aenter__(self):
+            observed["session_enter"] += 1
+            observed["owner_tasks"].append(asyncio.current_task())
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            observed["session_exit"] += 1
+            observed["owner_tasks"].append(asyncio.current_task())
+            return False
+
+        async def initialize(self):
+            observed["initialize"] += 1
+
+        async def call_tool(self, tool, arguments):
+            observed["calls"] += 1
+            observed["in_flight"] += 1
+            observed["max_in_flight"] = max(
+                observed["max_in_flight"], observed["in_flight"]
+            )
+            await asyncio.sleep(0.005)
+            observed["in_flight"] -= 1
+            return _stdio_result(
+                '{"ok": true, "value": ' + str(arguments["value"]) + "}"
+            )
+
+        async def list_tools(self):
+            observed["lists"] += 1
+            return SimpleNamespace(tools=[SimpleNamespace(name="echo")])
+
+    @asynccontextmanager
+    async def fake_stdio_client(params):
+        observed["transport_enter"] += 1
+        observed["owner_tasks"].append(asyncio.current_task())
+        try:
+            yield object(), object()
+        finally:
+            observed["transport_exit"] += 1
+            observed["owner_tasks"].append(asyncio.current_task())
+
+    fake_mcp = ModuleType("mcp")
+    fake_mcp.ClientSession = FakeSession
+    fake_mcp.StdioServerParameters = FakeServerParameters
+    fake_mcp_client = ModuleType("mcp.client")
+    fake_mcp_stdio = ModuleType("mcp.client.stdio")
+    fake_mcp_stdio.stdio_client = fake_stdio_client
+    fake_mcp.client = fake_mcp_client
+    fake_mcp_client.stdio = fake_mcp_stdio
+    monkeypatch.setitem(sys.modules, "mcp", fake_mcp)
+    monkeypatch.setitem(sys.modules, "mcp.client", fake_mcp_client)
+    monkeypatch.setitem(sys.modules, "mcp.client.stdio", fake_mcp_stdio)
+
+    with MCPToolClient(mode="stdio", timeout_seconds=1) as stdio_client_instance:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(
+                    stdio_client_instance.call,
+                    "threat_intel",
+                    "echo",
+                    value=value,
+                )
+                for value in range(8)
+            ]
+            assert sorted(future.result()["value"] for future in futures) == list(
+                range(8)
+            )
+
+        assert stdio_client_instance.list_tools("threat_intel") == ["echo"]
+
+        assert observed["transport_enter"] == 1
+        assert observed["session_enter"] == 1
+        assert observed["initialize"] == 1
+        assert observed["calls"] == 8
+        assert observed["lists"] == 1
+        assert observed["max_in_flight"] == 1
+
+    assert observed["session_exit"] == 1
+    assert observed["transport_exit"] == 1
+    assert len({id(task) for task in observed["owner_tasks"]}) == 1
+    assert stdio_client_instance.closed is True
+    with pytest.raises(RuntimeError, match="cliente MCP esta cerrado"):
+        stdio_client_instance.call("threat_intel", "echo", value=9)
+
+
+def test_stdio_client_close_is_idempotent_before_starting_any_server():
+    stdio_client_instance = MCPToolClient(mode="stdio")
+
+    stdio_client_instance.close()
+    stdio_client_instance.close()
+
+    assert stdio_client_instance.closed is True
+    with pytest.raises(RuntimeError, match="cliente MCP esta cerrado"):
+        stdio_client_instance.list_tools("threat_intel")
+
+
+def test_stdio_client_retains_a_worker_when_close_must_be_retried():
+    class FlakyWorker:
+        close_calls = 0
+
+        def close(self, *, join_timeout=None):
+            del join_timeout
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise TimeoutError("cierre simulado")
+
+    stdio_client_instance = MCPToolClient(mode="stdio", timeout_seconds=1)
+    worker = FlakyWorker()
+    stdio_client_instance._stdio_workers["threat_intel"] = worker
+
+    with pytest.raises(RuntimeError, match="cerrar todas las sesiones"):
+        stdio_client_instance.close()
+    assert stdio_client_instance.closed is True
+    assert stdio_client_instance._stdio_workers["threat_intel"] is worker
+
+    stdio_client_instance.close()
+    assert worker.close_calls == 2
+    assert stdio_client_instance._stdio_workers == {}
 
 @pytest.mark.asyncio
 async def test_stdio_threat_intel_lists_tools_over_real_mcp():
@@ -942,21 +1383,70 @@ async def test_stdio_threat_intel_lists_tools_over_real_mcp():
     assert "suggest_mitigations" in tools
 
 
+def test_stdio_client_lists_tools_through_real_mcp():
+    with MCPToolClient(mode="stdio") as stdio_client_instance:
+        tools = stdio_client_instance.list_tools("threat_intel")
+    assert "suggest_mitigations" in tools
+
+
+def test_stdio_inference_call_uses_real_mcp():
+    pytest.importorskip("mcp.server.fastmcp", reason="SDK MCP con FastMCP no instalado")
+    with MCPToolClient(mode="stdio") as stdio_client_instance:
+        result = stdio_client_instance.call(
+            "inference",
+            "get_mapping_confidence",
+            canonical_event={"mapping_confidence": 0.87},
+        )
+
+    assert result["ok"] is True
+    assert result["mapping_confidence"] == pytest.approx(0.87)
+
+
+def test_stdio_case_memory_roundtrip_uses_real_mcp(tmp_path, monkeypatch):
+    pytest.importorskip("mcp.server.fastmcp", reason="SDK MCP con FastMCP no instalado")
+    database = tmp_path / "stdio-case-memory.db"
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(database))
+    with MCPToolClient(mode="stdio") as stdio_client_instance:
+        created = stdio_client_instance.call(
+            "case_memory",
+            "create_case",
+            case_id="case-stdio-roundtrip",
+            payload={"marker": "mcp-real"},
+        )
+        stored = stdio_client_instance.call(
+            "case_memory",
+            "get_case",
+            case_id="case-stdio-roundtrip",
+            include_trace=False,
+        )
+
+    assert created["ok"] is True
+    assert stored["ok"] is True
+    assert stored["case"] == {"marker": "mcp-real"}
+
+
 def test_stdio_call_returns_same_payload_as_inprocess():
     pytest.importorskip("mcp.server.fastmcp", reason="SDK MCP con FastMCP no instalado")
-    stdio_client_instance = MCPToolClient(mode="stdio")
-    remote = stdio_client_instance.call(
-        "threat_intel", "map_family_to_capec", family="injection"
+    with MCPToolClient(mode="stdio") as stdio_client_instance:
+        remote = stdio_client_instance.call(
+            "threat_intel",
+            "map_attack_type_to_capec",
+            attack_type="SQL_injection",
+        )
+    local = client.call(
+        "threat_intel",
+        "map_attack_type_to_capec",
+        attack_type="SQL_injection",
     )
-    local = client.call("threat_intel", "map_family_to_capec", family="injection")
     assert remote["ok"] is True, remote.get("error")
     assert remote["capec_patterns"] == local["capec_patterns"]
 
 
 def test_stdio_protocol_error_is_fail_closed():
     pytest.importorskip("mcp.server.fastmcp", reason="SDK MCP con FastMCP no instalado")
-    result = MCPToolClient(mode="stdio").call(
-        "threat_intel", "tool_que_no_existe"
-    )
+    with MCPToolClient(mode="stdio") as stdio_client_instance:
+        result = stdio_client_instance.call(
+            "threat_intel", "tool_que_no_existe"
+        )
     assert result["ok"] is False
     assert "Unknown tool" in result["error"]

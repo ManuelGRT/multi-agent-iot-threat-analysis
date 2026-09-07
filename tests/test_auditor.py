@@ -69,15 +69,35 @@ def clean_attack_case(**overrides) -> CaseResult:
         canonical_event=dict(CANONICAL_EVENT),
         standardization=StandardizationInfo(mapping_confidence=0.9, schema_profile="network_flow"),
         detection=DetectionInfo(is_malicious=True, probability=0.97, model_name="xgb"),
-        classification=ClassificationInfo(attack_family="ddos", confidence=0.95),
+        classification=ClassificationInfo(
+            attack_type="DDoS_TCP",
+            confidence=0.95,
+            decision_threshold=0.65,
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.95, "DDoS_UDP": 0.03, "XSS": 0.02},
+        ),
         explanation=ExplanationInfo(
-            summary="ddos",
+            summary="DDoS TCP",
             mitigations=["rate_limit"],
             references=[ThreatReference(attack_id="T1498", source="catalog")],
             confidence=0.95,
+            attack_type="DDoS_TCP",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            catalog_scope="attack_type",
+            catalog_version="2.0",
+            catalog_taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            catalog_compatible_taxonomy_versions=[
+                MULTIDATASET_TAXONOMY_VERSION,
+            ],
             source="catalog",
         ),
-        judge=JudgeInfo(action="approve", approved=True, final_label="ddos", final_confidence=0.95),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.95,
+        ),
         trace=make_trace(FULL_PATH),
     )
     defaults.update(overrides)
@@ -87,17 +107,15 @@ def clean_attack_case(**overrides) -> CaseResult:
 
 def typed_explanation(
     *,
-    attack_subtype: str = "DDoS_TCP",
-    attack_family: str = "ddos",
-    taxonomy_version: str = JORGE_TAXONOMY_VERSION,
+    attack_type: str = "DDoS_TCP",
+    taxonomy_version: str = MULTIDATASET_TAXONOMY_VERSION,
 ) -> ExplanationInfo:
     return ExplanationInfo(
-        summary=attack_subtype,
+        summary=attack_type,
         mitigations=["rate_limit"],
         references=[ThreatReference(attack_id="T1498", source="catalog")],
         confidence=0.95,
-        attack_family=attack_family,
-        attack_subtype=attack_subtype,
+        attack_type=attack_type,
         taxonomy_version=taxonomy_version,
         catalog_scope="attack_type",
         catalog_version="2.0",
@@ -139,17 +157,14 @@ def test_clean_attack_case_is_approved():
     assert catalog_check.detail is None
 
 
-def test_auditor_validates_subtype_family_and_top_score_coherence():
+def test_auditor_validates_attack_type_and_top_score_coherence():
     coherent = clean_attack_case(
         classification=ClassificationInfo(
-            attack_family="ddos",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             confidence=0.91,
-            family_confidence=0.97,
-            model_task="attack_subtype",
-            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
-            family_scores={"ddos": 0.97, "injection": 0.03},
         ),
         explanation=typed_explanation(),
         judge=JudgeInfo(
@@ -163,16 +178,13 @@ def test_auditor_validates_subtype_family_and_top_score_coherence():
 
     mismatch = clean_attack_case(
         classification=ClassificationInfo(
-            attack_family="malware",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             confidence=0.91,
-            family_confidence=0.97,
-            model_task="attack_subtype",
-            taxonomy_version=JORGE_TAXONOMY_VERSION,
-            top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
-            family_scores={"ddos": 0.97, "injection": 0.03},
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            top_scores={"DDoS_UDP": 0.91, "DDoS_TCP": 0.06, "XSS": 0.03},
         ),
-        explanation=typed_explanation(attack_family="malware"),
+        explanation=typed_explanation(),
         judge=JudgeInfo(
             action="approve",
             approved=True,
@@ -182,23 +194,22 @@ def test_auditor_validates_subtype_family_and_top_score_coherence():
     )
     report = auditor.audit(mismatch)
     assert report.verdict == "reject"
-    assert any("consistencia_subtipo_vs_familia" in issue for issue in report.issues)
+    assert any(
+        "consistencia_tipo_ataque_vs_top_scores" in issue for issue in report.issues
+    )
 
 
-def test_auditor_accepts_multidataset_subtype_contract():
+def test_auditor_accepts_multidataset_attack_type_contract():
     case = clean_attack_case(
         classification=ClassificationInfo(
-            attack_family="ddos",
-            attack_subtype="DoS",
+            attack_type="DoS",
             confidence=0.88,
-            family_confidence=0.95,
-            model_task="attack_subtype",
+            model_task="attack_type",
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             top_scores={"DoS": 0.88, "DDoS_TCP": 0.07, "Command_and_Control": 0.05},
-            family_scores={"ddos": 0.95, "botnet": 0.05},
         ),
         explanation=typed_explanation(
-            attack_subtype="DoS",
+            attack_type="DoS",
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
         ),
         judge=JudgeInfo(
@@ -212,19 +223,16 @@ def test_auditor_accepts_multidataset_subtype_contract():
     assert auditor.audit(case).verdict == "approve"
 
 
-def test_auditor_validates_full_subtype_contract_and_dynamic_threshold():
+def test_auditor_validates_full_attack_type_contract_and_dynamic_threshold():
     case = clean_attack_case(
         classification=ClassificationInfo(
-            attack_family="ddos",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             confidence=0.80,
-            family_confidence=0.92,
             decision_threshold=0.81,
-            model_name="xgboost_attack_subtype_jorge14_balanced_20260906",
-            model_task="attack_subtype",
-            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            model_name="xgboost_attack_subtype_multidataset16_balanced500_20260906",
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             top_scores={"DDoS_TCP": 0.80, "DDoS_UDP": 0.12, "XSS": 0.08},
-            family_scores={"ddos": 0.92, "injection": 0.08},
         ),
         explanation=typed_explanation(),
         judge=JudgeInfo(
@@ -246,15 +254,18 @@ def test_auditor_validates_full_subtype_contract_and_dynamic_threshold():
     assert "threshold=0.81" in (threshold_check.detail or "")
 
 
-def test_auditor_rejects_wrong_subtype_taxonomy_and_invalid_top_score():
+def test_auditor_rejects_wrong_attack_type_taxonomy_and_invalid_top_score():
     case = clean_attack_case(
         classification=ClassificationInfo(
-            attack_family="ddos",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             confidence=0.91,
-            model_task="attack_subtype",
+            model_task="attack_type",
             taxonomy_version="obsolete",
-            top_scores={"DDoS_TCP": 0.91, "Novel_Attack": 0.09},
+            top_scores={
+                "DDoS_TCP": 0.91,
+                "Novel_Attack": 0.06,
+                "XSS": 0.03,
+            },
         ),
         explanation=typed_explanation(taxonomy_version="obsolete"),
         judge=JudgeInfo(
@@ -267,24 +278,23 @@ def test_auditor_rejects_wrong_subtype_taxonomy_and_invalid_top_score():
     report = auditor.audit(case)
     assert report.verdict == "reject"
     assert any("consistencia_version_taxonomia" in issue for issue in report.issues)
-    assert any("consistencia_top_scores_subtipos" in issue for issue in report.issues)
+    assert any("consistencia_top_scores_tipos" in issue for issue in report.issues)
 
 
 @pytest.mark.parametrize(
     ("field", "value", "expected_check"),
     [
-        ("attack_subtype", "DDoS_UDP", "consistencia_mitigacion_subtipo"),
-        ("attack_family", "malware", "consistencia_mitigacion_familia"),
+        ("attack_type", "DDoS_UDP", "consistencia_mitigacion_tipo_ataque"),
         (
             "taxonomy_version",
-            MULTIDATASET_TAXONOMY_VERSION,
+            JORGE_TAXONOMY_VERSION,
             "consistencia_mitigacion_taxonomia",
         ),
         ("catalog_scope", "family", "consistencia_mitigacion_catalogo_tipado"),
         ("catalog_version", None, "consistencia_mitigacion_catalogo_tipado"),
         (
             "catalog_compatible_taxonomy_versions",
-            [MULTIDATASET_TAXONOMY_VERSION],
+            [JORGE_TAXONOMY_VERSION],
             "consistencia_mitigacion_catalogo_tipado",
         ),
     ],
@@ -296,14 +306,11 @@ def test_auditor_rejects_typed_mitigation_contract_mismatch(
     setattr(explanation, field, value)
     case = clean_attack_case(
         classification=ClassificationInfo(
-            attack_family="ddos",
-            attack_subtype="DDoS_TCP",
+            attack_type="DDoS_TCP",
             confidence=0.91,
-            family_confidence=0.97,
-            model_task="attack_subtype",
-            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
-            family_scores={"ddos": 0.97, "injection": 0.03},
         ),
         explanation=explanation,
         judge=JudgeInfo(
@@ -384,13 +391,19 @@ def test_standardizer_abstention_without_detector_is_valid_review():
 # consistencia
 # ---------------------------------------------------------------------------
 
-def test_benign_with_attack_family_is_rejected():
+def test_benign_with_attack_type_is_rejected():
     case = clean_benign_case(
-        classification=ClassificationInfo(attack_family="ddos", confidence=0.9),
+        classification=ClassificationInfo(
+            attack_type="DDoS_TCP",
+            confidence=0.9,
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+        ),
     )
     report = auditor.audit(case)
     assert report.verdict == "reject"
-    assert any("consistencia_benigno_sin_familia" in issue for issue in report.issues)
+    assert any(
+        "consistencia_benigno_sin_tipo_ataque" in issue for issue in report.issues
+    )
 
 
 def test_detection_label_must_match_probability():
@@ -402,13 +415,21 @@ def test_detection_label_must_match_probability():
     assert any("consistencia_etiqueta_vs_probabilidad" in issue for issue in report.issues)
 
 
-def test_malicious_case_cannot_use_benign_family():
+def test_malicious_case_cannot_use_type_outside_taxonomy():
     case = clean_attack_case(
-        classification=ClassificationInfo(attack_family="benign", confidence=0.95),
+        classification=ClassificationInfo(
+            attack_type="benign",
+            confidence=0.95,
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            top_scores={"benign": 0.95, "DDoS_TCP": 0.03, "XSS": 0.02},
+        ),
     )
     report = auditor.audit(case)
     assert report.verdict == "reject"
-    assert any("consistencia_malicioso_no_benigno" in issue for issue in report.issues)
+    assert any(
+        "consistencia_tipo_ataque_en_taxonomia" in issue for issue in report.issues
+    )
 
 
 def test_unflagged_abstention_is_rejected():
@@ -430,11 +451,13 @@ def test_gray_zone_probability_without_abstain_is_rejected():
     assert any("umbral_zona_gris_abstiene" in issue for issue in report.issues)
 
 
-def test_completed_malicious_without_family_is_rejected():
+def test_completed_malicious_without_attack_type_is_rejected():
     case = clean_attack_case(classification=ClassificationInfo())
     report = auditor.audit(case)
     assert report.verdict == "reject"
-    assert any("consistencia_malicioso_con_familia" in issue for issue in report.issues)
+    assert any(
+        "consistencia_malicioso_con_tipo_ataque" in issue for issue in report.issues
+    )
 
 
 def test_catalog_source_with_llm_suggested_reference_is_rejected():
@@ -458,7 +481,11 @@ def test_catalog_source_with_llm_suggested_reference_is_rejected():
 
 def test_completed_status_with_rejecting_judge_is_rejected():
     # close() marca 'completed' aunque el juez rechace: solo este check lo caza
-    case = clean_attack_case(judge=JudgeInfo(action="reject", approved=False, final_label="ddos"))
+    case = clean_attack_case(
+        judge=JudgeInfo(
+            action="reject", approved=False, final_label="DDoS_TCP"
+        )
+    )
     assert case.status == "completed"
     report = auditor.audit(case)
     assert report.verdict == "reject"
@@ -787,7 +814,13 @@ def test_low_mapping_confidence_unflagged_is_rejected():
 def test_low_mapping_confidence_flagged_is_review():
     case = clean_attack_case(
         standardization=StandardizationInfo(mapping_confidence=0.2),
-        judge=JudgeInfo(action="human_interrupt", approved=False, requires_human_review=True),
+        judge=JudgeInfo(
+            action="human_interrupt",
+            approved=False,
+            requires_human_review=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.95,
+        ),
     )
     report = auditor.audit(case)
     assert report.verdict == "review"
@@ -796,7 +829,21 @@ def test_low_mapping_confidence_flagged_is_review():
 
 def test_low_classification_confidence_unflagged_is_review_not_reject():
     case = clean_attack_case(
-        classification=ClassificationInfo(attack_family="ddos", confidence=0.4),
+        classification=ClassificationInfo(
+            attack_type="DDoS_TCP",
+            confidence=0.4,
+            decision_threshold=0.65,
+            model_task="attack_type",
+            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.4, "DDoS_UDP": 0.35, "XSS": 0.25},
+        ),
+        explanation=typed_explanation(),
+        judge=JudgeInfo(
+            action="approve",
+            approved=True,
+            final_label="DDoS_TCP",
+            final_confidence=0.4,
+        ),
     )
     report = auditor.audit(case)
     assert report.verdict == "review"  # fallo blando: deriva, no invalida
@@ -811,7 +858,11 @@ def test_audit_batch_summary_counts():
     cases = [
         clean_attack_case(),
         clean_benign_case(),
-        clean_benign_case(classification=ClassificationInfo(attack_family="ddos", confidence=0.9)),
+        clean_benign_case(
+            classification=ClassificationInfo(
+                attack_type="DDoS_TCP", confidence=0.9
+            )
+        ),
     ]
     summary = auditor.audit_batch(cases)
     assert summary["total"] == 3
@@ -830,7 +881,7 @@ def test_real_final_graph_case_passes_audit():
         {
             ("inference", "standardize_event"): standardize_ok(),
             ("inference", "detect_event"): detect_ok(0.97),
-            ("inference", "classify_event"): classify_ok("ddos", 0.95),
+            ("inference", "classify_event"): classify_ok("DDoS_TCP", 0.95),
         }
     )
     case = run_case({"dataset": "iot23", "row": {"proto": "tcp"}}, agents=agents)

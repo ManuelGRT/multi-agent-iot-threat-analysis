@@ -20,7 +20,7 @@ class FinalAgent:
     name = "final_agent"
 
     def __init__(self, client: MCPToolClient | None = None):
-        self.client = client or MCPToolClient(mode="inprocess")
+        self.client = client or MCPToolClient()
 
     # ------------------------------------------------------------------
     def start_entry(self, tool: str | None = None, **detail: Any) -> TraceEntry:

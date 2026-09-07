@@ -84,11 +84,12 @@ repetidas en alguna clase de IoT-23):
 | Mitigador (16 llamadas Mistral en vivo) | 111/113 medidas base contextualizadas; cinco primeras ancladas en 16/16 casos; 15 aprobaciones estructurales y 1 revisión |
 | Auditor | 16/16 defectos inyectados detectados; 0 falsos rechazos |
 
-**Límite declarado:** el control *leave-one-dataset-out* muestra que los
-modelos no generalizan a una fuente no vista en entrenamiento; los resultados
-valen para los dominios representados. La mejora frente al TFM previo procede
-de la **representación canónica**, no del algoritmo (la réplica a igualdad de
-columnas reproduce su baseline).
+**Límite declarado:** las evaluaciones balanceadas por origen emplean registros
+de test de fuentes representadas durante el entrenamiento; no son pruebas
+*leave-one-dataset-out* ni demuestran transferencia a una fuente no vista. Los
+resultados valen para los dominios representados. La mejora frente al TFM
+previo procede de la **representación canónica**, no del algoritmo (la réplica
+a igualdad de columnas reproduce su baseline).
 
 ## Instalación y ejecución online
 

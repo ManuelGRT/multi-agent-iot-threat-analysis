@@ -1,7 +1,8 @@
 # Instrucciones: campaña de estandarización en vivo (otro ordenador)
 
-**Qué es:** Fase C del plan de validación (`docs/plan_validacion_metricas_por_dataset.md`).
-Estandariza con Mistral EN VIVO las 35.637 filas de los manifiestos de
+**Qué es:** ejecución reproducible de la fase de estandarización en vivo de la
+campaña de validación. Estandariza con Mistral EN VIVO las 35.637 filas de los
+manifiestos de
 `artifacts/validation_2026/manifests/` (5 datasets). Reanudable: se puede cortar
 y relanzar sin perder trabajo.
 

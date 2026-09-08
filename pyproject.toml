@@ -33,18 +33,14 @@ ollama = [
     "langchain-core>=1.0",
     "langchain-ollama>=1.1",
 ]
-training = ["torch>=2.2"]
 llm-training = [
     "torch>=2.2",
     "transformers>=4.45",
-    "datasets>=2.20",
     "accelerate>=0.34",
     "peft>=0.12",
 ]
 evaluation = [
     "jsonschema>=4.0",
-    "lightgbm==4.7.0",
-    "torch>=2.2",
 ]
 
 [tool.setuptools]

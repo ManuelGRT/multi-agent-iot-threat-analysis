@@ -1,11 +1,10 @@
 # src/contracts/case.py
-"""Contrato de caso con trazabilidad completa (Fase 1 del plan de cierre).
+"""Contrato vigente de caso con trazabilidad completa.
 
 Un *caso* es la unidad auditable del sistema multiagente: agrupa la entrada
 cruda, el evento canonico, las salidas de cada agente y una traza ordenada de
-todo lo que ocurrio. Este contrato sigue la forma recomendada en el handoff
-(handoff_llm_terminar_tfm_multiagente_mcp_20260802) y reutiliza los contratos
-existentes de ``src/contracts/agents.py`` en lugar de crear otros paralelos.
+todo lo que ocurrio. Reutiliza los contratos de ``src/contracts/agents.py``
+para evitar esquemas paralelos.
 """
 from __future__ import annotations
 
@@ -24,7 +23,7 @@ def utcnow() -> datetime:
 
 
 def new_case_id() -> str:
-    """Genera un identificador de caso unico con el prefijo del handoff."""
+    """Genera un identificador de caso unico con el prefijo operativo."""
     return f"case-{uuid.uuid4().hex[:12]}"
 
 
@@ -113,7 +112,7 @@ class ThreatReference(BaseModel):
 
 
 class MitigationItem(BaseModel):
-    """Mitigacion individual con procedencia auditable (Fase 4).
+    """Mitigacion individual con procedencia auditable.
 
     - ``catalog``: texto literal del catalogo threat intel.
     - ``llm``: la accion ``text``/``base`` permanece literal del catalogo;

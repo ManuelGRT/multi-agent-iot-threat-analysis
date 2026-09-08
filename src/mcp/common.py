@@ -41,10 +41,6 @@ def state_dir() -> Path:
     return Path(os.getenv("TFM_STATE_DIR") or artifacts_dir())
 
 
-def data_dir() -> Path:
-    return Path(os.getenv("TFM_DATA_DIR") or repo_root() / "data")
-
-
 def resolve_confined_path(
     value: str | Path,
     root: str | Path,
@@ -75,20 +71,12 @@ def resolve_confined_path(
     return resolved
 
 
-# Artefactos canonicos del proyecto (handoff 2026-08-02). Se pueden
-# sobreescribir con variables de entorno para tests o entornos alternativos.
+# Artefactos operativos vigentes. Se pueden sobrescribir con variables de
+# entorno para tests o despliegues alternativos compatibles.
 DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
     "standardization_cache_db": lambda: Path(
         os.getenv("TFM_STANDARDIZATION_CACHE_DB")
         or state_dir() / "cache" / "mistral_standardization_v2.sqlite3"
-    ),
-    "mistral_cache": lambda: Path(
-        os.getenv("TFM_MISTRAL_CACHE")
-        or artifacts_dir() / "cache" / "mistral_prebalanced_no_simulated_logs_20260704.jsonl"
-    ),
-    "standardized_dataset": lambda: Path(
-        os.getenv("TFM_STANDARDIZED_DATASET")
-        or artifacts_dir() / "datasets" / "mistral_prebalanced_no_simulated_logs_standardized_20260704_all.jsonl"
     ),
     # Modelos de solo lectura incluidos en el paquete instalable.
     "detection_model": lambda: Path(
@@ -102,10 +90,6 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         or package_data_dir()
         / "models"
         / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
-    ),
-    "baselines": lambda: Path(
-        os.getenv("TFM_BASELINES")
-        or artifacts_dir() / "baselines" / "jorge_and_current_baselines.json"
     ),
     "case_memory_db": lambda: Path(
         os.getenv("TFM_CASE_MEMORY_DB") or state_dir() / "case_memory.db"

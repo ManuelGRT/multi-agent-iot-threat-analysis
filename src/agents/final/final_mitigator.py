@@ -1,5 +1,5 @@
 # src/agents/final/final_mitigator.py
-"""Agente final de mitigacion (Fase 4): catalogo determinista + LLM anclado.
+"""Agente mitigador: catalogo verificable y contextualizacion LLM anclada.
 
 Flujo en dos pasos:
 1. Determinista: ``threat_intel.suggest_mitigations(attack_type, ...)``

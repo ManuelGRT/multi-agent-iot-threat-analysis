@@ -4,23 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from src.contracts.attack_taxonomy import (
-    JORGE_ALL_CLASSES,
-    JORGE_ATTACK_CLASSES,
-    MULTIDATASET_ATTACK_CLASSES,
-)
+from src.contracts.attack_taxonomy import MULTIDATASET_ATTACK_CLASSES
 from src.eval.classifier_balancing import (
     MappedClassifierRecord,
     RejectedClassifierRecord,
-    balance_classifier_splits,
     balanced_origin_test_views,
     build_balanced_stratified_classifier_corpus,
     classifier_origins,
     deduplicate_classifier_universe,
-    deduplicate_mapped_records,
-    map_classifier_records,
     map_multidataset_classifier_records,
-    shared_dataset_test_views,
 )
 from src.eval.classifier_targets import MappingContext
 from src.eval.validation_campaign import PreparedRecord
@@ -62,7 +54,7 @@ def _mapped_corpus() -> list[MappedClassifierRecord]:
     rows: list[MappedClassifierRecord] = []
     needs = {"train": 15, "val": 4, "test": 4}
     for split, count in needs.items():
-        for label in JORGE_ATTACK_CLASSES:
+        for label in MULTIDATASET_ATTACK_CLASSES:
             for index in range(count):
                 dataset = "ton_iot" if index % 2 else "edge_iiotset"
                 source = (
@@ -99,26 +91,6 @@ def test_classifier_origin_splits_all_four_ton_modalities():
         classifier_origins("ton_iot", "x/unclassified/a.csv")
 
 
-def test_balance_is_exact_deterministic_without_replacement_and_preserves_splits():
-    corpus = _mapped_corpus()
-    first, report = balance_classifier_splits(corpus, per_class_total=20, seed=42)
-    second, second_report = balance_classifier_splits(reversed(corpus), per_class_total=20, seed=42)
-
-    assert len(first) == 14 * 20
-    assert report["quotas_per_class"] == {"train": 14, "val": 3, "test": 3}
-    assert report["selection_sha256"] == second_report["selection_sha256"]
-    assert [item.record.manifest_id for item in first] == [
-        item.record.manifest_id for item in second
-    ]
-    assert len({item.record.manifest_id for item in first}) == len(first)
-    for split, quota in report["quotas_per_class"].items():
-        counts = report["selected"]["splits"][split]["class_counts"]
-        assert set(counts) == set(JORGE_ATTACK_CLASSES)
-        assert set(counts.values()) == {quota}
-        original_splits = {item.record.manifest_id: item.record.split for item in corpus}
-        assert all(original_splits[item.record.manifest_id] == split for item in first if item.record.split == split)
-
-
 def test_deduplication_happens_globally_and_removes_unsafe_groups():
     corpus = _mapped_corpus()[:2]
     base = corpus[0]
@@ -135,7 +107,10 @@ def test_deduplication_happens_globally_and_removes_unsafe_groups():
         detailed_origin="edge_iiotset",
         mapping_reason="test",
     )
-    kept, report = deduplicate_mapped_records([*corpus, duplicate])
+    kept, rejected, report = deduplicate_classifier_universe(
+        [*corpus, duplicate], ()
+    )
+    assert rejected == ()
     assert report["cross_split_groups"] == 1
     assert report["unsafe_rows_removed"] == 2
     assert len(kept) == 1
@@ -149,13 +124,13 @@ def test_origin_views_balance_only_classes_present_in_each_origin():
         counts = {}
         for item in rows:
             counts[item.label] = counts.get(item.label, 0) + 1
-        assert len(counts) == 14
+        assert len(counts) == len(MULTIDATASET_ATTACK_CLASSES)
         assert len(set(counts.values())) == 1
 
 
 def test_origin_views_can_exclude_classes_below_minimum_support():
     corpus = _mapped_corpus()
-    for label in JORGE_ATTACK_CLASSES:
+    for label in MULTIDATASET_ATTACK_CLASSES:
         record = _prepared(
             f"test-extra-{label}",
             dataset="edge_iiotset",
@@ -178,45 +153,9 @@ def test_origin_views_can_exclude_classes_below_minimum_support():
         minimum_class_support=3,
     )
     assert set(views) == {"edge_iiotset"}
-    assert len(views["edge_iiotset"]) == 14 * 3
+    assert len(views["edge_iiotset"]) == len(MULTIDATASET_ATTACK_CLASSES) * 3
     with pytest.raises(ValueError, match="entero positivo"):
         balanced_origin_test_views(corpus, minimum_class_support=0)
-
-
-def test_requested_total_must_follow_exact_70_15_15_units():
-    with pytest.raises(ValueError, match="multiplo de 20"):
-        balance_classifier_splits(_mapped_corpus(), per_class_total=19)
-    with pytest.raises(ValueError, match="entero positivo"):
-        balance_classifier_splits(_mapped_corpus(), per_class_total=20.0)
-    with pytest.raises(ValueError, match="entero positivo"):
-        balance_classifier_splits(_mapped_corpus(), per_class_total=True)
-
-
-def test_balance_accepts_edge_reference_control_with_normal():
-    corpus = _mapped_corpus()
-    for split, count in {"train": 15, "val": 4, "test": 4}.items():
-        for index in range(count):
-            prepared = _prepared(
-                f"{split}-Normal-{index}",
-                dataset="edge_iiotset",
-                split=split,
-                target_class="Normal",
-                is_attack=False,
-            )
-            corpus.append(
-                MappedClassifierRecord(
-                    record=prepared,
-                    label="Normal",
-                    dataset_origin="edge_iiotset",
-                    detailed_origin="edge_iiotset",
-                    mapping_reason="edge_normal_reference_control",
-                )
-            )
-    selected, report = balance_classifier_splits(
-        corpus, per_class_total=20, classes=JORGE_ALL_CLASSES
-    )
-    assert len(selected) == 15 * 20
-    assert report["classes"] == list(JORGE_ALL_CLASSES)
 
 
 def test_deduplication_covers_exact_and_rejected_ood_across_splits():
@@ -230,7 +169,7 @@ def test_deduplication_covers_exact_and_rejected_ood_across_splits():
             fingerprint=exact.record.feature_fingerprint,
         ),
         status="out_of_taxonomy",
-        reason="iot23_label_not_in_jorge",
+        reason="test_out_of_taxonomy",
     )
     mapped, ood, report = deduplicate_classifier_universe([exact], [rejected])
     assert mapped == ()
@@ -255,35 +194,9 @@ def test_mapping_fails_closed_on_contradictory_or_missing_supervision():
         is_attack=None,
     )
     with pytest.raises(ValueError, match="clase benigna"):
-        map_classifier_records([benign_attack])
+        map_multidataset_classifier_records([benign_attack])
     with pytest.raises(ValueError, match="target_is_attack invalido"):
-        map_classifier_records([missing])
-
-
-def test_shared_views_can_compare_detailed_ton_origins():
-    corpus = _mapped_corpus()
-    linux_rows = []
-    for item in corpus:
-        if item.record.split != "test" or item.dataset_origin != "ton_iot":
-            continue
-        linux_rows.append(
-            MappedClassifierRecord(
-                record=_prepared(
-                    f"linux-{item.record.manifest_id}",
-                    dataset="ton_iot",
-                    split="test",
-                    target_class=item.label,
-                    source_file="x/Train_Test_Linux_dataset/a.csv",
-                ),
-                label=item.label,
-                dataset_origin="ton_iot",
-                detailed_origin="ton_iot_linux",
-                mapping_reason="test",
-            )
-        )
-    views = shared_dataset_test_views([*corpus, *linux_rows], detailed=True)
-    pair = views["ton_iot_linux__vs__ton_iot_windows"]
-    assert set(pair) == {"ton_iot_linux", "ton_iot_windows"}
+        map_multidataset_classifier_records([missing])
 
 
 def test_multidataset_mapper_keeps_forced_status_and_rejects_missing_ddos_context():
@@ -342,35 +255,6 @@ def test_multidataset_mapper_keeps_forced_status_and_rejects_missing_ddos_contex
     assert report["status_counts"] == {"ambiguous": 1, "exact": 1, "forced": 3}
 
 
-def test_balancer_accepts_expanded_16_class_contract():
-    corpus = _mapped_corpus()
-    for split, count in {"train": 15, "val": 4, "test": 4}.items():
-        for label in ("DoS", "Command_and_Control"):
-            for index in range(count):
-                prepared = _prepared(
-                    f"{split}-{label}-{index}",
-                    dataset="iot23" if label == "Command_and_Control" else "bot_iot",
-                    split=split,
-                    target_class=label,
-                )
-                corpus.append(
-                    MappedClassifierRecord(
-                        record=prepared,
-                        label=label,
-                        dataset_origin=prepared.dataset,
-                        detailed_origin=prepared.dataset,
-                        mapping_reason="test",
-                    )
-                )
-    selected, report = balance_classifier_splits(
-        corpus,
-        per_class_total=20,
-        classes=MULTIDATASET_ATTACK_CLASSES,
-    )
-    assert len(selected) == 16 * 20
-    assert report["classes"] == list(MULTIDATASET_ATTACK_CLASSES)
-
-
 def _resplit_rows(
     label: str,
     count: int,
@@ -400,6 +284,39 @@ def _resplit_rows(
             )
         )
     return rows
+
+
+def test_current_protocol_defaults_to_the_16_type_taxonomy():
+    corpus = [
+        item
+        for label in MULTIDATASET_ATTACK_CLASSES
+        for item in _resplit_rows(label, 20, dataset="edge_iiotset")
+    ]
+
+    selected, report = build_balanced_stratified_classifier_corpus(
+        corpus,
+        per_class_total=20,
+        seed=42,
+    )
+
+    assert report["classes"] == list(MULTIDATASET_ATTACK_CLASSES)
+    assert report["quotas_per_class"] == {"train": 14, "val": 3, "test": 3}
+    assert len(selected) == len(MULTIDATASET_ATTACK_CLASSES) * 20
+
+
+def test_current_protocol_rejects_invalid_exact_split_quota():
+    corpus = [
+        item
+        for label in MULTIDATASET_ATTACK_CLASSES
+        for item in _resplit_rows(label, 20, dataset="edge_iiotset")
+    ]
+
+    with pytest.raises(ValueError, match="multiplo de 20"):
+        build_balanced_stratified_classifier_corpus(corpus, per_class_total=19)
+    with pytest.raises(ValueError, match="entero positivo"):
+        build_balanced_stratified_classifier_corpus(corpus, per_class_total=20.0)
+    with pytest.raises(ValueError, match="entero positivo"):
+        build_balanced_stratified_classifier_corpus(corpus, per_class_total=True)
 
 
 def test_new_protocol_uses_global_minimum_then_splits_exactly_by_class():

@@ -258,7 +258,7 @@ def is_predictive_target_value(value: Any) -> bool:
 def contains_predictive_target_text(text: str | None) -> bool:
     """True si el texto contiene patrones clave=valor de campos target.
 
-    Lo usa el auditor (Fase 5) para detectar leakage en semantic_text sin
+    Lo usa el auditor para detectar leakage en semantic_text sin
     depender del efecto colateral de normalizacion de scrub_predictive_text.
     """
     return bool(_TARGET_ASSIGNMENT_RE.search(text or ""))

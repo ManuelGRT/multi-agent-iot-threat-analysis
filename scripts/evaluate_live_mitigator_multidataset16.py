@@ -42,6 +42,7 @@ DEFAULT_SEED = 42
 DEFAULT_MIN_CLASSIFIER_CONFIDENCE = 0.80
 DEFAULT_MIN_DETECTION_PROBABILITY = 0.80
 DEFAULT_MIN_MAPPING_CONFIDENCE = 0.90
+DEFAULT_MCP_CLIENT_MODE = "stdio"
 
 
 def parse_args() -> argparse.Namespace:
@@ -67,6 +68,16 @@ def parse_args() -> argparse.Namespace:
         "--min-mapping-confidence",
         type=float,
         default=DEFAULT_MIN_MAPPING_CONFIDENCE,
+    )
+    parser.add_argument(
+        "--mcp-client-mode",
+        choices=("stdio", "inprocess"),
+        default=DEFAULT_MCP_CLIENT_MODE,
+        help=(
+            "Transporte MCP empleado durante el replay. Por defecto se usa "
+            "stdio, igual que en produccion; inprocess queda disponible para "
+            "pruebas aisladas."
+        ),
     )
     return parser.parse_args()
 
@@ -632,7 +643,7 @@ def main() -> int:
     if inner_llm.agent.base_url != OFFICIAL_MISTRAL_BASE_URL:
         raise RuntimeError("La URL efectiva no es la API oficial de Mistral")
     recording_llm = RecordingLLM(inner_llm, MITIGATION_SCHEMA)
-    client = MCPToolClient(mode="inprocess")
+    client = MCPToolClient(mode=args.mcp_client_mode)
     agents = default_final_agents(
         client=client,
         use_llm_mitigator=True,
@@ -642,6 +653,7 @@ def main() -> int:
 
     detector_model = resolve_path("detection_model")
     catalog_path = package_data_dir() / "threat_intel_catalog.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
     campaign_manifest = {
         "campaign": "mitigator_mistral_live_multidataset16",
         "started_at": utc_now(),
@@ -649,6 +661,7 @@ def main() -> int:
         "runtime": {
             "python": sys.version,
             "platform": platform.platform(),
+            "mcp_client_mode": args.mcp_client_mode,
         },
         "selection": {
             "path": str(selection_path),
@@ -820,7 +833,7 @@ def main() -> int:
     summary["completed_at"] = utc_now()
     summary["model"] = args.model
     summary["taxonomy_version"] = MULTIDATASET_TAXONOMY_VERSION
-    summary["catalog_version"] = "2.0"
+    summary["catalog_version"] = str(catalog["version"])
     write_json(output_dir / "summary.json", summary)
     (output_dir / "summary.md").write_text(
         markdown_summary(summary, results), encoding="utf-8"

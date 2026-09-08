@@ -1,8 +1,9 @@
-"""Supervisa la campana completa de validacion de forma reanudable.
+"""Supervisa la estandarizacion LLM de la campana de forma reanudable.
 
-El supervisor no conoce la logica interna de entrenamiento ni de evaluacion:
-usa los manifiestos como universo autoritativo y los JSONL de estandarizacion
-para decidir si todas las filas tienen, al menos, un intento LLM correcto.
+El supervisor usa los manifiestos como universo autoritativo y los JSONL de
+estandarizacion para decidir si todas las filas tienen, al menos, un intento
+LLM correcto. El entrenamiento y la evaluacion de los modelos actuales se
+ejecutan con sus runners especificos y no forman parte de este supervisor.
 
 Flujo:
 
@@ -11,13 +12,11 @@ Flujo:
 3. Tolera un numero acotado de rondas consecutivas sin progreso, con backoff
    interrumpible, y detiene la campana si se agota ese margen o el numero
    maximo de rondas.
-4. Solo con cobertura LLM del 100 % ejecuta
-   ``eval_validacion_por_dataset.py``.
+4. Con cobertura LLM del 100 % registra el cierre de la estandarizacion.
 
 La credencial Mistral solo se exige si quedan filas por estandarizar y solo se
-entrega al subproceso de Fase C. La evaluacion se ejecuta con un entorno
-depurado de claves, tokens y secretos. La credencial nunca se pasa como
-argumento, se guarda en un checkpoint ni se imprime.
+entrega al subproceso de Fase C. La credencial nunca se pasa como argumento,
+se guarda en un checkpoint ni se imprime.
 """
 from __future__ import annotations
 
@@ -36,7 +35,6 @@ from typing import Callable, Mapping, Sequence
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST_DIR = REPO / "artifacts" / "validation_2026" / "manifests"
 DEFAULT_RESULTS_DIR = REPO / "artifacts" / "validation_2026" / "standardized"
-DEFAULT_EVALUATION_DIR = REPO / "artifacts" / "validation_2026" / "evaluation"
 DEFAULT_STATE_DIR = REPO / "artifacts" / "validation_2026" / "campaign_supervisor"
 DEFAULT_PROVIDER = "mistral"
 DEFAULT_MODEL = "mistral-small-2603"
@@ -164,7 +162,6 @@ class CampaignConfig:
     repo: Path = REPO
     manifest_dir: Path = DEFAULT_MANIFEST_DIR
     results_dir: Path = DEFAULT_RESULTS_DIR
-    evaluation_dir: Path = DEFAULT_EVALUATION_DIR
     state_dir: Path = DEFAULT_STATE_DIR
     python_executable: str = sys.executable
     provider: str = DEFAULT_PROVIDER
@@ -344,24 +341,6 @@ def standardization_command(config: CampaignConfig) -> tuple[str, ...]:
     )
 
 
-def evaluation_command(config: CampaignConfig) -> tuple[str, ...]:
-    return (
-        config.python_executable,
-        "-u",
-        "scripts/eval_validacion_por_dataset.py",
-        "--manifest-dir",
-        str(config.manifest_dir),
-        "--results-dir",
-        str(config.results_dir),
-        "--out-dir",
-        str(config.evaluation_dir),
-        "--provider",
-        config.provider,
-        "--model",
-        config.model,
-    )
-
-
 def compact_log(path: Path, max_bytes: int) -> None:
     """Conserva solo la cola de un log finalizado y limita su tamano."""
     if max_bytes <= 0 or not path.is_file() or path.stat().st_size <= max_bytes:
@@ -423,17 +402,17 @@ def standardization_environment(
         raise MissingCredentialError(
             "MISTRAL_API_KEY es necesaria porque la estandarizacion esta incompleta"
         )
-    environment = evaluation_environment(source_environment)
+    environment = scrub_sensitive_environment(source_environment)
     environment["MISTRAL_API_KEY"] = mistral_key
     environment["LLM_PROVIDER"] = config.provider
     environment["INGEST_LLM_MODEL"] = config.model
     return environment
 
 
-def evaluation_environment(
+def scrub_sensitive_environment(
     source: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Hereda solo variables no sensibles al proceso local de evaluacion."""
+    """Hereda solo variables no sensibles al subproceso de estandarizacion."""
     environment = os.environ if source is None else source
     return {
         name: value
@@ -658,52 +637,24 @@ def _checkpoint(
     )
 
 
-def _run_evaluation(
+def _complete_standardization(
     config: CampaignConfig,
     status: CampaignStatus,
-    process_runner: ProcessRunner,
     *,
     counters: Mapping[str, int] | None = None,
 ) -> int:
     checkpoint_extra = {"counters": dict(counters or {})}
-    _checkpoint(config, "evaluating", status, **checkpoint_extra)
-    print(f"Cobertura LLM completa. Iniciando evaluacion. {_status_line(status)}", flush=True)
-    try:
-        return_code = process_runner(
-            evaluation_command(config),
-            config.repo,
-            config.state_dir / "evaluation.log",
-            config.max_log_bytes,
-            evaluation_environment(),
-        )
-    except (CampaignError, OSError) as exc:
-        _checkpoint(
-            config,
-            "evaluation_process_error",
-            status,
-            error_type=type(exc).__name__,
-            **checkpoint_extra,
-        )
-        raise CampaignError(
-            "No se pudo ejecutar el proceso de evaluacion; consulta evaluation.log"
-        ) from exc
-    if return_code != 0:
-        _checkpoint(
-            config,
-            "evaluation_failed",
-            status,
-            return_code=return_code,
-            **checkpoint_extra,
-        )
-        raise CampaignError(
-            f"La evaluacion termino con codigo {return_code}; consulta evaluation.log"
-        )
     _checkpoint(
         config,
         "complete",
         status,
-        evaluation_return_code=0,
+        completed_scope="llm_standardization",
         **checkpoint_extra,
+    )
+    print(
+        "Cobertura LLM completa. Estandarizacion cerrada; el entrenamiento y "
+        f"la evaluacion se ejecutan con sus runners actuales. {_status_line(status)}",
+        flush=True,
     )
     return 0
 
@@ -760,10 +711,9 @@ def run_campaign(
 
     print(f"Estado inicial: {_status_line(status)}", flush=True)
     if status.complete:
-        return _run_evaluation(
+        return _complete_standardization(
             config,
             status,
-            process_runner,
             counters=counters,
         )
 
@@ -836,10 +786,9 @@ def run_campaign(
         )
 
         if status.complete:
-            return _run_evaluation(
+            return _complete_standardization(
                 config,
                 status,
-                process_runner,
                 counters=counters,
             )
         if (
@@ -894,7 +843,7 @@ def supervise_campaign(
     platform_name: str | None = None,
     execution_state_setter=None,
 ) -> int:
-    """Mantiene Windows despierto durante la espera, rondas y evaluacion."""
+    """Mantiene Windows despierto durante la espera y la estandarizacion."""
     awake = request_system_awake(platform_name, execution_state_setter)
     if (platform_name or os.name) == "nt" and not awake:
         print("AVISO: Windows no acepto la solicitud para impedir la suspension.", flush=True)
@@ -960,7 +909,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--python", dest="python_executable", default=sys.executable)
     parser.add_argument("--manifest-dir", type=Path, default=DEFAULT_MANIFEST_DIR)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
-    parser.add_argument("--evaluation-dir", type=Path, default=DEFAULT_EVALUATION_DIR)
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE_DIR)
     parser.add_argument("--provider", default=DEFAULT_PROVIDER)
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -973,7 +921,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         repo=REPO,
         manifest_dir=args.manifest_dir,
         results_dir=args.results_dir,
-        evaluation_dir=args.evaluation_dir,
         state_dir=args.state_dir,
         python_executable=args.python_executable,
         provider=args.provider,

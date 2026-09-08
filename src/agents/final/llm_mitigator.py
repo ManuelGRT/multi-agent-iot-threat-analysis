@@ -1,11 +1,9 @@
 # src/agents/final/llm_mitigator.py
 """Contextualizacion LLM del mitigador, anclada al catalogo threat intel.
 
-Diferencia clave con el TFM previo de Jorge: aquel inyectaba las contramedidas
-genericas de CAPEC en el prompt y dejaba al LLM generar libremente (evaluacion
-circular con ROUGE-L, sin anclaje auditable). Aqui el catalogo es la fuente de
-verdad: el LLM solo CONTEXTUALIZA las mitigaciones numeradas del catalogo al
-evento concreto (puertos, protocolo, telemetria) y cualquier aportacion sin
+El catalogo es la fuente de verdad: el LLM solo CONTEXTUALIZA las mitigaciones
+numeradas del catalogo al evento concreto (puertos, protocolo, telemetria) y
+cualquier aportacion sin
 respaldo se marca ``llm_suggested`` — nunca se presenta como conocimiento
 auditado. Si el LLM falla o no esta configurado, el modo catalogo puro sigue
 funcionando (la demo nunca se rompe).
@@ -283,7 +281,7 @@ def anchor_llm_payload(
     fallback_summary: str,
     fallback_confidence: float,
 ) -> dict[str, Any]:
-    """Ancla la salida del LLM al catalogo (regla dura de la Fase 4).
+    """Ancla la salida del LLM al catalogo operativo.
 
     Garantias, independientemente de lo que devuelva el LLM:
     - toda mitigacion del catalogo aparece como accion literal e inmutable;

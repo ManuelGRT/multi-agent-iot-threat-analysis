@@ -2,14 +2,18 @@
 
 ## Estado y objetivo
 
-Este documento describe la reevaluación
+Este documento describe la evaluación vigente
 `classifier_multidataset16_balanced500_threshold065_20260907` de la campaña
 balanceada base.
-Sustituye como resultado principal a la campaña anterior de 480 casos por
-clase. El cambio metodológico es importante: primero se construye el corpus
-balanceado usando todos los ataques mapeables y, solo después, se crea una
-nueva partición 70/15/15. No se condiciona la cuota a la distribución de las
-particiones de una campaña anterior.
+Primero se construye el corpus balanceado usando todos los ataques mapeables y,
+solo después, se crea una nueva partición 70/15/15. La cuota no se condiciona
+a una partición previa.
+
+La ficha JSON portable y versionada que sustenta las cifras de este documento
+está disponible en
+[`evaluation_references/xgboost_attack_type_multidataset16_balanced500_20260907.json`](evaluation_references/xgboost_attack_type_multidataset16_balanced500_20260907.json).
+La ficha conserva el contrato del modelo desplegado, los hashes, los soportes
+y las métricas, pero no rutas absolutas ni las filas de la campaña.
 
 La taxonomía conserva los catorce ataques de Edge-IIoTset y añade `DoS` y
 `Command_and_Control`. La clase normal no pertenece a este clasificador, ya
@@ -255,6 +259,20 @@ umbral operativo 0,65:
 | IoT-23 | 96 | 2 | 15 | 30 | 1,0000 | 1,0000 | 1,0000 | 1,0000 | 0,0000 |
 | TON-IoT | 308 | 8 | 25 | 200 | 0,8250 | 0,8274 | 0,9350 | 0,8250 | 0,1030 |
 
+Dentro de esa misma vista, el desglose de TON-IoT muestra que el agregado no
+representa por igual sus cuatro modalidades:
+
+| Origen detallado TON-IoT | Pool de test | Clases elegibles | Cuota por clase | Filas | Accuracy | Macro-F1 | Top-3 | Cobertura | Riesgo |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Linux | 42 | 1 | — | — | — | — | — | — | — |
+| Network | 195 | 8 | 16 | 128 | 0,9609 | 0,9614 | 0,9844 | 0,9609 | 0,0244 |
+| Telemetría | 61 | 4 | 12 | 48 | 0,4375 | 0,3467 | 0,8125 | 0,5625 | 0,5926 |
+| Windows | 10 | 0 | — | — | — | — | — | — | — |
+
+Linux y Windows no son evaluables con el protocolo robusto en el test global:
+Linux solo tiene una clase que alcanza el mínimo de diez casos y Windows no
+tiene ninguna. No se les asigna una métrica artificial.
+
 La segunda vista responde a la evaluación ampliada solicitada. Para cada
 origen se construye:
 
@@ -279,6 +297,16 @@ balancea cada dataset de forma independiente.
 | IoT-23 | 333 | 3 | 83 | 249 | 0,9920 | 0,7455 | 0,9960 | 0,9759 | 0,0041 |
 | TON-IoT | 2.457 | 10 | 25 | 250 | 0,8600 | 0,8596 | 0,9440 | 0,8440 | 0,0853 |
 
+El mismo desglose por modalidad TON-IoT, ahora sobre el pool ampliado no usado
+para desarrollo, es:
+
+| Origen detallado TON-IoT | Pool ampliado | Clases evaluadas | Cuota por clase | Filas | Accuracy | Macro-F1 | Top-3 | Cobertura | Riesgo |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Linux | 345 | 6 | 32 | 192 | 0,6146 | 0,6069 | 0,8958 | 0,6927 | 0,3459 |
+| Network | 1.558 | 10 | 25 | 250 | 0,9680 | 0,9683 | 0,9760 | 0,9760 | 0,0205 |
+| Telemetría | 472 | 6 | 17 | 102 | 0,4510 | 0,4365 | 0,8137 | 0,6275 | 0,4531 |
+| Windows | 82 | 4 | 11 | 44 | 0,4318 | 0,2583 | 0,8864 | 0,5682 | 0,4000 |
+
 En IoT-23 hubo una predicción `DDoS_UDP` fuera de las tres clases presentes.
 El cálculo macro incorpora esa etiqueta predicha con soporte real cero; por
 eso la macro-F1 (0,7455) es mucho menor que la accuracy (0,9920). El artefacto
@@ -288,7 +316,14 @@ usan como comparación principal por su inestabilidad.
 ## Reproducibilidad y despliegue
 
 - Semilla: 42.
-- Hash de taxonomía: `d016e777a545c78361adb1c05352a70f36e0022c5f85e5aaf4f8e379655bd6ed`.
+- Hash de la taxonomía registrada durante el entrenamiento:
+  `d016e777a545c78361adb1c05352a70f36e0022c5f85e5aaf4f8e379655bd6ed`.
+  Esta huella conserva el metadato auxiliar de familias amplias que existía en
+  aquel contrato, aunque el modelo siempre se entrenó sobre los 16 tipos.
+- Hash de la taxonomía operativa actual, ya sin ese metadato auxiliar:
+  `060a45a18e9a99e302467a12a358fe1f346091707a75375e2082a98e3506fae2`.
+  El auditor portable exige que esta segunda huella coincida con el contrato
+  cargado por el runtime.
 - Hash de selección: `d39cf28b3ec96e1558fbc77327d5674a43644a5f880233bd59640e8370168f60`.
 - Hash de las 8.000 filas seleccionadas que entran al entrenador:
   `f4b6aa576b7c7b48b34023232e0abce9368c50f52fde9f3e40dff6a19c38e344`.
@@ -317,8 +352,10 @@ ambiguo/excluido es 0,6990. Ambos superan los límites conservadores de 0,05 y
 automáticamente el candidato. La promoción responde aquí a la política
 operativa explícita de mantener 0,65; no a una mejora de calidad predictiva.
 
-Los artefactos completos se encuentran bajo
-`artifacts/validation_2026/classifier_multidataset16_balanced500_threshold065_20260907/`:
-informe JSON, resumen, selección global, sidecar de targets y modelo candidato.
-El runner reproducible es
-`scripts/train_balanced_multidataset16_classifier.py`.
+Los artefactos completos de campaña —informe JSON, resumen, selección global,
+sidecar de targets y modelo candidato— se conservan fuera del repositorio. La
+[ficha portable versionada](evaluation_references/xgboost_attack_type_multidataset16_balanced500_20260907.json)
+permite verificar en un clon limpio la identidad del modelo y los resultados
+que se citan aquí. El runner reproducible es
+`scripts/train_balanced_multidataset16_classifier.py` y genera también una
+ficha portable en cada nueva ejecución.

@@ -1,5 +1,5 @@
 # tests/test_final_agents.py
-"""Tests de los agentes finales (Fase 3): unitarios con stub + integracion."""
+"""Tests unitarios y de integracion de los agentes operativos."""
 from __future__ import annotations
 
 import copy
@@ -20,6 +20,10 @@ from src.agents.final import (
 from src.mcp.client import MCPToolClient
 from src.eval.data_sanitization import sanitize_canonical_event, sanitize_llm_input
 from src.mcp.standardization_cache import bind_event_identity
+from src.mcp.threat_catalog import (
+    THREAT_INTEL_CATALOG_VERSION,
+    expected_catalog_contract,
+)
 
 
 CANONICAL_EVENT = {
@@ -881,6 +885,38 @@ def test_mitigator_tool_error_falls_back_to_review():
 # judge
 # ---------------------------------------------------------------------------
 
+def catalog_explanation_payload(attack_type="DDoS_TCP"):
+    expected = expected_catalog_contract(attack_type, "network_flow")
+    mitigation_items = [
+        {
+            "text": item["text"],
+            "phase": item["phase"],
+            "source": "catalog",
+            "base": None,
+            "context_trusted": False,
+        }
+        for item in expected["items"]
+    ]
+    return {
+        "attack_type": attack_type,
+        "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        "catalog_scope": "attack_type",
+        "catalog_version": THREAT_INTEL_CATALOG_VERSION,
+        "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
+        "catalog_compatible_taxonomy_versions": list(
+            expected["compatible_taxonomy_versions"]
+        ),
+        "reference_quality": expected["reference_quality"],
+        "mitigation_items": mitigation_items,
+        "mitigations": [item["text"] for item in mitigation_items],
+        "references": expected["references"],
+        "source": "catalog",
+        "has_llm_suggested": False,
+        "first_five_catalog_anchored": False,
+        "requires_human_review": False,
+    }
+
+
 def clean_state():
     return {
         "canonical_event": dict(CANONICAL_EVENT),
@@ -898,17 +934,7 @@ def clean_state():
                 "XSS": 0.02,
             },
         },
-        "explanation_output": {
-            "attack_type": "DDoS_TCP",
-            "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
-            "catalog_scope": "attack_type",
-            "catalog_version": "2.0",
-            "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
-            "catalog_compatible_taxonomy_versions": [
-                MULTIDATASET_TAXONOMY_VERSION,
-            ],
-            "requires_human_review": False,
-        },
+        "explanation_output": catalog_explanation_payload(),
         "trace": [],
     }
 
@@ -936,19 +962,13 @@ def configure_typed_mitigation(
             },
         }
     )
-    state["explanation_output"].update(
-        {
-            "attack_type": attack_type,
-            "taxonomy_version": taxonomy_version,
-            "catalog_scope": "attack_type",
-            "catalog_version": "2.0",
-            "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
-            "catalog_compatible_taxonomy_versions": [
-                MULTIDATASET_TAXONOMY_VERSION,
-                JORGE_TAXONOMY_VERSION,
-            ],
-        }
-    )
+    try:
+        explanation = catalog_explanation_payload(attack_type)
+    except ValueError:
+        explanation = dict(state["explanation_output"])
+        explanation["attack_type"] = attack_type
+    explanation["taxonomy_version"] = taxonomy_version
+    state["explanation_output"] = explanation
     return state
 
 
@@ -988,15 +1008,28 @@ def test_judge_accepts_multidataset_dos_attack_type_contract():
     assert update["judge_output"]["final_label"] == "DoS"
 
 
-def test_judge_uses_persisted_attack_type_threshold_and_contract():
+@pytest.mark.parametrize("persisted_threshold", [0.10, 0.81])
+def test_judge_rejects_a_persisted_threshold_that_differs_from_contract(
+    persisted_threshold,
+):
     state = configure_typed_mitigation(clean_state())
-    state["classification_output"]["decision_threshold"] = 0.81
+    state["classification_output"]["decision_threshold"] = persisted_threshold
     set_classifier_confidence(state, 0.80)
     update = FinalJudge().run(state)
-    assert "classification_confidence_below_review_threshold" in update[
+    assert "classification_threshold_mismatch" in update["judge_output"]["issues"]
+    assert "classification_confidence_below_review_threshold" not in update[
         "judge_output"
     ]["issues"]
     assert update["judge_output"]["final_label"] == "DDoS_TCP"
+
+
+def test_judge_requires_the_threshold_in_the_classifier_contract():
+    state = configure_typed_mitigation(clean_state())
+    state["classification_output"].pop("decision_threshold")
+
+    update = FinalJudge().run(state)
+
+    assert "classification_threshold_missing" in update["judge_output"]["issues"]
 
 
 @pytest.mark.parametrize(
@@ -1055,7 +1088,7 @@ def test_judge_flags_attack_type_outside_taxonomy():
             "mitigation_taxonomy_version_mismatch",
         ),
         ("catalog_scope", "family", "mitigation_catalog_scope_invalid"),
-        ("catalog_version", None, "mitigation_catalog_version_missing"),
+        ("catalog_version", "2.0", "mitigation_catalog_version_mismatch"),
         (
             "catalog_compatible_taxonomy_versions",
             [JORGE_TAXONOMY_VERSION],
@@ -1074,6 +1107,24 @@ def test_judge_flags_typed_mitigation_contract_mismatch(
     assert update["judge_output"]["action"] == "human_interrupt"
     assert expected_issue in update["judge_output"]["issues"]
     assert update["needs_human_review"] is True
+
+
+def test_judge_detects_an_invented_catalog_mitigation():
+    state = configure_typed_mitigation(clean_state())
+    state["explanation_output"]["mitigation_items"][0]["text"] = (
+        "accion inventada que no figura en el catalogo"
+    )
+    state["explanation_output"]["mitigations"][0] = (
+        "accion inventada que no figura en el catalogo"
+    )
+
+    update = FinalJudge().run(state)
+
+    assert update["judge_output"]["action"] == "human_interrupt"
+    assert (
+        "mitigation_catalog_content_catalog_mitigation_set_mismatch"
+        in update["judge_output"]["issues"]
+    )
 
 
 def test_judge_rejects_legacy_model_task():

@@ -1,0 +1,1859 @@
+{
+  "artifact": {
+    "bytes": 2018126,
+    "deployed": true,
+    "filename": "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
+    "sha256": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+    "source_candidate_activated": false
+  },
+  "balancing": {
+    "available_class_support": {
+      "Backdoor": 1000,
+      "Command_and_Control": 537,
+      "DDoS_HTTP": 517,
+      "DDoS_ICMP": 500,
+      "DDoS_TCP": 1103,
+      "DDoS_UDP": 805,
+      "DoS": 1000,
+      "Fingerprinting": 620,
+      "MITM": 900,
+      "Password": 1000,
+      "Port_Scanning": 1496,
+      "Ransomware": 1000,
+      "SQL_injection": 1000,
+      "Uploading": 500,
+      "Vulnerability_scanner": 500,
+      "XSS": 1000
+    },
+    "available_rows": 13478,
+    "limiting_classes": [
+      "DDoS_ICMP",
+      "Uploading",
+      "Vulnerability_scanner"
+    ],
+    "minimum_global_class_support": 500,
+    "per_class_total": 500,
+    "policy": "minimum_global_class_support_then_stratified_70_15_15_by_class_dataset_detailed_origin_and_mapping_status",
+    "sampling_with_replacement": false,
+    "seed": 42,
+    "selected_class_support": {
+      "Backdoor": 500,
+      "Command_and_Control": 500,
+      "DDoS_HTTP": 500,
+      "DDoS_ICMP": 500,
+      "DDoS_TCP": 500,
+      "DDoS_UDP": 500,
+      "DoS": 500,
+      "Fingerprinting": 500,
+      "MITM": 500,
+      "Password": 500,
+      "Port_Scanning": 500,
+      "Ransomware": 500,
+      "SQL_injection": 500,
+      "Uploading": 500,
+      "Vulnerability_scanner": 500,
+      "XSS": 500
+    },
+    "selected_mapping_status_support": {
+      "exact": 7248,
+      "forced": 752
+    },
+    "selected_rows": 8000
+  },
+  "excluded_attack_targets": [
+    {
+      "dataset": "bot_iot",
+      "native_class": "Theft",
+      "reason": "bot_theft_insufficient_support",
+      "rows": 79,
+      "status": "out_of_taxonomy"
+    },
+    {
+      "dataset": "iot23",
+      "native_class": "FileDownload",
+      "reason": "iot23_filedownload_insufficient_support",
+      "rows": 3,
+      "status": "out_of_taxonomy"
+    },
+    {
+      "dataset": "ton_iot",
+      "native_class": "ddos",
+      "reason": "ton_ddos_missing_raw_protocol",
+      "rows": 300,
+      "status": "ambiguous"
+    }
+  ],
+  "generated_at": "2026-09-06T22:32:17+00:00",
+  "hashes": {
+    "artifact": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+    "eligible_records": "f4b6aa576b7c7b48b34023232e0abce9368c50f52fde9f3e40dff6a19c38e344",
+    "feature_names": "7562752da27242801d14455990f38e7b1e32771a35f96196fb499b52c0a289cd",
+    "selection": "d39cf28b3ec96e1558fbc77327d5674a43644a5f880233bd59640e8370168f60",
+    "runtime_taxonomy": "060a45a18e9a99e302467a12a358fe1f346091707a75375e2082a98e3506fae2",
+    "training_taxonomy": "d016e777a545c78361adb1c05352a70f36e0022c5f85e5aaf4f8e379655bd6ed",
+    "test": "644ce38284d1853b38691eb12aba42f58270ec4217ed074357fec14a2268320c",
+    "train": "c53a855cbb787b8f34499fd3e61b6dbae3ccf4b2cf0c0c0a30dbc76b9dbe69fc",
+    "validation": "bd62dd524b7804fe24d89b22ce57ee5d69b89717f319d48cb8161cef7826fefa"
+  },
+  "inputs": {
+    "manifests": [
+      {
+        "bytes": 3844426,
+        "filename": "bot_iot_manifest.jsonl",
+        "sha256": "ec924573aad6af6a9c5e335f74f21e1064002430309aa2e4aa0c018aaa2fac14"
+      },
+      {
+        "bytes": 27440681,
+        "filename": "edge_iiotset_manifest.jsonl",
+        "sha256": "e447e8f5ab77cd49e91da7442a04cf8eb37e5d105958ede7ad7eadbc557738b4"
+      },
+      {
+        "bytes": 5631515,
+        "filename": "iot23_manifest.jsonl",
+        "sha256": "caef7fa8ed9a8ce9c7f28720abf88c3aad6a801aa58f1a2c5234c579906298f1"
+      },
+      {
+        "bytes": 18052075,
+        "filename": "ton_iot_manifest.jsonl",
+        "sha256": "348616fd60ab0025e2df6aa3a4f546528cab4b04b0e217c86a668a65a7d67bd8"
+      },
+      {
+        "bytes": 447456,
+        "filename": "urban_iot_manifest.jsonl",
+        "sha256": "3a818734d4194dbec50b263a95abd06c66760b2d9eb6bcb7a7ba0c506c62ee13"
+      }
+    ],
+    "standardized_results": [
+      {
+        "bytes": 11410079,
+        "filename": "bot_iot_standardized.jsonl",
+        "sha256": "c9d036945c33a43825e4586510c470df811174ce76547a6cd69bedd926cbf037"
+      },
+      {
+        "bytes": 63582604,
+        "filename": "edge_iiotset_standardized.jsonl",
+        "sha256": "f307c81e48352a78ccb1862f61ed3a5894a6a84384940066e123993aed31dbf3"
+      },
+      {
+        "bytes": 18515595,
+        "filename": "iot23_standardized.jsonl",
+        "sha256": "837ffaa5ab0985d197ca5a0dd1b1e6135f38c2f41e8ddb134190ad427f95cc02"
+      },
+      {
+        "bytes": 35784707,
+        "filename": "ton_iot_standardized.jsonl",
+        "sha256": "e49d98803309b75d185efe95d92945ac994bd52d3a66f9598ff7d7d5f43793f8"
+      },
+      {
+        "bytes": 2025366,
+        "filename": "urban_iot_standardized.jsonl",
+        "sha256": "f343914fee3119bcc2266d1048e474d5e710616a7575085e2288536f632b7a29"
+      }
+    ]
+  },
+  "llm_policy": "Reutilizacion exclusiva de resultados Mistral ya materializados; el entrenamiento no llama al LLM.",
+  "mapping": {
+    "input_rows": 35637,
+    "mapped_by_dataset": {
+      "bot_iot": {
+        "DDoS_HTTP": 2,
+        "DDoS_TCP": 247,
+        "DDoS_UDP": 251,
+        "DoS": 500,
+        "Fingerprinting": 120,
+        "Port_Scanning": 380
+      },
+      "edge_iiotset": {
+        "Backdoor": 500,
+        "DDoS_HTTP": 500,
+        "DDoS_ICMP": 500,
+        "DDoS_TCP": 500,
+        "DDoS_UDP": 500,
+        "Fingerprinting": 500,
+        "MITM": 400,
+        "Password": 500,
+        "Port_Scanning": 500,
+        "Ransomware": 500,
+        "SQL_injection": 500,
+        "Uploading": 500,
+        "Vulnerability_scanner": 500,
+        "XSS": 500
+      },
+      "iot23": {
+        "Command_and_Control": 537,
+        "DDoS_TCP": 223,
+        "DDoS_UDP": 2,
+        "Port_Scanning": 116
+      },
+      "ton_iot": {
+        "Backdoor": 500,
+        "DDoS_HTTP": 15,
+        "DDoS_TCP": 133,
+        "DDoS_UDP": 52,
+        "DoS": 500,
+        "MITM": 500,
+        "Password": 500,
+        "Port_Scanning": 500,
+        "Ransomware": 500,
+        "SQL_injection": 500,
+        "XSS": 500
+      }
+    },
+    "mapped_by_status": {
+      "exact": {
+        "Backdoor": 1000,
+        "Command_and_Control": 537,
+        "DDoS_HTTP": 502,
+        "DDoS_ICMP": 500,
+        "DDoS_TCP": 747,
+        "DDoS_UDP": 751,
+        "DoS": 1000,
+        "Fingerprinting": 620,
+        "MITM": 900,
+        "Password": 1000,
+        "Port_Scanning": 616,
+        "Ransomware": 1000,
+        "SQL_injection": 500,
+        "Uploading": 500,
+        "Vulnerability_scanner": 500,
+        "XSS": 1000
+      },
+      "forced": {
+        "DDoS_HTTP": 15,
+        "DDoS_TCP": 356,
+        "DDoS_UDP": 54,
+        "Port_Scanning": 880,
+        "SQL_injection": 500
+      }
+    },
+    "mapped_rows": 13478,
+    "reason_counts": {
+      "bot_native_dos_coarsened": 500,
+      "bot_service_scan_forced_to_port_scanning": 380,
+      "bot_target_os_fingerprint": 120,
+      "bot_target_subcategory": 500,
+      "bot_theft_insufficient_support": 79,
+      "edge_native_attack_type": 6900,
+      "iot23_ddos_raw_protocol_tcp": 223,
+      "iot23_ddos_raw_protocol_udp": 2,
+      "iot23_filedownload_insufficient_support": 3,
+      "iot23_horizontal_port_scan": 116,
+      "iot23_native_command_and_control": 537,
+      "ton_ddos_missing_raw_protocol": 300,
+      "ton_ddos_raw_protocol_tcp": 133,
+      "ton_ddos_raw_protocol_udp": 52,
+      "ton_ddos_raw_service_http": 15,
+      "ton_injection_forced_to_sql_injection": 500,
+      "ton_native_dos_coarsened": 500,
+      "ton_native_exact_label": 2500,
+      "ton_scanning_forced_to_port_scanning": 500
+    },
+    "rejected_attack_rows": 382,
+    "status_counts": {
+      "ambiguous": 300,
+      "exact": 11673,
+      "forced": 1805,
+      "non_attack": 1977,
+      "out_of_taxonomy": 82,
+      "task_not_declared": 19800
+    }
+  },
+  "metrics": {
+    "deployment_assessment": {
+      "activation_policy": "El runner solo persiste un candidato. La activacion requiere una decision explicita tras revisar metricas y calidad de los targets forzados.",
+      "automatically_activated": false,
+      "checks": {
+        "exact_16_classes": true,
+        "minimum_class_recall_at_least_0_50": true,
+        "selective_coverage_at_least_0_50": true,
+        "selective_risk_at_most_0_05": false,
+        "task_is_attack_subtype": true,
+        "taxonomy_version_is_multidataset16": true,
+        "test_macro_f1_at_least_0_80": true,
+        "unresolved_acceptance_at_most_0_50": false
+      },
+      "metrics_eligible_for_manual_activation": false
+    },
+    "per_class": [
+      {
+        "f1": 0.9115646258503401,
+        "label": "Backdoor",
+        "precision": 0.9305555555555556,
+        "recall": 0.8933333333333333,
+        "support": 75
+      },
+      {
+        "f1": 1.0,
+        "label": "Command_and_Control",
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 75
+      },
+      {
+        "f1": 0.7891156462585034,
+        "label": "DDoS_HTTP",
+        "precision": 0.8055555555555556,
+        "recall": 0.7733333333333333,
+        "support": 75
+      },
+      {
+        "f1": 1.0,
+        "label": "DDoS_ICMP",
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 75
+      },
+      {
+        "f1": 0.9933774834437086,
+        "label": "DDoS_TCP",
+        "precision": 0.9868421052631579,
+        "recall": 1.0,
+        "support": 75
+      },
+      {
+        "f1": 0.9866666666666667,
+        "label": "DDoS_UDP",
+        "precision": 0.9866666666666667,
+        "recall": 0.9866666666666667,
+        "support": 75
+      },
+      {
+        "f1": 0.9594594594594594,
+        "label": "DoS",
+        "precision": 0.9726027397260274,
+        "recall": 0.9466666666666667,
+        "support": 75
+      },
+      {
+        "f1": 0.9866666666666667,
+        "label": "Fingerprinting",
+        "precision": 0.9866666666666667,
+        "recall": 0.9866666666666667,
+        "support": 75
+      },
+      {
+        "f1": 0.9387755102040817,
+        "label": "MITM",
+        "precision": 0.9583333333333334,
+        "recall": 0.92,
+        "support": 75
+      },
+      {
+        "f1": 0.5874125874125874,
+        "label": "Password",
+        "precision": 0.6176470588235294,
+        "recall": 0.56,
+        "support": 75
+      },
+      {
+        "f1": 0.9798657718120806,
+        "label": "Port_Scanning",
+        "precision": 0.9864864864864865,
+        "recall": 0.9733333333333334,
+        "support": 75
+      },
+      {
+        "f1": 0.8933333333333333,
+        "label": "Ransomware",
+        "precision": 0.8933333333333333,
+        "recall": 0.8933333333333333,
+        "support": 75
+      },
+      {
+        "f1": 0.6748466257668712,
+        "label": "SQL_injection",
+        "precision": 0.625,
+        "recall": 0.7333333333333333,
+        "support": 75
+      },
+      {
+        "f1": 0.8309859154929577,
+        "label": "Uploading",
+        "precision": 0.8805970149253731,
+        "recall": 0.7866666666666666,
+        "support": 75
+      },
+      {
+        "f1": 0.9664429530201343,
+        "label": "Vulnerability_scanner",
+        "precision": 0.972972972972973,
+        "recall": 0.96,
+        "support": 75
+      },
+      {
+        "f1": 0.7682926829268293,
+        "label": "XSS",
+        "precision": 0.7078651685393258,
+        "recall": 0.84,
+        "support": 75
+      }
+    ],
+    "per_origin": {
+      "development_overlap_rows": 0,
+      "extended_unused_holdout": {
+        "by_dataset": {
+          "minimum_test_rows_per_class": 10,
+          "origins": {
+            "bot_iot": {
+              "accuracy": 0.9947368421052631,
+              "available_class_support": {
+                "DDoS_HTTP": 1,
+                "DDoS_TCP": 152,
+                "DDoS_UDP": 118,
+                "DoS": 287,
+                "Fingerprinting": 38,
+                "Port_Scanning": 272
+              },
+              "class_support": {
+                "DDoS_TCP": 38,
+                "DDoS_UDP": 38,
+                "DoS": 38,
+                "Fingerprinting": 38,
+                "Port_Scanning": 38
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 1
+              },
+              "eligible_classes": [
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "Fingerprinting",
+                "Port_Scanning"
+              ],
+              "macro": {
+                "f1": 0.9947359307359308,
+                "precision": 0.9948717948717949,
+                "recall": 0.9947368421052631
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 190,
+              "selective": {
+                "abstained_rows": 3,
+                "accuracy": 1.0,
+                "coverage": 0.9842105263157894,
+                "decided_rows": 187,
+                "macro_f1": 1.0,
+                "risk": 0.0,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9947368421052631
+            },
+            "edge_iiotset": {
+              "accuracy": 0.8904761904761904,
+              "available_class_support": {
+                "Backdoor": 288,
+                "DDoS_HTTP": 88,
+                "DDoS_ICMP": 75,
+                "DDoS_TCP": 307,
+                "DDoS_UDP": 236,
+                "Fingerprinting": 157,
+                "MITM": 211,
+                "Password": 287,
+                "Port_Scanning": 358,
+                "Ransomware": 287,
+                "SQL_injection": 288,
+                "Uploading": 75,
+                "Vulnerability_scanner": 75,
+                "XSS": 288
+              },
+              "class_support": {
+                "Backdoor": 75,
+                "DDoS_HTTP": 75,
+                "DDoS_ICMP": 75,
+                "DDoS_TCP": 75,
+                "DDoS_UDP": 75,
+                "Fingerprinting": 75,
+                "MITM": 75,
+                "Password": 75,
+                "Port_Scanning": 75,
+                "Ransomware": 75,
+                "SQL_injection": 75,
+                "Uploading": 75,
+                "Vulnerability_scanner": 75,
+                "XSS": 75
+              },
+              "classes_below_minimum_support": {},
+              "eligible_classes": [
+                "Backdoor",
+                "DDoS_HTTP",
+                "DDoS_ICMP",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "Fingerprinting",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "Uploading",
+                "Vulnerability_scanner",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.8865053083085087,
+                "precision": 0.8874189420456889,
+                "recall": 0.8904761904761905
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 1050,
+              "selective": {
+                "abstained_rows": 90,
+                "accuracy": 0.9302083333333333,
+                "coverage": 0.9142857142857143,
+                "decided_rows": 960,
+                "macro_f1": 0.9082132321692459,
+                "risk": 0.06979166666666667,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9971428571428571
+            },
+            "iot23": {
+              "accuracy": 0.9919678714859438,
+              "available_class_support": {
+                "Command_and_Control": 112,
+                "DDoS_TCP": 137,
+                "DDoS_UDP": 1,
+                "Port_Scanning": 83
+              },
+              "class_support": {
+                "Command_and_Control": 83,
+                "DDoS_TCP": 83,
+                "Port_Scanning": 83
+              },
+              "classes_below_minimum_support": {
+                "DDoS_UDP": 1
+              },
+              "eligible_classes": [
+                "Command_and_Control",
+                "DDoS_TCP",
+                "Port_Scanning"
+              ],
+              "macro": {
+                "f1": 0.7454726909816729,
+                "precision": 0.7470238095238095,
+                "recall": 0.7439759036144578
+              },
+              "predictions_outside_present_classes_rate": 0.004016064257028112,
+              "rows": 249,
+              "selective": {
+                "abstained_rows": 6,
+                "accuracy": 0.9958847736625515,
+                "coverage": 0.9759036144578314,
+                "decided_rows": 243,
+                "macro_f1": 0.995983789995766,
+                "risk": 0.00411522633744856,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9959839357429718
+            },
+            "ton_iot": {
+              "accuracy": 0.86,
+              "available_class_support": {
+                "Backdoor": 287,
+                "DDoS_HTTP": 3,
+                "DDoS_TCP": 82,
+                "DDoS_UDP": 25,
+                "DoS": 288,
+                "MITM": 264,
+                "Password": 288,
+                "Port_Scanning": 358,
+                "Ransomware": 288,
+                "SQL_injection": 287,
+                "XSS": 287
+              },
+              "class_support": {
+                "Backdoor": 25,
+                "DDoS_TCP": 25,
+                "DDoS_UDP": 25,
+                "DoS": 25,
+                "MITM": 25,
+                "Password": 25,
+                "Port_Scanning": 25,
+                "Ransomware": 25,
+                "SQL_injection": 25,
+                "XSS": 25
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 3
+              },
+              "eligible_classes": [
+                "Backdoor",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.859626047994624,
+                "precision": 0.8627112048371419,
+                "recall": 0.86
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 250,
+              "selective": {
+                "abstained_rows": 39,
+                "accuracy": 0.9146919431279621,
+                "coverage": 0.844,
+                "decided_rows": 211,
+                "macro_f1": 0.9101604545425651,
+                "risk": 0.08530805687203792,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.944
+            }
+          }
+        },
+        "by_detailed_origin": {
+          "minimum_test_rows_per_class": 10,
+          "origins": {
+            "bot_iot": {
+              "accuracy": 0.9947368421052631,
+              "available_class_support": {
+                "DDoS_HTTP": 1,
+                "DDoS_TCP": 152,
+                "DDoS_UDP": 118,
+                "DoS": 287,
+                "Fingerprinting": 38,
+                "Port_Scanning": 272
+              },
+              "class_support": {
+                "DDoS_TCP": 38,
+                "DDoS_UDP": 38,
+                "DoS": 38,
+                "Fingerprinting": 38,
+                "Port_Scanning": 38
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 1
+              },
+              "eligible_classes": [
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "Fingerprinting",
+                "Port_Scanning"
+              ],
+              "macro": {
+                "f1": 0.9947359307359308,
+                "precision": 0.9948717948717949,
+                "recall": 0.9947368421052631
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 190,
+              "selective": {
+                "abstained_rows": 3,
+                "accuracy": 1.0,
+                "coverage": 0.9842105263157894,
+                "decided_rows": 187,
+                "macro_f1": 1.0,
+                "risk": 0.0,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9947368421052631
+            },
+            "edge_iiotset": {
+              "accuracy": 0.8904761904761904,
+              "available_class_support": {
+                "Backdoor": 288,
+                "DDoS_HTTP": 88,
+                "DDoS_ICMP": 75,
+                "DDoS_TCP": 307,
+                "DDoS_UDP": 236,
+                "Fingerprinting": 157,
+                "MITM": 211,
+                "Password": 287,
+                "Port_Scanning": 358,
+                "Ransomware": 287,
+                "SQL_injection": 288,
+                "Uploading": 75,
+                "Vulnerability_scanner": 75,
+                "XSS": 288
+              },
+              "class_support": {
+                "Backdoor": 75,
+                "DDoS_HTTP": 75,
+                "DDoS_ICMP": 75,
+                "DDoS_TCP": 75,
+                "DDoS_UDP": 75,
+                "Fingerprinting": 75,
+                "MITM": 75,
+                "Password": 75,
+                "Port_Scanning": 75,
+                "Ransomware": 75,
+                "SQL_injection": 75,
+                "Uploading": 75,
+                "Vulnerability_scanner": 75,
+                "XSS": 75
+              },
+              "classes_below_minimum_support": {},
+              "eligible_classes": [
+                "Backdoor",
+                "DDoS_HTTP",
+                "DDoS_ICMP",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "Fingerprinting",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "Uploading",
+                "Vulnerability_scanner",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.8865053083085087,
+                "precision": 0.8874189420456889,
+                "recall": 0.8904761904761905
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 1050,
+              "selective": {
+                "abstained_rows": 90,
+                "accuracy": 0.9302083333333333,
+                "coverage": 0.9142857142857143,
+                "decided_rows": 960,
+                "macro_f1": 0.9082132321692459,
+                "risk": 0.06979166666666667,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9971428571428571
+            },
+            "iot23": {
+              "accuracy": 0.9919678714859438,
+              "available_class_support": {
+                "Command_and_Control": 112,
+                "DDoS_TCP": 137,
+                "DDoS_UDP": 1,
+                "Port_Scanning": 83
+              },
+              "class_support": {
+                "Command_and_Control": 83,
+                "DDoS_TCP": 83,
+                "Port_Scanning": 83
+              },
+              "classes_below_minimum_support": {
+                "DDoS_UDP": 1
+              },
+              "eligible_classes": [
+                "Command_and_Control",
+                "DDoS_TCP",
+                "Port_Scanning"
+              ],
+              "macro": {
+                "f1": 0.7454726909816729,
+                "precision": 0.7470238095238095,
+                "recall": 0.7439759036144578
+              },
+              "predictions_outside_present_classes_rate": 0.004016064257028112,
+              "rows": 249,
+              "selective": {
+                "abstained_rows": 6,
+                "accuracy": 0.9958847736625515,
+                "coverage": 0.9759036144578314,
+                "decided_rows": 243,
+                "macro_f1": 0.995983789995766,
+                "risk": 0.00411522633744856,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9959839357429718
+            },
+            "ton_iot_linux": {
+              "accuracy": 0.6145833333333334,
+              "available_class_support": {
+                "DoS": 48,
+                "MITM": 53,
+                "Password": 55,
+                "Port_Scanning": 65,
+                "SQL_injection": 32,
+                "XSS": 92
+              },
+              "class_support": {
+                "DoS": 32,
+                "MITM": 32,
+                "Password": 32,
+                "Port_Scanning": 32,
+                "SQL_injection": 32,
+                "XSS": 32
+              },
+              "classes_below_minimum_support": {},
+              "eligible_classes": [
+                "DoS",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.6069483495989813,
+                "precision": 0.6167564589028919,
+                "recall": 0.6145833333333334
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 192,
+              "selective": {
+                "abstained_rows": 59,
+                "accuracy": 0.6541353383458647,
+                "coverage": 0.6927083333333334,
+                "decided_rows": 133,
+                "macro_f1": 0.6143566428014718,
+                "risk": 0.3458646616541353,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.8958333333333334
+            },
+            "ton_iot_network": {
+              "accuracy": 0.968,
+              "available_class_support": {
+                "Backdoor": 147,
+                "DDoS_HTTP": 3,
+                "DDoS_TCP": 82,
+                "DDoS_UDP": 25,
+                "DoS": 232,
+                "MITM": 205,
+                "Password": 123,
+                "Port_Scanning": 269,
+                "Ransomware": 182,
+                "SQL_injection": 131,
+                "XSS": 159
+              },
+              "class_support": {
+                "Backdoor": 25,
+                "DDoS_TCP": 25,
+                "DDoS_UDP": 25,
+                "DoS": 25,
+                "MITM": 25,
+                "Password": 25,
+                "Port_Scanning": 25,
+                "Ransomware": 25,
+                "SQL_injection": 25,
+                "XSS": 25
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 3
+              },
+              "eligible_classes": [
+                "Backdoor",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.9682638495755047,
+                "precision": 0.9715050594360939,
+                "recall": 0.968
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 250,
+              "selective": {
+                "abstained_rows": 6,
+                "accuracy": 0.9795081967213115,
+                "coverage": 0.976,
+                "decided_rows": 244,
+                "macro_f1": 0.9793417879972501,
+                "risk": 0.020491803278688523,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.976
+            },
+            "ton_iot_telemetry": {
+              "accuracy": 0.45098039215686275,
+              "available_class_support": {
+                "Backdoor": 129,
+                "Password": 87,
+                "Port_Scanning": 17,
+                "Ransomware": 105,
+                "SQL_injection": 112,
+                "XSS": 22
+              },
+              "class_support": {
+                "Backdoor": 17,
+                "Password": 17,
+                "Port_Scanning": 17,
+                "Ransomware": 17,
+                "SQL_injection": 17,
+                "XSS": 17
+              },
+              "classes_below_minimum_support": {},
+              "eligible_classes": [
+                "Backdoor",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.43649481827701764,
+                "precision": 0.5097520233389798,
+                "recall": 0.4509803921568627
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 102,
+              "selective": {
+                "abstained_rows": 38,
+                "accuracy": 0.546875,
+                "coverage": 0.6274509803921569,
+                "decided_rows": 64,
+                "macro_f1": 0.4992076888628612,
+                "risk": 0.453125,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.8137254901960784
+            },
+            "ton_iot_windows": {
+              "accuracy": 0.4318181818181818,
+              "available_class_support": {
+                "Backdoor": 11,
+                "DoS": 8,
+                "MITM": 6,
+                "Password": 23,
+                "Port_Scanning": 7,
+                "Ransomware": 1,
+                "SQL_injection": 12,
+                "XSS": 14
+              },
+              "class_support": {
+                "Backdoor": 11,
+                "Password": 11,
+                "SQL_injection": 11,
+                "XSS": 11
+              },
+              "classes_below_minimum_support": {
+                "DoS": 8,
+                "MITM": 6,
+                "Port_Scanning": 7,
+                "Ransomware": 1
+              },
+              "eligible_classes": [
+                "Backdoor",
+                "Password",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.2582766439909297,
+                "precision": 0.29405762304921973,
+                "recall": 0.24675324675324675
+              },
+              "predictions_outside_present_classes_rate": 0.13636363636363635,
+              "rows": 44,
+              "selective": {
+                "abstained_rows": 19,
+                "accuracy": 0.6,
+                "coverage": 0.5681818181818182,
+                "decided_rows": 25,
+                "macro_f1": 0.5222222222222223,
+                "risk": 0.4,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.8863636363636364
+            }
+          }
+        },
+        "pool_rows": 6678,
+        "protocol": "robust_balanced"
+      },
+      "global_classifier_test": {
+        "by_dataset": {
+          "minimum_test_rows_per_class": 10,
+          "origins": {
+            "bot_iot": {
+              "accuracy": 0.9866666666666667,
+              "available_class_support": {
+                "DDoS_HTTP": 1,
+                "DDoS_TCP": 17,
+                "DDoS_UDP": 23,
+                "DoS": 37,
+                "Fingerprinting": 15,
+                "Port_Scanning": 19
+              },
+              "class_support": {
+                "DDoS_TCP": 15,
+                "DDoS_UDP": 15,
+                "DoS": 15,
+                "Fingerprinting": 15,
+                "Port_Scanning": 15
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 1
+              },
+              "eligible_classes": [
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "Fingerprinting",
+                "Port_Scanning"
+              ],
+              "macro": {
+                "f1": 0.9866518353726363,
+                "precision": 0.9875,
+                "recall": 0.9866666666666667
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 75,
+              "selective": {
+                "abstained_rows": 2,
+                "accuracy": 1.0,
+                "coverage": 0.9733333333333334,
+                "decided_rows": 73,
+                "macro_f1": 1.0,
+                "risk": 0.0,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9866666666666667
+            },
+            "edge_iiotset": {
+              "accuracy": 0.9028571428571428,
+              "available_class_support": {
+                "Backdoor": 38,
+                "DDoS_HTTP": 72,
+                "DDoS_ICMP": 75,
+                "DDoS_TCP": 34,
+                "DDoS_UDP": 47,
+                "Fingerprinting": 60,
+                "MITM": 33,
+                "Password": 37,
+                "Port_Scanning": 25,
+                "Ransomware": 37,
+                "SQL_injection": 38,
+                "Uploading": 75,
+                "Vulnerability_scanner": 75,
+                "XSS": 38
+              },
+              "class_support": {
+                "Backdoor": 25,
+                "DDoS_HTTP": 25,
+                "DDoS_ICMP": 25,
+                "DDoS_TCP": 25,
+                "DDoS_UDP": 25,
+                "Fingerprinting": 25,
+                "MITM": 25,
+                "Password": 25,
+                "Port_Scanning": 25,
+                "Ransomware": 25,
+                "SQL_injection": 25,
+                "Uploading": 25,
+                "Vulnerability_scanner": 25,
+                "XSS": 25
+              },
+              "classes_below_minimum_support": {},
+              "eligible_classes": [
+                "Backdoor",
+                "DDoS_HTTP",
+                "DDoS_ICMP",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "Fingerprinting",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "Uploading",
+                "Vulnerability_scanner",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.9005184631504592,
+                "precision": 0.9023477109676762,
+                "recall": 0.9028571428571428
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 350,
+              "selective": {
+                "abstained_rows": 34,
+                "accuracy": 0.9493670886075949,
+                "coverage": 0.9028571428571428,
+                "decided_rows": 316,
+                "macro_f1": 0.9355729964513694,
+                "risk": 0.05063291139240506,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9971428571428571
+            },
+            "iot23": {
+              "accuracy": 1.0,
+              "available_class_support": {
+                "Command_and_Control": 75,
+                "DDoS_TCP": 15,
+                "Port_Scanning": 6
+              },
+              "class_support": {
+                "Command_and_Control": 15,
+                "DDoS_TCP": 15
+              },
+              "classes_below_minimum_support": {
+                "Port_Scanning": 6
+              },
+              "eligible_classes": [
+                "Command_and_Control",
+                "DDoS_TCP"
+              ],
+              "macro": {
+                "f1": 1.0,
+                "precision": 1.0,
+                "recall": 1.0
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 30,
+              "selective": {
+                "abstained_rows": 0,
+                "accuracy": 1.0,
+                "coverage": 1.0,
+                "decided_rows": 30,
+                "macro_f1": 1.0,
+                "risk": 0.0,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 1.0
+            },
+            "ton_iot": {
+              "accuracy": 0.825,
+              "available_class_support": {
+                "Backdoor": 37,
+                "DDoS_HTTP": 2,
+                "DDoS_TCP": 9,
+                "DDoS_UDP": 5,
+                "DoS": 38,
+                "MITM": 42,
+                "Password": 38,
+                "Port_Scanning": 25,
+                "Ransomware": 38,
+                "SQL_injection": 37,
+                "XSS": 37
+              },
+              "class_support": {
+                "Backdoor": 25,
+                "DoS": 25,
+                "MITM": 25,
+                "Password": 25,
+                "Port_Scanning": 25,
+                "Ransomware": 25,
+                "SQL_injection": 25,
+                "XSS": 25
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 2,
+                "DDoS_TCP": 9,
+                "DDoS_UDP": 5
+              },
+              "eligible_classes": [
+                "Backdoor",
+                "DoS",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.8274286257056014,
+                "precision": 0.83352940070682,
+                "recall": 0.8250000000000001
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 200,
+              "selective": {
+                "abstained_rows": 35,
+                "accuracy": 0.896969696969697,
+                "coverage": 0.825,
+                "decided_rows": 165,
+                "macro_f1": 0.8912854785186679,
+                "risk": 0.10303030303030303,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.935
+            }
+          }
+        },
+        "by_detailed_origin": {
+          "minimum_test_rows_per_class": 10,
+          "origins": {
+            "bot_iot": {
+              "accuracy": 0.9866666666666667,
+              "available_class_support": {
+                "DDoS_HTTP": 1,
+                "DDoS_TCP": 17,
+                "DDoS_UDP": 23,
+                "DoS": 37,
+                "Fingerprinting": 15,
+                "Port_Scanning": 19
+              },
+              "class_support": {
+                "DDoS_TCP": 15,
+                "DDoS_UDP": 15,
+                "DoS": 15,
+                "Fingerprinting": 15,
+                "Port_Scanning": 15
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 1
+              },
+              "eligible_classes": [
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "DoS",
+                "Fingerprinting",
+                "Port_Scanning"
+              ],
+              "macro": {
+                "f1": 0.9866518353726363,
+                "precision": 0.9875,
+                "recall": 0.9866666666666667
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 75,
+              "selective": {
+                "abstained_rows": 2,
+                "accuracy": 1.0,
+                "coverage": 0.9733333333333334,
+                "decided_rows": 73,
+                "macro_f1": 1.0,
+                "risk": 0.0,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9866666666666667
+            },
+            "edge_iiotset": {
+              "accuracy": 0.9028571428571428,
+              "available_class_support": {
+                "Backdoor": 38,
+                "DDoS_HTTP": 72,
+                "DDoS_ICMP": 75,
+                "DDoS_TCP": 34,
+                "DDoS_UDP": 47,
+                "Fingerprinting": 60,
+                "MITM": 33,
+                "Password": 37,
+                "Port_Scanning": 25,
+                "Ransomware": 37,
+                "SQL_injection": 38,
+                "Uploading": 75,
+                "Vulnerability_scanner": 75,
+                "XSS": 38
+              },
+              "class_support": {
+                "Backdoor": 25,
+                "DDoS_HTTP": 25,
+                "DDoS_ICMP": 25,
+                "DDoS_TCP": 25,
+                "DDoS_UDP": 25,
+                "Fingerprinting": 25,
+                "MITM": 25,
+                "Password": 25,
+                "Port_Scanning": 25,
+                "Ransomware": 25,
+                "SQL_injection": 25,
+                "Uploading": 25,
+                "Vulnerability_scanner": 25,
+                "XSS": 25
+              },
+              "classes_below_minimum_support": {},
+              "eligible_classes": [
+                "Backdoor",
+                "DDoS_HTTP",
+                "DDoS_ICMP",
+                "DDoS_TCP",
+                "DDoS_UDP",
+                "Fingerprinting",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "Uploading",
+                "Vulnerability_scanner",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.9005184631504592,
+                "precision": 0.9023477109676762,
+                "recall": 0.9028571428571428
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 350,
+              "selective": {
+                "abstained_rows": 34,
+                "accuracy": 0.9493670886075949,
+                "coverage": 0.9028571428571428,
+                "decided_rows": 316,
+                "macro_f1": 0.9355729964513694,
+                "risk": 0.05063291139240506,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.9971428571428571
+            },
+            "iot23": {
+              "accuracy": 1.0,
+              "available_class_support": {
+                "Command_and_Control": 75,
+                "DDoS_TCP": 15,
+                "Port_Scanning": 6
+              },
+              "class_support": {
+                "Command_and_Control": 15,
+                "DDoS_TCP": 15
+              },
+              "classes_below_minimum_support": {
+                "Port_Scanning": 6
+              },
+              "eligible_classes": [
+                "Command_and_Control",
+                "DDoS_TCP"
+              ],
+              "macro": {
+                "f1": 1.0,
+                "precision": 1.0,
+                "recall": 1.0
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 30,
+              "selective": {
+                "abstained_rows": 0,
+                "accuracy": 1.0,
+                "coverage": 1.0,
+                "decided_rows": 30,
+                "macro_f1": 1.0,
+                "risk": 0.0,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 1.0
+            },
+            "ton_iot_linux": {
+              "available_class_support": {
+                "DoS": 6,
+                "MITM": 8,
+                "Password": 7,
+                "Port_Scanning": 5,
+                "SQL_injection": 4,
+                "XSS": 12
+              },
+              "classes_below_minimum_support": {
+                "DoS": 6,
+                "MITM": 8,
+                "Password": 7,
+                "Port_Scanning": 5,
+                "SQL_injection": 4
+              },
+              "eligible_classes": [
+                "XSS"
+              ],
+              "status": "not_evaluable"
+            },
+            "ton_iot_network": {
+              "accuracy": 0.9609375,
+              "available_class_support": {
+                "Backdoor": 19,
+                "DDoS_HTTP": 2,
+                "DDoS_TCP": 9,
+                "DDoS_UDP": 5,
+                "DoS": 31,
+                "MITM": 33,
+                "Password": 16,
+                "Port_Scanning": 19,
+                "Ransomware": 24,
+                "SQL_injection": 17,
+                "XSS": 20
+              },
+              "class_support": {
+                "Backdoor": 16,
+                "DoS": 16,
+                "MITM": 16,
+                "Password": 16,
+                "Port_Scanning": 16,
+                "Ransomware": 16,
+                "SQL_injection": 16,
+                "XSS": 16
+              },
+              "classes_below_minimum_support": {
+                "DDoS_HTTP": 2,
+                "DDoS_TCP": 9,
+                "DDoS_UDP": 5
+              },
+              "eligible_classes": [
+                "Backdoor",
+                "DoS",
+                "MITM",
+                "Password",
+                "Port_Scanning",
+                "Ransomware",
+                "SQL_injection",
+                "XSS"
+              ],
+              "macro": {
+                "f1": 0.9613525853889944,
+                "precision": 0.9630208333333333,
+                "recall": 0.9609375
+              },
+              "predictions_outside_present_classes_rate": 0.0,
+              "rows": 128,
+              "selective": {
+                "abstained_rows": 5,
+                "accuracy": 0.975609756097561,
+                "coverage": 0.9609375,
+                "decided_rows": 123,
+                "macro_f1": 0.974673579109063,
+                "risk": 0.024390243902439025,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.984375
+            },
+            "ton_iot_telemetry": {
+              "accuracy": 0.4375,
+              "available_class_support": {
+                "Backdoor": 17,
+                "Password": 12,
+                "Port_Scanning": 1,
+                "Ransomware": 14,
+                "SQL_injection": 14,
+                "XSS": 3
+              },
+              "class_support": {
+                "Backdoor": 12,
+                "Password": 12,
+                "Ransomware": 12,
+                "SQL_injection": 12
+              },
+              "classes_below_minimum_support": {
+                "Port_Scanning": 1,
+                "XSS": 3
+              },
+              "eligible_classes": [
+                "Backdoor",
+                "Password",
+                "Ransomware",
+                "SQL_injection"
+              ],
+              "macro": {
+                "f1": 0.3466666666666666,
+                "precision": 0.35470085470085466,
+                "recall": 0.35
+              },
+              "predictions_outside_present_classes_rate": 0.020833333333333332,
+              "rows": 48,
+              "selective": {
+                "abstained_rows": 21,
+                "accuracy": 0.4074074074074074,
+                "coverage": 0.5625,
+                "decided_rows": 27,
+                "macro_f1": 0.40476190476190477,
+                "risk": 0.5925925925925926,
+                "threshold": 0.65
+              },
+              "status": "evaluated",
+              "top3_accuracy": 0.8125
+            },
+            "ton_iot_windows": {
+              "available_class_support": {
+                "Backdoor": 1,
+                "DoS": 1,
+                "MITM": 1,
+                "Password": 3,
+                "SQL_injection": 2,
+                "XSS": 2
+              },
+              "classes_below_minimum_support": {
+                "Backdoor": 1,
+                "DoS": 1,
+                "MITM": 1,
+                "Password": 3,
+                "SQL_injection": 2,
+                "XSS": 2
+              },
+              "eligible_classes": [],
+              "status": "not_evaluable"
+            }
+          }
+        },
+        "pool_rows": 1200,
+        "protocol": "robust_balanced"
+      },
+      "policy": "La primera vista usa el test del nuevo clasificador. La segunda anade todas las filas mapeadas que quedaron fuera del corpus global y que por tanto no participaron en entrenamiento ni validacion. En cada origen, la vista principal exige al menos 10 filas por clase y balancea las clases elegibles."
+    },
+    "selective": {
+      "test": {
+        "abstained_rows": 112,
+        "accuracy": 0.9329044117647058,
+        "coverage": 0.9066666666666666,
+        "decided_rows": 1088,
+        "macro_f1": 0.9236604757855131,
+        "risk": 0.06709558823529412,
+        "threshold": 0.65
+      },
+      "threshold": 0.65,
+      "validation": {
+        "abstained_rows": 108,
+        "accuracy": 0.9230769230769231,
+        "coverage": 0.91,
+        "decided_rows": 1092,
+        "macro_f1": 0.9139173112095943,
+        "risk": 0.07692307692307693,
+        "threshold": 0.65
+      }
+    },
+    "test": {
+      "accuracy": 0.8908333333333334,
+      "class_support": {
+        "Backdoor": 75,
+        "Command_and_Control": 75,
+        "DDoS_HTTP": 75,
+        "DDoS_ICMP": 75,
+        "DDoS_TCP": 75,
+        "DDoS_UDP": 75,
+        "DoS": 75,
+        "Fingerprinting": 75,
+        "MITM": 75,
+        "Password": 75,
+        "Port_Scanning": 75,
+        "Ransomware": 75,
+        "SQL_injection": 75,
+        "Uploading": 75,
+        "Vulnerability_scanner": 75,
+        "XSS": 75
+      },
+      "macro": {
+        "f1": 0.8916753705196387,
+        "precision": 0.894445291115499,
+        "recall": 0.8908333333333334
+      },
+      "rows": 1200,
+      "selective": {
+        "abstained_rows": 112,
+        "accuracy": 0.9329044117647058,
+        "coverage": 0.9066666666666666,
+        "decided_rows": 1088,
+        "macro_f1": 0.9236604757855131,
+        "risk": 0.06709558823529412,
+        "threshold": 0.65
+      },
+      "top3_accuracy": 0.98,
+      "weighted": {
+        "f1": 0.8916753705196386,
+        "precision": 0.894445291115499,
+        "recall": 0.8908333333333334
+      }
+    },
+    "validation": {
+      "accuracy": 0.88,
+      "class_support": {
+        "Backdoor": 75,
+        "Command_and_Control": 75,
+        "DDoS_HTTP": 75,
+        "DDoS_ICMP": 75,
+        "DDoS_TCP": 75,
+        "DDoS_UDP": 75,
+        "DoS": 75,
+        "Fingerprinting": 75,
+        "MITM": 75,
+        "Password": 75,
+        "Port_Scanning": 75,
+        "Ransomware": 75,
+        "SQL_injection": 75,
+        "Uploading": 75,
+        "Vulnerability_scanner": 75,
+        "XSS": 75
+      },
+      "macro": {
+        "f1": 0.8791640549131661,
+        "precision": 0.8791009099999165,
+        "recall": 0.8799999999999999
+      },
+      "rows": 1200,
+      "selective": {
+        "abstained_rows": 108,
+        "accuracy": 0.9230769230769231,
+        "coverage": 0.91,
+        "decided_rows": 1092,
+        "macro_f1": 0.9139173112095943,
+        "risk": 0.07692307692307693,
+        "threshold": 0.65
+      },
+      "top3_accuracy": 0.975,
+      "weighted": {
+        "f1": 0.879164054913166,
+        "precision": 0.8791009099999165,
+        "recall": 0.88
+      }
+    }
+  },
+  "model": {
+    "algorithm": "xgboost",
+    "classes": [
+      "Backdoor",
+      "Command_and_Control",
+      "DDoS_HTTP",
+      "DDoS_ICMP",
+      "DDoS_TCP",
+      "DDoS_UDP",
+      "DoS",
+      "Fingerprinting",
+      "MITM",
+      "Password",
+      "Port_Scanning",
+      "Ransomware",
+      "SQL_injection",
+      "Uploading",
+      "Vulnerability_scanner",
+      "XSS"
+    ],
+    "feature_count": 2742,
+    "operational_contract": {
+      "confidence_threshold": 0.65,
+      "model_name": "xgboost_attack_subtype_multidataset16_balanced500_20260906",
+      "public_task": "attack_type",
+      "task": "attack_subtype",
+      "taxonomy_version": "multidataset_attack_type_v1_2026-09-06"
+    },
+    "parameters": {
+      "colsample_bytree": 0.8,
+      "eval_metric": "mlogloss",
+      "learning_rate": 0.1,
+      "max_depth": 6,
+      "n_estimators": 300,
+      "n_jobs": 1,
+      "num_class": 16,
+      "objective": "multi:softprob",
+      "random_state": 42,
+      "subsample": 0.8,
+      "tree_method": "hist",
+      "verbosity": 0
+    }
+  },
+  "network_calls_during_training": 0,
+  "schema_version": "classifier-evaluation-reference-v1",
+  "source_report": {
+    "filename": "classifier_multidataset16_report.json",
+    "schema_version": "classifier_multidataset16_balanced_resplit_evaluation_v2"
+  },
+  "splits": {
+    "assignment": {
+      "class_totals_exact": true,
+      "method": "hierarchical_integer_apportionment_by_class_dataset_origin_detailed_origin_and_mapping_status",
+      "origin_counts_use_floor_or_ceil_of_ideal": true,
+      "tie_breaker": "sha256(seed, scope, origin, split)"
+    },
+    "final_cross_split_overlap_count": 0,
+    "quotas_per_class": {
+      "test": 75,
+      "train": 350,
+      "val": 75
+    },
+    "ratio_units": {
+      "test": 3,
+      "train": 14,
+      "val": 3
+    },
+    "source_split_used_for_assignment": false,
+    "source_split_used_for_corpus_selection": false,
+    "supports": {
+      "test": {
+        "by_dataset": {
+          "bot_iot": 112,
+          "edge_iiotset": 684,
+          "iot23": 96,
+          "ton_iot": 308
+        },
+        "by_origin": {
+          "bot_iot": 112,
+          "edge_iiotset": 684,
+          "iot23": 96,
+          "ton_iot_linux": 42,
+          "ton_iot_network": 195,
+          "ton_iot_telemetry": 61,
+          "ton_iot_windows": 10
+        },
+        "class_counts": {
+          "Backdoor": 75,
+          "Command_and_Control": 75,
+          "DDoS_HTTP": 75,
+          "DDoS_ICMP": 75,
+          "DDoS_TCP": 75,
+          "DDoS_UDP": 75,
+          "DoS": 75,
+          "Fingerprinting": 75,
+          "MITM": 75,
+          "Password": 75,
+          "Port_Scanning": 75,
+          "Ransomware": 75,
+          "SQL_injection": 75,
+          "Uploading": 75,
+          "Vulnerability_scanner": 75,
+          "XSS": 75
+        },
+        "rows": 1200
+      },
+      "train": {
+        "by_dataset": {
+          "bot_iot": 520,
+          "edge_iiotset": 3196,
+          "iot23": 449,
+          "ton_iot": 1435
+        },
+        "by_origin": {
+          "bot_iot": 520,
+          "edge_iiotset": 3196,
+          "iot23": 449,
+          "ton_iot_linux": 200,
+          "ton_iot_network": 905,
+          "ton_iot_telemetry": 283,
+          "ton_iot_windows": 47
+        },
+        "class_counts": {
+          "Backdoor": 350,
+          "Command_and_Control": 350,
+          "DDoS_HTTP": 350,
+          "DDoS_ICMP": 350,
+          "DDoS_TCP": 350,
+          "DDoS_UDP": 350,
+          "DoS": 350,
+          "Fingerprinting": 350,
+          "MITM": 350,
+          "Password": 350,
+          "Port_Scanning": 350,
+          "Ransomware": 350,
+          "SQL_injection": 350,
+          "Uploading": 350,
+          "Vulnerability_scanner": 350,
+          "XSS": 350
+        },
+        "rows": 5600
+      },
+      "val": {
+        "by_dataset": {
+          "bot_iot": 112,
+          "edge_iiotset": 684,
+          "iot23": 96,
+          "ton_iot": 308
+        },
+        "by_origin": {
+          "bot_iot": 112,
+          "edge_iiotset": 684,
+          "iot23": 96,
+          "ton_iot_linux": 42,
+          "ton_iot_network": 194,
+          "ton_iot_telemetry": 60,
+          "ton_iot_windows": 12
+        },
+        "class_counts": {
+          "Backdoor": 75,
+          "Command_and_Control": 75,
+          "DDoS_HTTP": 75,
+          "DDoS_ICMP": 75,
+          "DDoS_TCP": 75,
+          "DDoS_UDP": 75,
+          "DoS": 75,
+          "Fingerprinting": 75,
+          "MITM": 75,
+          "Password": 75,
+          "Port_Scanning": 75,
+          "Ransomware": 75,
+          "SQL_injection": 75,
+          "Uploading": 75,
+          "Vulnerability_scanner": 75,
+          "XSS": 75
+        },
+        "rows": 1200
+      }
+    }
+  },
+  "taxonomy": {
+    "attack_classes": [
+      "Backdoor",
+      "DDoS_HTTP",
+      "DDoS_ICMP",
+      "DDoS_TCP",
+      "DDoS_UDP",
+      "Fingerprinting",
+      "MITM",
+      "Password",
+      "Port_Scanning",
+      "Ransomware",
+      "SQL_injection",
+      "Uploading",
+      "Vulnerability_scanner",
+      "XSS",
+      "DoS",
+      "Command_and_Control"
+    ],
+    "class_count": 16,
+    "coarsening_policy": {
+      "bot_dos": "DoS",
+      "iot23_c_and_c_variants": "Command_and_Control",
+      "ton_dos": "DoS"
+    },
+    "excluded_labels": {
+      "bot_iot_theft": "insufficient_distinct_support",
+      "iot23_filedownload": "insufficient_distinct_support"
+    },
+    "forced_mapping_policy": {
+      "bot_service_scan": {
+        "quality": "scenario_level_forced",
+        "target": "Port_Scanning"
+      },
+      "generic_ddos": {
+        "llm_inference": false,
+        "missing_protocol": "ambiguous_excluded_from_subtype_training",
+        "port_inference": false,
+        "precedence": [
+          "service_http_to_DDoS_HTTP",
+          "protocol_icmp_to_DDoS_ICMP",
+          "protocol_udp_to_DDoS_UDP",
+          "protocol_tcp_to_DDoS_TCP"
+        ],
+        "selector_source": "raw_manifest_row_only"
+      },
+      "ton_injection": {
+        "quality": "coarse_forced",
+        "target": "SQL_injection"
+      },
+      "ton_scanning": {
+        "quality": "scenario_level_forced",
+        "target": "Port_Scanning"
+      }
+    },
+    "mapping_statuses_used_for_training": [
+      "exact",
+      "forced"
+    ],
+    "normal_policy": "binary_detector_only",
+    "reference_taxonomy_version": "jorge_edge_attack_type_v1_2026-09-06",
+    "runtime_taxonomy_sha256": "060a45a18e9a99e302467a12a358fe1f346091707a75375e2082a98e3506fae2",
+    "training_taxonomy_sha256": "d016e777a545c78361adb1c05352a70f36e0022c5f85e5aaf4f8e379655bd6ed",
+    "version": "multidataset_attack_type_v1_2026-09-06"
+  }
+}

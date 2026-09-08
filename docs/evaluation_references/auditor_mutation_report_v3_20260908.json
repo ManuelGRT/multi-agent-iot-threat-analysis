@@ -1,0 +1,90 @@
+{
+  "schema_version": "auditor-mutation-evaluation-v1",
+  "generated_at": "2026-09-08",
+  "implementation": {
+    "auditor": "src/agents/final/auditor.py",
+    "auditor_sha256": "c7aaeadc008bfa93ca5707a1112acb581daab14385449dcffffb23d501cb7cb0",
+    "catalog_contract": "src/mcp/threat_catalog.py",
+    "catalog_contract_sha256": "ed7670f6bc2fc311783a69883d8ed3ad84adb1fcabdcaa73633cedcf4c20325e",
+    "catalog_sha256": "b282a389111bd5fc8d54170f2b045ad33a5cd79ec000f1a22efa26b0276a21ae"
+  },
+  "protocol": {
+    "method": "deterministic_case_mutation_testing",
+    "split_policy": "not_applicable_case_contract_evaluation",
+    "catalog_version": "3.0",
+    "taxonomy_version": "multidataset_attack_type_v1_2026-09-06",
+    "classification_threshold": 0.65,
+    "valid_controls": 3
+  },
+  "mutations": [
+    {
+      "id": "classification_low_confidence_unreviewed",
+      "expected_check": "umbral_confianza_clasificacion_derivada"
+    },
+    {
+      "id": "classification_threshold_tampered",
+      "expected_check": "consistencia_umbral_clasificacion_operativo"
+    },
+    {
+      "id": "catalog_version_obsolete",
+      "expected_check": "consistencia_mitigacion_catalogo_tipado"
+    },
+    {
+      "id": "catalog_taxonomy_obsolete",
+      "expected_check": "consistencia_mitigacion_catalogo_tipado"
+    },
+    {
+      "id": "catalog_mitigation_invented",
+      "expected_check": "consistencia_contenido_catalogo_tipado"
+    },
+    {
+      "id": "catalog_reference_invented",
+      "expected_check": "consistencia_contenido_catalogo_tipado"
+    },
+    {
+      "id": "benign_with_attack_type",
+      "expected_check": "consistencia_benigno_sin_tipo_ataque"
+    },
+    {
+      "id": "malicious_without_classification",
+      "expected_check": "consistencia_malicioso_con_tipo_ataque"
+    },
+    {
+      "id": "detection_label_probability_mismatch",
+      "expected_check": "consistencia_etiqueta_vs_probabilidad"
+    },
+    {
+      "id": "gray_zone_without_abstention",
+      "expected_check": "umbral_zona_gris_abstiene"
+    },
+    {
+      "id": "trace_empty",
+      "expected_check": "traza_no_vacia"
+    },
+    {
+      "id": "trace_unfinished",
+      "expected_check": "traza_entradas_cerradas"
+    },
+    {
+      "id": "trace_agent_order_invalid",
+      "expected_check": "traza_orden_de_agentes"
+    },
+    {
+      "id": "trace_error_unreported",
+      "expected_check": "traza_errores_derivados"
+    },
+    {
+      "id": "judge_status_incompatible",
+      "expected_check": "consistencia_estado_vs_juez"
+    },
+    {
+      "id": "canonical_target_leakage",
+      "expected_check": "leakage_evento_canonico"
+    }
+  ],
+  "expected": {
+    "mutations": 16,
+    "detected": 16,
+    "false_rejects": 0
+  }
+}

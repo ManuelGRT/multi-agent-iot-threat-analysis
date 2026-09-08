@@ -1,10 +1,9 @@
 # src/agents/final/final_judge.py
-"""Juez final por caso: reglas de consistencia sobre el estado completo.
+"""Juez operacional: aplica umbrales y reglas al estado completo del caso.
 
-Extiende los umbrales del juez original (mapping_confidence, abstencion del
-detector, confianza de clasificacion, revision pedida por el mitigador) con
-chequeos propios del flujo final: errores de pipeline y deteccion ausente.
-La auditoria E2E completa llega en la Fase 5 (auditor).
+Comprueba la confianza de estandarizacion y clasificacion, la abstencion del
+detector, las peticiones del mitigador, los errores del flujo y la presencia
+de las salidas obligatorias. El auditor posterior es un agente independiente.
 """
 from __future__ import annotations
 
@@ -17,6 +16,10 @@ from src.contracts.attack_taxonomy import (
 )
 from src.agents.final.base import FinalAgent
 from src.contracts.agents import JudgeOutput
+from src.mcp.threat_catalog import (
+    THREAT_INTEL_CATALOG_VERSION,
+    catalog_output_issues,
+)
 from src.orchestration.state import OrchestratorState
 
 REVIEW_MAPPING_CONFIDENCE = 0.5
@@ -45,19 +48,32 @@ class FinalJudge(FinalAgent):
         )
         attack_classes = MULTIDATASET_ATTACK_CLASSES
         classification_confidence = 0.0
+        if classification and "decision_threshold" not in classification:
+            issues.append("classification_threshold_missing")
+        raw_classification_threshold = classification.get(
+            "decision_threshold", REVIEW_CLASSIFICATION_CONFIDENCE
+        )
         try:
-            classification_threshold = float(
-                classification.get(
-                    "decision_threshold", REVIEW_CLASSIFICATION_CONFIDENCE
-                )
-            )
+            received_classification_threshold = float(raw_classification_threshold)
         except (TypeError, ValueError):
-            classification_threshold = REVIEW_CLASSIFICATION_CONFIDENCE
             issues.append("classification_threshold_invalid")
         else:
-            if not 0.0 <= classification_threshold <= 1.0:
-                classification_threshold = REVIEW_CLASSIFICATION_CONFIDENCE
+            if (
+                not math.isfinite(received_classification_threshold)
+                or not 0.0 <= received_classification_threshold <= 1.0
+            ):
                 issues.append("classification_threshold_invalid")
+            elif (
+                abs(
+                    received_classification_threshold
+                    - REVIEW_CLASSIFICATION_CONFIDENCE
+                )
+                > 1e-9
+            ):
+                issues.append("classification_threshold_mismatch")
+        # El umbral es parte del contrato desplegado, no un parametro que una
+        # salida persistida pueda rebajar para evitar la revision humana.
+        classification_threshold = REVIEW_CLASSIFICATION_CONFIDENCE
         if classification and model_task != "attack_type":
             issues.append("classification_model_task_invalid")
         if classification:
@@ -185,8 +201,21 @@ class FinalJudge(FinalAgent):
                 issues.append("mitigation_catalog_taxonomy_version_mismatch")
             if explanation.get("catalog_scope") != "attack_type":
                 issues.append("mitigation_catalog_scope_invalid")
-            if not explanation.get("catalog_version"):
-                issues.append("mitigation_catalog_version_missing")
+            if (
+                explanation.get("catalog_version")
+                != THREAT_INTEL_CATALOG_VERSION
+            ):
+                issues.append("mitigation_catalog_version_mismatch")
+            catalog_issues = catalog_output_issues(
+                explanation,
+                attack_type=str(attack_type),
+                schema_profile=canonical.get("schema_profile"),
+            )
+            if catalog_issues:
+                issues.extend(
+                    f"mitigation_catalog_content_{issue}"
+                    for issue in catalog_issues
+                )
         if explanation.get("requires_human_review"):
             issues.append("mitigator_requested_human_review")
 

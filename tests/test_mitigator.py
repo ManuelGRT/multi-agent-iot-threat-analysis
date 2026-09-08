@@ -1,5 +1,5 @@
 # tests/test_mitigator.py
-"""Tests del agente de mitigacion Fase 4: catalogo + LLM anclado.
+"""Tests del agente mitigador: catalogo y LLM anclado.
 
 Criterios de aceptacion del plan:
 (a) modo determinista devuelve mitigaciones y referencias correctas por tipo;
@@ -7,11 +7,12 @@ Criterios de aceptacion del plan:
     marcarlas ``llm_suggested``;
 (c) benign -> mitigacion no aplicable, sin consultar el catalogo.
 
-Ademas: cobertura del mapeo CAPEC del TFM de Jorge (su unica documentacion de
-mitigacion) — este catalogo debe ser superset de su Tabla 3.4.
+Ademas, comprueba que la estructura y la version del catalogo operativo sean
+validas antes de exponerlo al mitigador.
 """
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -31,6 +32,11 @@ from src.contracts.attack_taxonomy import (
 )
 from src.contracts.case import CaseResult
 from src.mcp.client import MCPToolClient
+from src.mcp.threat_catalog import (
+    THREAT_INTEL_CATALOG_VERSION,
+    catalog,
+    validate_catalog,
+)
 from tests.test_final_agents import CANONICAL_EVENT, StubClient
 
 client = MCPToolClient(mode="inprocess")
@@ -881,21 +887,60 @@ def test_anchor_duplicate_base_id_marked_suggested():
 
 
 # ---------------------------------------------------------------------------
-# cobertura del TFM de Jorge (su documentacion de mitigacion: MITRE CAPEC)
+# contrato estructural del catalogo operativo
 # ---------------------------------------------------------------------------
 
-def test_catalog_covers_all_jorge_capec_mappings():
-    """El catalogo debe ser superset de la Tabla 3.4 del TFM de Jorge."""
-    coverage = client.call("threat_intel", "get_jorge_capec_coverage")
-    assert coverage["ok"]
-    assert coverage["total"] == 14
-    assert coverage["covered"] == 14, [
-        row for row in coverage["mappings"] if not row["covered"]
-    ]
-    # y ademas anadimos lo que Jorge no tenia: tecnicas ATT&CK y mitigaciones M-*
-    for row in coverage["mappings"]:
-        assert row["extra_attack_techniques"], row
-        assert row["extra_attack_mitigations"], row
+def test_catalog_v3_passes_the_reusable_structural_validator():
+    validate_catalog(copy.deepcopy(CATALOG))
+    assert CATALOG["version"] == THREAT_INTEL_CATALOG_VERSION
+    assert "jorge_tfm_capec_table" not in CATALOG
+
+
+def test_catalog_validator_rejects_an_obsolete_catalog_version():
+    invalid = copy.deepcopy(CATALOG)
+    invalid["version"] = "2.0"
+
+    with pytest.raises(ValueError, match="Version del catalogo incompatible"):
+        validate_catalog(invalid)
+
+
+def test_catalog_validator_rejects_historical_or_unknown_top_level_blocks():
+    invalid = copy.deepcopy(CATALOG)
+    invalid["jorge_tfm_capec_table"] = {"mappings": []}
+
+    with pytest.raises(ValueError, match="Campos de primer nivel"):
+        validate_catalog(invalid)
+
+
+def test_catalog_cache_cannot_be_mutated_by_a_consumer():
+    first = catalog()
+    first["attack_types"]["DDoS_TCP"]["mitigations"]["containment"][0] = (
+        "accion alterada"
+    )
+
+    second = catalog()
+
+    assert (
+        second["attack_types"]["DDoS_TCP"]["mitigations"]["containment"][0]
+        != "accion alterada"
+    )
+
+
+def test_catalog_validator_checks_urls_without_a_domain_allowlist():
+    group = "attack_techniques"
+    reference_id = next(iter(CATALOG["reference_catalog"][group]))
+    legitimate = copy.deepcopy(CATALOG)
+    legitimate["reference_catalog"][group][reference_id]["url"] = (
+        "https://example.org/authoritative-reference"
+    )
+    validate_catalog(legitimate)
+
+    invalid = copy.deepcopy(CATALOG)
+    invalid["reference_catalog"][group][reference_id]["url"] = (
+        "javascript:alert(1)"
+    )
+    with pytest.raises(ValueError, match="Referencia invalida"):
+        validate_catalog(invalid)
 
 
 def test_edge_attack_types_require_the_exact_contractual_spelling():

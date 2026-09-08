@@ -344,7 +344,15 @@ const AUDIT_CHECK_INFO = {
   },
   "consistencia_mitigacion_catalogo_tipado": {
     label: "Catálogo específico válido",
-    description: "Comprueba que las medidas procedan del catálogo versionado del tipo predicho.",
+    description: "Comprueba que se use el catálogo v3 y la taxonomía vigente para el tipo predicho.",
+  },
+  "consistencia_contenido_catalogo_tipado": {
+    label: "Contenido respaldado por el catálogo",
+    description: "Comprueba que medidas, fases y referencias catalogadas coincidan con la entrada v3 del tipo predicho.",
+  },
+  "consistencia_umbral_clasificacion_operativo": {
+    label: "Umbral operativo correcto",
+    description: "Comprueba que la decisión del clasificador aplique el umbral operativo fijo de 0,65.",
   },
   "consistencia_veredicto_juez_tipo_ataque": {
     label: "Veredicto conserva el tipo",
@@ -589,6 +597,12 @@ function formatAuditDetail(check) {
       return `Taxonomía del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Taxonomía del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
     case "consistencia_mitigacion_catalogo_tipado":
       return `Ámbito del catálogo: ${auditField(raw, "scope") || "no disponible"} · Versión: ${auditField(raw, "version") || "no disponible"} · Taxonomía: ${auditField(raw, "taxonomia_catalogo") || "no disponible"}`;
+    case "consistencia_contenido_catalogo_tipado":
+      return check.passed
+        ? "Medidas, fases y referencias coinciden con la entrada del catálogo"
+        : `Incidencias del contenido: ${auditField(raw, "issues") || raw || "no disponibles"}`;
+    case "consistencia_umbral_clasificacion_operativo":
+      return `Umbral recibido: ${auditPercent(auditField(raw, "recibido"))} · Umbral esperado: ${auditPercent(auditField(raw, "esperado"))}`;
     case "consistencia_veredicto_juez_tipo_ataque":
       return `Veredicto del juez: ${auditField(raw, "juez") || "no disponible"} · Resultado del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
     case "consistencia_abstencion_flaggeada":

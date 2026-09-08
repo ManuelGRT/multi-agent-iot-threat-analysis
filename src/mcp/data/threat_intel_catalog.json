@@ -378,26 +378,6 @@
       "note": "CAPEC-542 se usa como referencia generica de malware; T1071 constituye el anclaje especifico del canal C2."
     }
   },
-  "jorge_tfm_capec_table": {
-    "description": "Mapeo manual ataque->CAPEC del TFM previo de Jorge (TFM_Jorge_Juan_Tejero-Threat_IoT.pdf, Tabla 3.4; version articulo arXiv:2507.02390, Tabla 3). Era su UNICA documentacion de mitigacion: las contramedidas genericas de CAPEC se inyectaban en el prompt del LLM sin anclaje auditable. Este catalogo cubre todos sus patrones CAPEC y anade tecnicas ATT&CK, mitigaciones ATT&CK M-* y priorizacion por fases que aquel no usaba.",
-    "source": "TFM_Jorge_Juan_Tejero-Threat_IoT.pdf (Tabla 3.4, p. 20) / arXiv:2507.02390 (Tabla 3, p. 7)",
-    "mappings": [
-      {"attack_type": "DDoS_UDP", "capec_id": "CAPEC-486", "capec_name": "UDP Flood"},
-      {"attack_type": "DDoS_ICMP", "capec_id": "CAPEC-487", "capec_name": "ICMP Flood"},
-      {"attack_type": "DDoS_TCP", "capec_id": "CAPEC-482", "capec_name": "TCP Flood"},
-      {"attack_type": "DDoS_HTTP", "capec_id": "CAPEC-488", "capec_name": "HTTP Flood"},
-      {"attack_type": "SQL_injection", "capec_id": "CAPEC-66", "capec_name": "SQL Injection"},
-      {"attack_type": "XSS", "capec_id": "CAPEC-63", "capec_name": "Cross-Site Scripting (XSS)"},
-      {"attack_type": "Uploading", "capec_id": "CAPEC-242", "capec_name": "Code Injection"},
-      {"attack_type": "Password", "capec_id": "CAPEC-49", "capec_name": "Password Brute Forcing"},
-      {"attack_type": "Vulnerability_scanner", "capec_id": "CAPEC-310", "capec_name": "Scanning for Vulnerable Software"},
-      {"attack_type": "Port_Scanning", "capec_id": "CAPEC-300", "capec_name": "Port Scanning"},
-      {"attack_type": "Fingerprinting", "capec_id": "CAPEC-224", "capec_name": "Fingerprinting"},
-      {"attack_type": "Backdoor", "capec_id": "CAPEC-523", "capec_name": "Malicious Software Implanted"},
-      {"attack_type": "Ransomware", "capec_id": "CAPEC-542", "capec_name": "Targeted Malware"},
-      {"attack_type": "MITM", "capec_id": "CAPEC-94", "capec_name": "Adversary in the Middle (AiTM)"}
-    ]
-  },
   "schema_profile_actions": {
     "network_flow": ["capturar ventana de flujo para evidencia", "revisar politica de red del segmento"],
     "network_packet": ["capturar muestra de paquetes", "inspeccionar anomalias de protocolo"],

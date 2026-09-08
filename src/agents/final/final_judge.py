@@ -209,7 +209,6 @@ class FinalJudge(FinalAgent):
             catalog_issues = catalog_output_issues(
                 explanation,
                 attack_type=str(attack_type),
-                schema_profile=canonical.get("schema_profile"),
             )
             if catalog_issues:
                 issues.extend(

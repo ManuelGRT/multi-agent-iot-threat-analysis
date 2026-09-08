@@ -1,11 +1,11 @@
 {
   "schema_version": "threat-intel-catalog-evaluation-v1",
-  "generated_at": "2026-09-07",
+  "generated_at": "2026-09-08",
   "artifact": {
     "filename": "threat_intel_catalog.json",
-    "bytes": 19446,
-    "sha256": "b282a389111bd5fc8d54170f2b045ad33a5cd79ec000f1a22efa26b0276a21ae",
-    "version": "3.0"
+    "bytes": 18826,
+    "sha256": "daef99f01b62b6e9e72ac9f8343273c854a8c5d135f8a98ac64c3ae0c275879c",
+    "version": "4.0"
   },
   "taxonomy": {
     "version": "multidataset_attack_type_v1_2026-09-06",

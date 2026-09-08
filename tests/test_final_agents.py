@@ -793,7 +793,7 @@ def test_mitigator_uses_typed_catalog_contract(attack_type, expected_reference):
     assert "attack_subtype" not in output
     assert output["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
     assert output["catalog_scope"] == "attack_type"
-    assert output["catalog_version"] == "3.0"
+    assert output["catalog_version"] == "4.0"
     assert output["catalog_taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
     assert set(output["catalog_compatible_taxonomy_versions"]) == {
         JORGE_TAXONOMY_VERSION,
@@ -886,7 +886,7 @@ def test_mitigator_tool_error_falls_back_to_review():
 # ---------------------------------------------------------------------------
 
 def catalog_explanation_payload(attack_type="DDoS_TCP"):
-    expected = expected_catalog_contract(attack_type, "network_flow")
+    expected = expected_catalog_contract(attack_type)
     mitigation_items = [
         {
             "text": item["text"],

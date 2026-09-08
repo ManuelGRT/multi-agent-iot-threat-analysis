@@ -22,7 +22,7 @@ from src.contracts.attack_taxonomy import (
 )
 
 
-THREAT_INTEL_CATALOG_VERSION = "3.0"
+THREAT_INTEL_CATALOG_VERSION = "4.0"
 CATALOG_PATH = Path(__file__).resolve().parent / "data" / "threat_intel_catalog.json"
 
 REFERENCE_ID_FIELDS = {
@@ -38,7 +38,6 @@ CATALOG_TOP_LEVEL_FIELDS = {
     "attack_taxonomy",
     "reference_catalog",
     "attack_types",
-    "schema_profile_actions",
 }
 
 
@@ -54,7 +53,7 @@ def _valid_reference_url(value: Any) -> bool:
 
 
 def validate_catalog(value: dict[str, Any]) -> None:
-    """Falla cerrado cuando el fichero no satisface el contrato de catalogo v3."""
+    """Falla cerrado cuando el fichero no satisface el contrato de catalogo v4."""
 
     if not isinstance(value, dict):
         raise ValueError("El catalogo debe ser un objeto JSON")
@@ -198,20 +197,6 @@ def validate_catalog(value: dict[str, Any]) -> None:
                 f"missing={sorted(used_ids - registered_ids)}"
             )
 
-    profile_actions = value.get("schema_profile_actions")
-    if not isinstance(profile_actions, dict) or "unknown" not in profile_actions:
-        raise ValueError("schema_profile_actions requiere el perfil unknown")
-    for profile, actions in profile_actions.items():
-        if (
-            not _nonempty_text(profile)
-            or not isinstance(actions, list)
-            or not actions
-            or any(not _nonempty_text(action) for action in actions)
-            or len(set(actions)) != len(actions)
-        ):
-            raise ValueError(f"Acciones de perfil invalidas para {profile!r}")
-
-
 @lru_cache(maxsize=1)
 def _load_catalog() -> dict[str, Any]:
     with CATALOG_PATH.open("r", encoding="utf-8") as stream:
@@ -279,23 +264,17 @@ def resolve_catalog_entry(attack_type: str | None) -> dict[str, Any]:
 
 def expected_catalog_contract(
     attack_type: str,
-    schema_profile: str | None,
 ) -> dict[str, Any]:
     """Salida catalogada exacta que debe conservar un caso malicioso."""
 
     value = catalog()
     resolved = resolve_catalog_entry(attack_type)
     entry = resolved["entry"]
-    profile = str(schema_profile or "unknown").strip().lower()
-    profile_actions = value["schema_profile_actions"].get(
-        profile, value["schema_profile_actions"]["unknown"]
-    )
     items = [
         {"text": text, "phase": phase}
         for phase in MITIGATION_PHASES
         for text in entry["mitigations"][phase]
     ]
-    items.extend({"text": text, "phase": "profile"} for text in profile_actions)
 
     references: list[dict[str, Any]] = []
     for group in ("attack_techniques", "capec_patterns", "attack_mitigation_refs"):
@@ -346,13 +325,12 @@ def catalog_output_issues(
     explanation: Any,
     *,
     attack_type: str,
-    schema_profile: str | None,
 ) -> list[str]:
-    """Contrasta metadatos, acciones y referencias con la entrada v3 real."""
+    """Contrasta metadatos, acciones y referencias con la entrada v4 real."""
 
     payload = _as_mapping(explanation)
     try:
-        expected = expected_catalog_contract(attack_type, schema_profile)
+        expected = expected_catalog_contract(attack_type)
     except (OSError, ValueError, json.JSONDecodeError):
         return ["catalog_unavailable_or_invalid"]
 
@@ -393,10 +371,7 @@ def catalog_output_issues(
         if source in {"catalog", "llm"}:
             text = item.get("text")
             phase = item.get("phase")
-            if not _nonempty_text(text) or phase not in {
-                *MITIGATION_PHASES,
-                "profile",
-            }:
+            if not _nonempty_text(text) or phase not in set(MITIGATION_PHASES):
                 issues.append("anchored_mitigation_item_invalid")
                 continue
             anchored_items[(text, phase)] += 1
@@ -410,10 +385,7 @@ def catalog_output_issues(
             if bool(item.get("context_trusted", False)):
                 issues.append("mitigation_context_marked_trusted")
         elif source == "llm_suggested":
-            if not _nonempty_text(item.get("text")):
-                issues.append("llm_suggested_text_invalid")
-            if item.get("phase") is not None:
-                issues.append("llm_suggested_phase_invalid")
+            issues.append("llm_suggested_not_allowed")
         else:
             issues.append("mitigation_item_source_invalid")
     if anchored_items != expected_items:
@@ -461,6 +433,8 @@ def catalog_output_issues(
     ) or any(
         item.get("source") == "llm_suggested" for item in valid_references
     )
+    if has_suggested or bool(payload.get("has_llm_suggested", False)):
+        issues.append("llm_suggested_not_allowed")
     if bool(payload.get("has_llm_suggested", False)) != has_suggested:
         issues.append("has_llm_suggested_mismatch")
     if payload.get("source") not in {"catalog", "hybrid"}:

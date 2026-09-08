@@ -2,7 +2,7 @@
 
 La comprobacion no reentrena modelos ni necesita los datasets originales. Usa
 fichas portables versionadas para verificar el detector, el clasificador de 16
-tipos y sus splits; valida el catalogo operativo v3; y ejecuta la bateria de
+tipos y sus splits; valida el catalogo operativo v4; y ejecuta la bateria de
 mutaciones del auditor sobre casos sinteticos con el contrato actual.
 """
 from __future__ import annotations
@@ -51,8 +51,8 @@ CLASSIFIER_REFERENCE = (
     REFERENCE_ROOT
     / "xgboost_attack_type_multidataset16_balanced500_20260907.json"
 )
-CATALOG_REFERENCE = REFERENCE_ROOT / "threat_intel_catalog_v3_20260907.json"
-AUDITOR_REFERENCE = REFERENCE_ROOT / "auditor_mutation_report_v3_20260908.json"
+CATALOG_REFERENCE = REFERENCE_ROOT / "threat_intel_catalog_v4_20260908.json"
+AUDITOR_REFERENCE = REFERENCE_ROOT / "auditor_mutation_report_v4_20260908.json"
 
 DETECTOR_RELEASE_HASHES = {
     "artifact": "f2d7d3dbe9c90fbd7f3d1f134d91e77f855dde134119eced812646e285524393",
@@ -564,7 +564,7 @@ def audit_classifier() -> dict[str, Any]:
 
 
 def audit_catalog() -> dict[str, Any]:
-    """Valida el fichero v3 y su cobertura exacta de los 16 tipos."""
+    """Valida el fichero v4 y su cobertura exacta de los 16 tipos."""
 
     issues: list[str] = []
     try:
@@ -740,9 +740,7 @@ def _canonical_event() -> dict[str, Any]:
 def _valid_attack_case() -> CaseResult:
     from src.mcp.threat_intel_server import suggest_mitigations
 
-    catalog_result = suggest_mitigations(
-        "DDoS_TCP", schema_profile="network_flow"
-    )
+    catalog_result = suggest_mitigations("DDoS_TCP")
     if catalog_result.get("ok") is not True:
         raise RuntimeError(str(catalog_result.get("error")))
     base_items = build_base_items(catalog_result)
@@ -942,7 +940,7 @@ def audit_auditor() -> dict[str, Any]:
     expected_protocol = {
         "method": "deterministic_case_mutation_testing",
         "split_policy": "not_applicable_case_contract_evaluation",
-        "catalog_version": "3.0",
+        "catalog_version": "4.0",
         "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
         "classification_threshold": 0.65,
         "valid_controls": 3,

@@ -89,8 +89,8 @@ Qué señalar:
   inferior a `0.65` también deriva el caso.
 - El mitigador consulta directamente por `attack_type` la entrada específica
   del catálogo, muestra primero la contextualización de Mistral y mantiene
-  visibles sus recomendaciones y referencias. Los elementos `llm_suggested`
-  aparecen marcados como no respaldados.
+  visibles sus recomendaciones y referencias. Las aportaciones de Mistral sin
+  una base catalogada válida se descartan y no llegan al caso.
 - El juez comprueba que el tipo predicho sea el mismo utilizado por el
   mitigador. El caso persistido queda indexado por ese tipo y el auditor vuelve
   a comprobar su continuidad en el resultado cerrado.

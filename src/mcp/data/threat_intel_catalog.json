@@ -1,7 +1,7 @@
 {
-  "version": "3.0",
-  "generated_at": "2026-09-07",
-  "description": "Catalogo determinista de threat intel para el agente de mitigacion. La consulta operativa se realiza exclusivamente por una de las 16 entradas de tipo de ataque de la taxonomia multidataset. Las referencias se resuelven por identificador contra un registro global, sin derivar ni consultar familias amplias. El LLM contextualiza las acciones seleccionadas, pero no puede presentar como auditada ninguna aportacion ajena al catalogo.",
+  "version": "4.0",
+  "generated_at": "2026-09-08",
+  "description": "Catalogo determinista de threat intel para el agente de mitigacion. La consulta operativa se realiza exclusivamente por una de las 16 entradas de tipo de ataque de la taxonomia multidataset. Las referencias ATT&CK y CAPEC se resuelven por identificador contra un registro global, sin derivar familias amplias ni incorporar recomendaciones por perfil de esquema. Mistral contextualiza las acciones seleccionadas, pero no puede anadir mitigaciones o referencias ajenas al catalogo.",
   "attack_taxonomy": {
     "version": "multidataset_attack_type_v1_2026-09-06",
     "compatible_versions": [
@@ -377,14 +377,5 @@
       },
       "note": "CAPEC-542 se usa como referencia generica de malware; T1071 constituye el anclaje especifico del canal C2."
     }
-  },
-  "schema_profile_actions": {
-    "network_flow": ["capturar ventana de flujo para evidencia", "revisar politica de red del segmento"],
-    "network_packet": ["capturar muestra de paquetes", "inspeccionar anomalias de protocolo"],
-    "host_metrics": ["recolectar artefactos del endpoint", "verificar integridad de procesos"],
-    "iot_telemetry": ["validar baseline del sensor", "comprobar estado e integridad del dispositivo"],
-    "alert_text": ["correlacionar contexto de la alerta", "verificar el disparo de la regla"],
-    "pcap_ref": ["preservar el pcap como evidencia", "reproducir la muestra en sandbox"],
-    "unknown": ["capturar contexto adicional"]
   }
 }

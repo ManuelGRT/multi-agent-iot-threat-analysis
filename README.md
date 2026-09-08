@@ -24,7 +24,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 | **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Una caché SQLite por hash exacto reutiliza únicamente éxitos previos de Mistral para contenido duplicado y reconstruye la identidad y procedencia del caso actual. En un *cache miss*, Mistral selecciona las columnas y genera el evento canónico | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase balanceado: identifica directamente uno de los 16 tipos de ataque | Tipo, confianza y top-3 de tipos; si la confianza es < 0,65, el caso va a revisión |
-| **Mitigador** | Consulta por `attack_type` la entrada específica del **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarla con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; todo añadido sin respaldo queda marcado `llm_suggested` |
+| **Mitigador** | Consulta por `attack_type` la entrada específica del **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarla con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; cualquier mitigación o referencia adicional se descarta |
 | **Juez** | Aplica reglas deterministas sobre el caso completo y comprueba que clasificación y mitigación conserven el mismo tipo | Aprobar o derivar a revisión humana |
 | **Auditor** | Revisa a posteriori el caso cerrado, incluida la coherencia del tipo entre clasificador, catálogo, mitigador, juez y persistencia | Aprobar, revisar o rechazar |
 
@@ -59,14 +59,13 @@ Ideas clave del diseño:
   persistir el resultado. El modo `inprocess` conserva el mismo contrato, pero
   queda reservado para la demostración rápida y las pruebas que no evalúan el
   transporte.
-- **El LLM del mitigador está anclado**: puede redactar y contextualizar, pero
-  no puede presentar referencias inventadas como conocimiento auditado; lo no
-  respaldado por el catálogo siempre conserva la marca `llm_suggested`. Para la
-  decisión operacional se examinan las cinco primeras recomendaciones del LLM:
-  si las cinco están vinculadas a bases distintas del catálogo, una sugerencia
-  posterior o una petición genérica del LLM no fuerza por sí sola la revisión.
-  Una recomendación no anclada dentro de esas cinco, una referencia adicional
-  desconocida o un identificador inventado en el resumen sí la mantienen.
+- **El LLM del mitigador está anclado**: puede redactar la explicación y
+  contextualizar exclusivamente las bases numeradas del catálogo. No puede añadir
+  mitigaciones ni referencias: cualquier elemento sin una base válida se descarta.
+  Para la decisión operacional se comprueba si las cinco primeras bases quedaron
+  contextualizadas y vinculadas con entradas distintas del catálogo.
+  Los descartes quedan registrados como evidencia; un identificador inventado
+  dentro del resumen hace que este se elimine y mantiene la revisión humana.
 
 ## Resultados principales
 
@@ -143,8 +142,8 @@ auditor en un panel independiente: informa `approve`, `review` o `reject` y
 desglosa sus comprobaciones sin modificar la decisión del juez ni añadir una
 entrada a la traza operacional. En la tarjeta del mitigador se presenta primero
 la contextualización de Mistral; si no existe, se muestra el texto del catálogo.
-También se conserva debajo la base catalogada y se muestran todas las
-recomendaciones, incluidas las `llm_suggested`. La entrada cruda debe llegar
+También se conserva debajo la base catalogada y se muestran exclusivamente las
+recomendaciones procedentes de esa entrada. La entrada cruda debe llegar
 limpia. El estandarizador busca primero un éxito Mistral con el mismo hash
 exacto en la caché SQLite; en
 un *miss* necesitas `MISTRAL_API_KEY` y se llama a Mistral en vivo. Si el
@@ -207,7 +206,7 @@ python scripts\run_system_audit.py
 Esta utilidad es portable: comprueba los SHA-256 y contratos de los dos modelos
 empaquetados, distingue la taxonomía registrada durante el entrenamiento de la
 taxonomía operativa actual, verifica la coherencia de sus splits y métricas
-congeladas, la integridad del catálogo v3 y la batería reproducible de
+congeladas, la integridad del catálogo v4 y la batería reproducible de
 mutaciones del auditor. Funciona en un clon limpio y no necesita los datasets
 completos. Los datos originales
 solo son necesarios para reentrenar o recalcular las predicciones fila a fila.

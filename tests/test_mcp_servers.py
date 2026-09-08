@@ -119,7 +119,7 @@ def test_threat_intel_lists_exactly_the_16_operational_attack_types():
     assert result["ok"] is True
     assert tuple(result["attack_types"]) == MULTIDATASET_ATTACK_CLASSES
     assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
-    assert result["version"] == "3.0"
+    assert result["version"] == "4.0"
     assert "families" not in result
     assert "families_by_attack_type" not in result
 
@@ -146,7 +146,6 @@ def test_threat_intel_resolves_specific_non_crossed_catalog_for_all_16_types(
         "threat_intel",
         "suggest_mitigations",
         attack_type=attack_type,
-        schema_profile="network_flow",
     )
 
     for response in (attack, capec, result):
@@ -183,7 +182,8 @@ def test_threat_intel_resolves_specific_non_crossed_catalog_for_all_16_types(
     assert result["mitigations_ordered"] == ordered
     assert len(ordered) >= 5
     assert len(ordered) == len(set(ordered))
-    assert result["profile_actions"]
+    assert "profile_actions" not in result
+    assert "schema_profile" not in result
 
 
 def test_threat_intel_reports_complete_multidataset_catalog_coverage():
@@ -255,6 +255,18 @@ def test_family_argument_is_rejected_instead_of_affecting_type_selection():
     assert "unexpected keyword argument 'family'" in result["error"]
 
 
+def test_schema_profile_argument_is_rejected_for_mitigation_lookup():
+    result = client.call(
+        "threat_intel",
+        "suggest_mitigations",
+        attack_type="DDoS_TCP",
+        schema_profile="network_flow",
+    )
+
+    assert result["ok"] is False
+    assert "unexpected keyword argument 'schema_profile'" in result["error"]
+
+
 def test_unknown_explicit_attack_type_fails_without_fallback():
     result = client.call(
         "threat_intel",
@@ -277,16 +289,16 @@ def test_threat_intel_mappings_ddos_tcp_by_exact_type():
     assert any(p["id"] == "CAPEC-482" for p in capec["capec_patterns"])
 
 
-def test_threat_intel_suggest_mitigations_with_profile():
+def test_threat_intel_suggest_mitigations_only_uses_attack_type_catalog():
     result = client.call(
         "threat_intel",
         "suggest_mitigations",
         attack_type="Password",
-        schema_profile="network_flow",
     )
     assert result["attack_type"] == "Password"
     assert result["mitigations_ordered"], "debe haber mitigaciones"
-    assert result["profile_actions"], "debe haber acciones por perfil"
+    assert "profile_actions" not in result
+    assert "schema_profile" not in result
     assert result["references"]["attack_techniques"], "debe haber referencias ATT&CK"
 
 

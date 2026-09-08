@@ -77,18 +77,13 @@ def map_attack_type_to_capec(attack_type: str) -> dict[str, Any]:
 @tool_result
 def suggest_mitigations(
     attack_type: str,
-    schema_profile: str | None = None,
 ) -> dict[str, Any]:
-    """Mitigaciones del tipo predicho y acciones complementarias por perfil."""
+    """Mitigaciones y referencias del tipo de ataque predicho."""
 
     catalog = _catalog()
     resolved = _resolve_catalog_entry(attack_type)
     entry = resolved["entry"]
     mitigations = entry.get("mitigations", {})
-    profile_key = (schema_profile or "unknown").strip().lower()
-    profile_actions = catalog["schema_profile_actions"].get(
-        profile_key, catalog["schema_profile_actions"]["unknown"]
-    )
     ordered: list[str] = [
         *mitigations.get("containment", []),
         *mitigations.get("eradication", []),
@@ -103,10 +98,8 @@ def suggest_mitigations(
         "compatible_taxonomy_versions": list(
             catalog["attack_taxonomy"]["compatible_versions"]
         ),
-        "schema_profile": profile_key,
         "mitigations_by_phase": mitigations,
         "mitigations_ordered": ordered,
-        "profile_actions": profile_actions,
         "references": {
             "attack_techniques": entry.get("attack_techniques", []),
             "capec_patterns": entry.get("capec_patterns", []),

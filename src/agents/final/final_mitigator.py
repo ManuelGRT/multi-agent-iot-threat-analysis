@@ -2,15 +2,15 @@
 """Agente mitigador: catalogo verificable y contextualizacion LLM anclada.
 
 Flujo en dos pasos:
-1. Determinista: ``threat_intel.suggest_mitigations(attack_type, ...)``
+1. Determinista: ``threat_intel.suggest_mitigations(attack_type)``
    devuelve la base auditable especifica para una de las 16 clases operativas
    (mitigaciones por fase + referencias MITRE ATT&CK/CAPEC). El tipo es
    obligatorio y nunca se sustituye por una familia amplia. Este paso siempre
    se ejecuta para los eventos maliciosos; en los benignos no hay mitigacion.
 2. LLM (opcional, ``llm=LLMMitigationAgent``): contextualiza las mitigaciones
    del catalogo al evento concreto (puertos, protocolo, telemetria). Regla
-   dura: no puede inventar tecnicas ni referencias fuera del catalogo; toda
-   aportacion sin respaldo queda marcada ``llm_suggested``. Si el LLM falla,
+   dura: no puede inventar tecnicas, referencias ni mitigaciones fuera del
+   catalogo; toda aportacion sin respaldo se descarta. Si el LLM falla,
    fallback total al modo catalogo (la demo nunca se rompe).
 
 ``source`` de la salida: ``catalog`` (solo paso 1) o ``hybrid`` (1+2).
@@ -187,7 +187,6 @@ class FinalMitigator(FinalAgent):
         result = self.call_tool(
             "threat_intel",
             "suggest_mitigations",
-            schema_profile=schema_profile,
             attack_type=attack_type,
         )
         if not result.get("ok", False):
@@ -363,17 +362,12 @@ class FinalMitigator(FinalAgent):
                     anchored[key] = catalog_payload[key]
                 final_payload = anchored
                 model_name = self.llm.model_name
-                suggested = sum(
-                    1
-                    for item in anchored["mitigation_items"]
-                    if item["source"] == "llm_suggested"
-                )
                 llm_entry.finish(
                     status="ok",
                     confidence=anchored["confidence"],
                     summary=(
                         f"contextualizadas={sum(1 for i in anchored['mitigation_items'] if i['source'] == 'llm')} "
-                        f"llm_suggested={suggested} "
+                        "adicionales_permitidas=no "
                         f"primeras_5_ancladas={anchored['first_five_catalog_anchored']} "
                         f"modelo={model_name}"
                     ),
@@ -404,8 +398,7 @@ class FinalMitigator(FinalAgent):
         if final_payload.get("llm_context_summary"):
             explanation_output["llm_context_summary"] = final_payload["llm_context_summary"]
             explanation_output["llm_context_trusted"] = False
-        if final_payload.get("has_llm_suggested"):
-            explanation_output["has_llm_suggested"] = True
+        explanation_output["has_llm_suggested"] = False
         explanation_output["first_five_catalog_anchored"] = bool(
             final_payload.get("first_five_catalog_anchored", False)
         )

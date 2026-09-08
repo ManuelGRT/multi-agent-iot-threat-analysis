@@ -3,8 +3,7 @@
 
 Criterios de aceptacion del plan:
 (a) modo determinista devuelve mitigaciones y referencias correctas por tipo;
-(b) modo LLM (mockeado) nunca produce referencias fuera del catalogo sin
-    marcarlas ``llm_suggested``;
+(b) modo LLM (mockeado) descarta mitigaciones y referencias fuera del catalogo;
 (c) benign -> mitigacion no aplicable, sin consultar el catalogo.
 
 Ademas, comprueba que la estructura y la version del catalogo operativo sean
@@ -141,9 +140,10 @@ def llm_with_stub(payload: dict | None = None, error: Exception | None = None) -
 # (a) modo determinista: mitigaciones y referencias correctas por tipo
 # ---------------------------------------------------------------------------
 
-def test_catalog_v3_has_no_broad_family_fallback_data():
-    assert CATALOG["version"] == "3.0"
+def test_catalog_v4_has_no_broad_family_or_schema_profile_data():
+    assert CATALOG["version"] == "4.0"
     assert "families" not in CATALOG
+    assert "schema_profile_actions" not in CATALOG
     assert set(CATALOG["attack_types"]) == set(MULTIDATASET_ATTACK_CLASSES)
     assert all("family" not in entry for entry in CATALOG["attack_types"].values())
 
@@ -262,7 +262,7 @@ def test_benign_never_calls_llm_even_if_configured():
 
 
 # ---------------------------------------------------------------------------
-# (b) modo LLM anclado: nada fuera del catalogo sin marca llm_suggested
+# (b) modo LLM anclado: nada fuera del catalogo llega a la salida
 # ---------------------------------------------------------------------------
 
 def hybrid_payload_ok() -> dict:
@@ -369,7 +369,7 @@ def test_all_16_attack_types_are_contextualized_and_approved_when_anchored(
     assert judged["needs_human_review"] is False
 
 
-def test_first_five_catalog_anchored_allow_judge_approval_with_later_suggestion():
+def test_first_five_catalog_anchored_discard_later_suggestion_and_allow_approval():
     payload = five_catalog_anchored_payload(requires_human_review=True)
     payload["mitigations"].append(
         {"base_id": None, "text": "sexta recomendacion adicional sin respaldo"}
@@ -380,12 +380,11 @@ def test_first_five_catalog_anchored_allow_judge_approval_with_later_suggestion(
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is True
-    assert output["has_llm_suggested"] is True
+    assert output["has_llm_suggested"] is False
     assert output["requires_human_review"] is False
     assert output["review_reasons"] == []
-    assert any(
+    assert not any(
         item["text"] == "sexta recomendacion adicional sin respaldo"
-        and item["source"] == "llm_suggested"
         for item in output["mitigation_items"]
     )
 
@@ -400,11 +399,11 @@ def test_first_five_catalog_anchored_allow_judge_approval_with_later_suggestion(
     case = CaseResult.from_orchestrator_state({**judge_state, **judged})
     assert case.status == "completed"
     assert case.explanation.first_five_catalog_anchored is True
-    assert case.explanation.has_llm_suggested is True
+    assert case.explanation.has_llm_suggested is False
     assert case.explanation.review_reasons == []
 
 
-def test_unanchored_fifth_recommendation_still_requires_human_review():
+def test_unanchored_fifth_recommendation_is_discarded_and_catalog_base_recovers():
     payload = five_catalog_anchored_payload()
     payload["mitigations"][4] = {
         "base_id": None,
@@ -416,8 +415,13 @@ def test_unanchored_fifth_recommendation_still_requires_human_review():
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is False
-    assert output["requires_human_review"] is True
-    assert "unanchored_mitigation_in_review_window" in output["review_reasons"]
+    assert output["requires_human_review"] is False
+    assert output["review_reasons"] == []
+    assert not any(
+        item["text"] == "quinta recomendacion sin respaldo"
+        for item in output["mitigation_items"]
+    )
+    assert any("mitigacion_llm_descartada" in note for note in output["evidence"])
 
 
 def test_fewer_than_five_do_not_override_explicit_llm_review_request():
@@ -433,7 +437,7 @@ def test_fewer_than_five_do_not_override_explicit_llm_review_request():
     assert "llm_requested_human_review" in output["review_reasons"]
 
 
-def test_first_five_anchored_do_not_hide_untrusted_additional_reference():
+def test_first_five_anchored_discard_untrusted_additional_reference():
     payload = five_catalog_anchored_payload(requires_human_review=True)
     payload["additional_references"] = [
         {"attack_id": "T9999", "name": "Referencia no catalogada"}
@@ -444,9 +448,10 @@ def test_first_five_anchored_do_not_hide_untrusted_additional_reference():
     output = update["explanation_output"]
 
     assert output["first_five_catalog_anchored"] is True
-    assert output["requires_human_review"] is True
-    assert "llm_requested_human_review" not in output["review_reasons"]
-    assert "llm_reference_not_in_catalog" in output["review_reasons"]
+    assert output["requires_human_review"] is False
+    assert output["review_reasons"] == []
+    assert not any(ref.get("attack_id") == "T9999" for ref in output["references"])
+    assert "referencias_llm_adicionales_descartadas" in output["evidence"]
 
 
 def test_llm_cannot_smuggle_references_outside_catalog():
@@ -461,9 +466,9 @@ def test_llm_cannot_smuggle_references_outside_catalog():
     references = update["explanation_output"]["references"]
 
     by_id = {(ref.get("attack_id") or ref.get("capec_id")): ref for ref in references}
-    # inventadas: presentes SOLO como llm_suggested
-    assert by_id["T9999"]["source"] == "llm_suggested"
-    assert by_id["CAPEC-99999"]["source"] == "llm_suggested"
+    # Las referencias inventadas no llegan a la salida.
+    assert "T9999" not in by_id
+    assert "CAPEC-99999" not in by_id
     # la duplicada del catalogo NO se degrada: se conserva la del catalogo
     assert by_id["T1498"]["source"] == "catalog"
     assert sum(1 for ref in references if (ref.get("attack_id") == "T1498")) == 1
@@ -477,7 +482,7 @@ def test_llm_cannot_smuggle_references_outside_catalog():
     assert catalog_ids <= present
 
 
-def test_llm_free_mitigations_are_marked_llm_suggested():
+def test_llm_free_mitigations_are_discarded():
     payload = hybrid_payload_ok()
     payload["mitigations"].append({"base_id": None, "text": "instalar honeypot en la DMZ"})
     payload["mitigations"].append({"text": "regla extra sin base_id"})
@@ -486,12 +491,13 @@ def test_llm_free_mitigations_are_marked_llm_suggested():
     update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     items = update["explanation_output"]["mitigation_items"]
 
-    suggested = {item["text"] for item in items if item["source"] == "llm_suggested"}
-    assert "instalar honeypot en la DMZ" in suggested
-    assert "regla extra sin base_id" in suggested
-    assert "base_id inexistente" in suggested
-    assert update["explanation_output"]["has_llm_suggested"] is True
-    assert update["explanation_output"]["requires_human_review"] is True
+    texts = {item["text"] for item in items}
+    assert "instalar honeypot en la DMZ" not in texts
+    assert "regla extra sin base_id" not in texts
+    assert "base_id inexistente" not in texts
+    assert update["explanation_output"]["has_llm_suggested"] is False
+    assert update["explanation_output"]["requires_human_review"] is False
+    assert all(item["source"] in {"catalog", "llm"} for item in items)
 
 
 def test_llm_failure_falls_back_to_catalog_completely():
@@ -558,12 +564,12 @@ def test_llm_risk_summary_with_invented_ids_is_discarded():
     assert "T1337" not in output["risk_summary"]
     assert "CAPEC-777" not in output["risk_summary"]
     assert output.get("llm_context_summary") is None
-    assert output["has_llm_suggested"] is True
+    assert output["has_llm_suggested"] is False
     assert output["requires_human_review"] is True
     assert any("risk_summary_llm_descartado" in note for note in output["evidence"])
 
 
-def test_llm_item_text_with_invented_id_is_downgraded():
+def test_llm_item_text_with_invented_id_is_discarded():
     payload = hybrid_payload_ok()
     payload["mitigations"] = [
         {"base_id": 1, "text": "bloquear conforme a la tecnica T4242 el origen"},
@@ -572,8 +578,7 @@ def test_llm_item_text_with_invented_id_is_downgraded():
     update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
     items = update["explanation_output"]["mitigation_items"]
 
-    downgraded = next(item for item in items if "T4242" in item["text"])
-    assert downgraded["source"] == "llm_suggested"
+    assert not any("T4242" in (item.get("context") or item["text"]) for item in items)
     # la mitigacion base del catalogo reentra literal como catalog
     ddos_containment = CATALOG["attack_types"]["DDoS_TCP"]["mitigations"][
         "containment"
@@ -581,7 +586,7 @@ def test_llm_item_text_with_invented_id_is_downgraded():
     assert any(
         item["text"] == ddos_containment and item["source"] == "catalog" for item in items
     )
-    assert any("mitigacion_llm_degradada" in n for n in update["explanation_output"]["evidence"])
+    assert any("mitigacion_llm_descartada" in n for n in update["explanation_output"]["evidence"])
 
 
 def test_llm_item_citing_catalog_ids_is_not_downgraded():
@@ -608,16 +613,14 @@ def test_reference_from_sibling_attack_type_is_not_treated_as_catalog_anchored()
     ).run(malicious_attack_type_state("DDoS_HTTP"))
     output = update["explanation_output"]
 
-    crossed = next(
-        item
+    assert not any(
+        "CAPEC-486" in (item.get("context") or item["text"])
         for item in output["mitigation_items"]
-        if "CAPEC-486" in item["text"]
     )
-    assert crossed["source"] == "llm_suggested"
     assert "CAPEC-486" not in flattened_reference_ids(output)
     assert output["first_five_catalog_anchored"] is False
-    assert output["requires_human_review"] is True
-    assert "unanchored_mitigation_in_review_window" in output["review_reasons"]
+    assert output["requires_human_review"] is False
+    assert output["review_reasons"] == []
 
 
 @pytest.mark.parametrize("foreign_reference", ["capec-486", "t9999", "m9999"])
@@ -631,18 +634,16 @@ def test_lowercase_reference_cannot_bypass_catalog_anchor(foreign_reference):
         llm=llm_with_stub(payload=payload),
     ).run(malicious_attack_type_state("DDoS_HTTP"))["explanation_output"]
 
-    crossed = next(
-        item
+    assert not any(
+        foreign_reference in (item.get("context") or item["text"])
         for item in output["mitigation_items"]
-        if foreign_reference in item["text"]
     )
-    assert crossed["source"] == "llm_suggested"
     assert output["first_five_catalog_anchored"] is False
-    assert output["requires_human_review"] is True
-    assert "unanchored_mitigation_in_review_window" in output["review_reasons"]
+    assert output["requires_human_review"] is False
+    assert output["review_reasons"] == []
 
 
-def test_llm_raw_typed_references_do_not_crash_case_result():
+def test_llm_raw_typed_references_are_discarded_without_breaking_case_result():
     payload = hybrid_payload_ok()
     payload["additional_references"] = [
         {"attack_id": 12345, "name": ["lista", "rara"], "url": 99},
@@ -656,9 +657,8 @@ def test_llm_raw_typed_references_do_not_crash_case_result():
     state["explanation_output"] = update["explanation_output"]
     state["judge_output"] = {"action": "approve", "approved": True}
     case = CaseResult.from_orchestrator_state(state)  # no debe lanzar
-    coerced = next(ref for ref in case.explanation.references if ref.attack_id == "12345")
-    assert coerced.source == "llm_suggested"
-    assert coerced.name is None  # la lista cruda no se cuela como nombre
+    assert not any(ref.attack_id == "12345" for ref in case.explanation.references)
+    assert all(ref.source == "catalog" for ref in case.explanation.references)
 
 
 def test_llm_nan_confidence_falls_back_without_breaking_case():
@@ -676,11 +676,9 @@ def test_llm_bool_base_id_is_not_anchored():
     payload["mitigations"] = [{"base_id": True, "text": "colada booleana"}]
     llm = llm_with_stub(payload=payload)
     update = FinalMitigator(client=client, llm=llm).run(malicious_state("DDoS_TCP"))
-    item = next(
-        i for i in update["explanation_output"]["mitigation_items"]
-        if i["text"] == "colada booleana"
-    )
-    assert item["source"] == "llm_suggested"
+    output = update["explanation_output"]
+    assert not any(i["text"] == "colada booleana" for i in output["mitigation_items"])
+    assert any("base_id_no_valido" in note for note in output["evidence"])
 
 
 def test_llm_cannot_replace_catalog_action_with_contradictory_text():
@@ -776,7 +774,7 @@ def test_llm_failure_case_level_stays_completed():
     assert len(fallback_steps) == 1
 
 
-def test_llm_suggested_marks_survive_case_result_boundary():
+def test_non_catalog_llm_content_does_not_cross_case_result_boundary():
     from src.orchestration.mcp_graph import MultiAgentComponents, run_case
     from src.agents.final import (
         FinalClassifier,
@@ -808,12 +806,11 @@ def test_llm_suggested_marks_survive_case_result_boundary():
     payload_json = case.model_dump(mode="json")  # frontera API
 
     refs = payload_json["explanation"]["references"]
-    assert any(r["attack_id"] == "T9999" and r["source"] == "llm_suggested" for r in refs)
+    assert not any(r["attack_id"] == "T9999" for r in refs)
+    assert all(r["source"] == "catalog" for r in refs)
     items = payload_json["explanation"]["mitigation_items"]
-    assert any(
-        i["text"] == "honeypot sin respaldo" and i["source"] == "llm_suggested"
-        for i in items
-    )
+    assert not any(i["text"] == "honeypot sin respaldo" for i in items)
+    assert all(i["source"] in {"catalog", "llm"} for i in items)
 
 
 # ---------------------------------------------------------------------------
@@ -863,7 +860,7 @@ def test_anchor_survives_malformed_payloads(payload):
     assert anchored["source"] == "hybrid"
 
 
-def test_anchor_duplicate_base_id_marked_suggested():
+def test_anchor_duplicate_base_id_is_discarded():
     base_items, refs, known = anchor_fixture()
     payload = {
         "risk_summary": "r",
@@ -883,14 +880,15 @@ def test_anchor_duplicate_base_id_marked_suggested():
         for item in anchored["mitigation_items"]
         if (item.get("context") or item["text"]).startswith(("primera", "segunda"))
     ]
-    assert sources == ["llm", "llm_suggested"]
+    assert sources == ["llm"]
+    assert any("base_id_no_valido_o_repetido" in note for note in anchored["evidence"])
 
 
 # ---------------------------------------------------------------------------
 # contrato estructural del catalogo operativo
 # ---------------------------------------------------------------------------
 
-def test_catalog_v3_passes_the_reusable_structural_validator():
+def test_catalog_v4_passes_the_reusable_structural_validator():
     validate_catalog(copy.deepcopy(CATALOG))
     assert CATALOG["version"] == THREAT_INTEL_CATALOG_VERSION
     assert "jorge_tfm_capec_table" not in CATALOG

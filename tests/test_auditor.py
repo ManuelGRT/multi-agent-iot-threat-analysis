@@ -101,7 +101,7 @@ def typed_explanation(
     attack_type: str = "DDoS_TCP",
     taxonomy_version: str = MULTIDATASET_TAXONOMY_VERSION,
 ) -> ExplanationInfo:
-    expected = expected_catalog_contract(attack_type, "network_flow")
+    expected = expected_catalog_contract(attack_type)
     mitigation_items = [
         MitigationItem(
             text=item["text"],

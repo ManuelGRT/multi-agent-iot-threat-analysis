@@ -133,9 +133,9 @@ El mitigador trabaja en dos capas:
    una ruta de reserva por familia amplia.
 2. Mistral intenta contextualizar esa base para el evento observado.
 
-El validador conserva la procedencia de cada elemento. Las incorporaciones sin
-respaldo se marcan `llm_suggested` y no se presentan como conocimiento
-auditado. Si Mistral falla, el caso mantiene la respuesta completa del
+El validador conserva la procedencia de cada elemento y descarta cualquier
+mitigación o referencia que no corresponda con una base catalogada. Si Mistral
+falla, el caso mantiene la respuesta completa del
 catálogo. Este *fallback* existe únicamente en mitigación: nunca sustituye la
 llamada obligatoria del estandarizador ante un *cache miss*.
 

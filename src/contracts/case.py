@@ -117,8 +117,8 @@ class MitigationItem(BaseModel):
     - ``catalog``: texto literal del catalogo threat intel.
     - ``llm``: la accion ``text``/``base`` permanece literal del catalogo;
       la redaccion del LLM vive solo en ``context`` y nunca es confiable.
-    - ``llm_suggested``: aportacion del LLM SIN respaldo en el catalogo;
-      nunca se presenta como conocimiento auditado.
+    - ``llm_suggested``: valor legado que el catálogo v4 no emite y que el
+      auditor rechaza si aparece en un caso nuevo.
     - ``fallback``: accion de emergencia del sistema (catalogo no disponible).
     """
 

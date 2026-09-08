@@ -49,7 +49,7 @@ def test_current_release_audit_is_fully_green():
     assert payload["results"]["classifier"]["runtime_taxonomy_sha256"] == (
         "060a45a18e9a99e302467a12a358fe1f346091707a75375e2082a98e3506fae2"
     )
-    assert payload["results"]["catalog"]["version"] == "3.0"
+    assert payload["results"]["catalog"]["version"] == "4.0"
     assert payload["results"]["auditor"]["detected"] == 16
     assert payload["results"]["auditor"]["false_rejects"] == 0
 

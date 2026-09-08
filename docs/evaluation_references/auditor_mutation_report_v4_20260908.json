@@ -3,15 +3,15 @@
   "generated_at": "2026-09-08",
   "implementation": {
     "auditor": "src/agents/final/auditor.py",
-    "auditor_sha256": "c7aaeadc008bfa93ca5707a1112acb581daab14385449dcffffb23d501cb7cb0",
+    "auditor_sha256": "f9037ef21a8e58e83dc00661969e030a3e4f9eb2b2664c8b154a8086b4829f60",
     "catalog_contract": "src/mcp/threat_catalog.py",
-    "catalog_contract_sha256": "ed7670f6bc2fc311783a69883d8ed3ad84adb1fcabdcaa73633cedcf4c20325e",
-    "catalog_sha256": "b282a389111bd5fc8d54170f2b045ad33a5cd79ec000f1a22efa26b0276a21ae"
+    "catalog_contract_sha256": "5fb642acedf6ea592a712dbf6a56ad0c2e6c31f0254fb9279a58783291cc60d2",
+    "catalog_sha256": "daef99f01b62b6e9e72ac9f8343273c854a8c5d135f8a98ac64c3ae0c275879c"
   },
   "protocol": {
     "method": "deterministic_case_mutation_testing",
     "split_policy": "not_applicable_case_contract_evaluation",
-    "catalog_version": "3.0",
+    "catalog_version": "4.0",
     "taxonomy_version": "multidataset_attack_type_v1_2026-09-06",
     "classification_threshold": 0.65,
     "valid_controls": 3

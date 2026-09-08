@@ -374,7 +374,6 @@ class CaseAuditor:
             catalog_issues = catalog_output_issues(
                 case.explanation,
                 attack_type=classification.attack_type,
-                schema_profile=case.canonical_event.get("schema_profile"),
             )
             add(
                 "consistencia_contenido_catalogo_tipado",

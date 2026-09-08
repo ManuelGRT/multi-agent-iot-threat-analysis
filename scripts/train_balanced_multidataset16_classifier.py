@@ -67,6 +67,8 @@ DEFAULT_PROVIDER = "mistral"
 DEFAULT_MODEL = "mistral-small-2603"
 MODEL_NAME = "xgboost_attack_subtype_multidataset16_balanced500_20260906"
 DEFAULT_CONFIDENCE_THRESHOLD = 0.65
+PORTABLE_REFERENCE_SCHEMA_VERSION = "classifier-evaluation-reference-v1"
+PORTABLE_REFERENCE_FILENAME = "classifier_multidataset16_portable_reference.json"
 
 
 def utc_now() -> str:
@@ -125,6 +127,246 @@ def _write_json(path: Path, value: Any) -> None:
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+def _portable_inventory(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Elimina rutas locales sin perder la identidad criptografica de entradas."""
+
+    return [
+        {
+            "filename": Path(str(item["path"])).name,
+            "bytes": int(item["bytes"]),
+            "sha256": str(item["sha256"]),
+        }
+        for item in items
+    ]
+
+
+def _portable_evaluation(
+    view: dict[str, Any],
+    *,
+    include_per_class: bool = False,
+    include_origin_support: bool = False,
+) -> dict[str, Any]:
+    """Conserva solo las metricas necesarias para auditar una vista."""
+
+    fields = ["status", "rows", "accuracy", "macro", "top3_accuracy", "selective"]
+    if not include_origin_support:
+        fields.extend(("class_support", "weighted"))
+    if include_per_class:
+        fields.append("per_class")
+    if include_origin_support:
+        fields.extend(
+            (
+                "available_class_support",
+                "eligible_classes",
+                "classes_below_minimum_support",
+                "class_support",
+                "predictions_outside_present_classes_rate",
+            )
+        )
+    return {key: view[key] for key in fields if key in view}
+
+
+def _portable_origin_group(group: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "minimum_test_rows_per_class": group["minimum_test_rows_per_class"],
+        "origins": {
+            origin: _portable_evaluation(view, include_origin_support=True)
+            for origin, view in group["origins"].items()
+        },
+    }
+
+
+def _portable_split_supports(balance: dict[str, Any]) -> dict[str, Any]:
+    """Resume filas y soportes de clase/origen para cada particion."""
+
+    return {
+        split: {
+            "rows": support["rows"],
+            "class_counts": support["class_counts"],
+            "by_dataset": {
+                origin: values["rows"]
+                for origin, values in support["by_dataset"].items()
+            },
+            "by_origin": {
+                origin: values["rows"]
+                for origin, values in support["by_origin"].items()
+            },
+        }
+        for split, support in balance["selected"]["splits"].items()
+    }
+
+
+def build_portable_classifier_reference(
+    report: dict[str, Any],
+    *,
+    artifact_filename: str | None = None,
+    deployed: bool = False,
+) -> dict[str, Any]:
+    """Resume una evaluacion completa sin rutas absolutas ni datos de campana.
+
+    La ficha resultante permite comprobar en un clon limpio el contrato, los
+    hashes y las metricas del artefacto, aunque los JSONL originales no esten
+    versionados. ``deployed`` debe marcarse solo tras una promocion explicita.
+    """
+
+    protocol = report["global_protocol"]
+    balance = protocol["balance"]
+    training = protocol["training"]
+    evaluations = protocol["evaluation"]
+    origin_views = protocol["evaluation_by_origin"]
+    artifact = report["candidate_artifact"]
+    taxonomy = report["taxonomy"]
+    runtime_taxonomy = multidataset_taxonomy_report()
+    selected_artifact_name = artifact_filename or Path(str(artifact["path"])).name
+
+    per_origin: dict[str, Any] = {
+        "policy": origin_views["policy"],
+        "development_overlap_rows": origin_views["development_overlap_rows"],
+    }
+    for view_name in ("global_classifier_test", "extended_unused_holdout"):
+        source_view = origin_views[view_name]
+        robust = source_view["robust_balanced"]
+        per_origin[view_name] = {
+            "pool_rows": source_view["rows"],
+            "protocol": "robust_balanced",
+            "by_dataset": _portable_origin_group(robust["by_dataset"]),
+            "by_detailed_origin": _portable_origin_group(
+                robust["by_detailed_origin"]
+            ),
+        }
+
+    test = _portable_evaluation(evaluations["test"])
+    validation = _portable_evaluation(evaluations["val"])
+    assignment = balance["split_assignment"]
+    return {
+        "schema_version": PORTABLE_REFERENCE_SCHEMA_VERSION,
+        "generated_at": report["generated_at"],
+        "source_report": {
+            "filename": "classifier_multidataset16_report.json",
+            "schema_version": report["schema_version"],
+        },
+        "artifact": {
+            "filename": selected_artifact_name,
+            "bytes": int(artifact["bytes"]),
+            "sha256": artifact["sha256"],
+            "deployed": deployed,
+            "source_candidate_activated": bool(artifact.get("activated", False)),
+        },
+        "taxonomy": {
+            "version": taxonomy["version"],
+            # El primer hash identifica exactamente el contrato registrado en
+            # la campaña de entrenamiento. El segundo identifica el contrato
+            # operativo del código que genera la ficha; no deben confundirse
+            # cuando se retira metadato auxiliar sin reentrenar el modelo.
+            "training_taxonomy_sha256": taxonomy["sha256"],
+            "runtime_taxonomy_sha256": runtime_taxonomy["sha256"],
+            "reference_taxonomy_version": taxonomy["reference_taxonomy_version"],
+            "class_count": len(taxonomy["attack_classes"]),
+            "attack_classes": taxonomy["attack_classes"],
+            "normal_policy": taxonomy["normal_policy"],
+            "mapping_statuses_used_for_training": taxonomy[
+                "mapping_statuses_used_for_training"
+            ],
+            "coarsening_policy": taxonomy["coarsening_policy"],
+            "forced_mapping_policy": taxonomy["forced_mapping_policy"],
+            "excluded_labels": taxonomy["excluded_labels"],
+        },
+        "balancing": {
+            "policy": balance["policy"],
+            "seed": balance["seed"],
+            "sampling_with_replacement": balance["sampling_with_replacement"],
+            "minimum_global_class_support": balance[
+                "minimum_global_class_support"
+            ],
+            "limiting_classes": balance["limiting_classes"],
+            "per_class_total": balance["per_class_total"],
+            "selected_rows": balance["selected_rows"],
+            "available_rows": balance["available"]["rows"],
+            "available_class_support": balance["available"]["class_counts"],
+            "selected_class_support": balance["selected"]["class_counts"],
+            "selected_mapping_status_support": balance["selected"][
+                "mapping_status_counts"
+            ],
+        },
+        "splits": {
+            "ratio_units": balance["ratio_units"],
+            "quotas_per_class": balance["quotas_per_class"],
+            "assignment": {
+                "method": assignment["method"],
+                "class_totals_exact": assignment["class_totals_exact"],
+                "origin_counts_use_floor_or_ceil_of_ideal": assignment[
+                    "origin_counts_use_floor_or_ceil_of_ideal"
+                ],
+                "tie_breaker": assignment["tie_breaker"],
+            },
+            "source_split_used_for_assignment": balance[
+                "source_split_used_for_assignment"
+            ],
+            "source_split_used_for_corpus_selection": balance[
+                "source_split_used_for_corpus_selection"
+            ],
+            "final_cross_split_overlap_count": balance[
+                "final_cross_split_overlap_count"
+            ],
+            "supports": _portable_split_supports(balance),
+        },
+        "hashes": {
+            "training_taxonomy": taxonomy["sha256"],
+            "runtime_taxonomy": runtime_taxonomy["sha256"],
+            "selection": balance["selection_sha256"],
+            "eligible_records": training["data_sha256"]["eligible"],
+            "train": training["data_sha256"]["train"],
+            "validation": training["data_sha256"]["val"],
+            "test": training["data_sha256"]["test"],
+            "feature_names": training["features"]["names_sha256"],
+            "artifact": artifact["sha256"],
+        },
+        "model": {
+            "algorithm": training["model"],
+            "operational_contract": {
+                **training["operational_contract"],
+                "public_task": "attack_type",
+            },
+            "classes": training["classes"],
+            "feature_count": training["features"]["count"],
+            "parameters": training["parameters"],
+        },
+        "metrics": {
+            "validation": validation,
+            "test": test,
+            "selective": {
+                "threshold": training["operational_contract"][
+                    "confidence_threshold"
+                ],
+                "validation": validation["selective"],
+                "test": test["selective"],
+            },
+            "per_class": evaluations["test"]["per_class"],
+            "per_origin": per_origin,
+            "deployment_assessment": protocol["deployment_assessment"],
+        },
+        "mapping": {
+            key: report["mapping"][key]
+            for key in (
+                "input_rows",
+                "mapped_rows",
+                "rejected_attack_rows",
+                "status_counts",
+                "mapped_by_dataset",
+                "mapped_by_status",
+                "reason_counts",
+            )
+        },
+        "excluded_attack_targets": report["excluded_attack_targets"],
+        "inputs": {
+            group: _portable_inventory(items)
+            for group, items in report["inputs"].items()
+        },
+        "network_calls_during_training": report["network_calls"],
+        "llm_policy": report["llm_policy"],
+    }
 
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
@@ -776,6 +1018,13 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         },
     }
     _write_json(out_dir / "classifier_multidataset16_report.json", report)
+    portable_reference = build_portable_classifier_reference(report)
+    _write_json(out_dir / PORTABLE_REFERENCE_FILENAME, portable_reference)
+    if args.portable_reference_out is not None:
+        _write_json(
+            args.portable_reference_out.expanduser().resolve(),
+            portable_reference,
+        )
     (out_dir / "classifier_multidataset16_summary.md").write_text(
         _markdown_summary(report), encoding="utf-8", newline="\n"
     )
@@ -805,6 +1054,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--minimum-validation-coverage", type=float, default=0.50)
     parser.add_argument("--per-class-total", type=int, default=None)
     parser.add_argument("--model-out", type=Path)
+    parser.add_argument(
+        "--portable-reference-out",
+        type=Path,
+        help=(
+            "Ruta opcional para copiar la ficha JSON portable de contrato, "
+            "hashes y metricas."
+        ),
+    )
     return parser.parse_args(argv)
 
 

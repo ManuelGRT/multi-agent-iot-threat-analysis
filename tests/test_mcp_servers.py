@@ -93,6 +93,7 @@ def test_all_servers_expose_tools():
     for server, tools in expected.items():
         available = set(client.list_tools(server))
         assert tools <= available, f"{server}: faltan tools {tools - available}"
+    assert "get_jorge_capec_coverage" not in client.list_tools("threat_intel")
 
 
 def test_tool_results_carry_trace_metadata():

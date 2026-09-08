@@ -1,17 +1,11 @@
-"""Training of candidate models used by the deployed predictive agents.
+"""Training helpers used by the deployed predictive agents.
 
 The validation campaign already owns ingestion, target authority and feature
-sanitisation.  This module deliberately accepts only :class:`PreparedRecord`
-objects and preserves their frozen ``train``/``val``/``test`` split.  It trains
-two global candidates:
-
-* a binary attack detector over every dataset that declares the ``binary`` task;
-* an attack-only multiclass classifier over an explicit, versioned broad-family
-  taxonomy.
-
-Both candidates fit their :class:`~sklearn.feature_extraction.DictVectorizer`
-on train only.  Saving is opt-in and atomic: no default deployment artefact is
-ever overwritten merely by calling a training function.
+sanitisation. This module accepts only :class:`PreparedRecord` objects and
+preserves their ``train``/``val``/``test`` split. It trains the global binary
+detector and provides the shared helper used by the current 16-type classifier.
+Both fit their :class:`~sklearn.feature_extraction.DictVectorizer` on train
+only. Saving is opt-in and atomic.
 """
 from __future__ import annotations
 
@@ -21,10 +15,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import tempfile
 from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
-import unicodedata
 
 import numpy as np
 from sklearn.feature_extraction import DictVectorizer
@@ -36,13 +28,12 @@ from src.contracts.inference import (
     _validated_encoded_predictions,
 )
 from src.eval.binary_balancing import balance_binary_records, logical_binary_origin
-from src.eval.jorge_models import compute_classification_metrics
+from src.eval.model_metrics import compute_classification_metrics
 from src.eval.validation_campaign import PreparedRecord
 
 
 EstimatorFactory = Callable[..., Any]
 
-FAMILY_MAPPING_VERSION = "broad_attack_family_v1_2026-08-06"
 SPLITS = ("train", "val", "test")
 BINARY_GRAY_ZONE = (0.4, 0.6)
 
@@ -57,10 +48,6 @@ BASE_XGBOOST_PARAMETERS: Mapping[str, Any] = {
     "tree_method": "hist",
     "verbosity": 0,
 }
-
-
-class UnmappedAttackLabelError(ProductionModelError):
-    """An attack label is not covered by the explicit family mapping."""
 
 
 class EstimatorFactoryProtocol(Protocol):
@@ -78,61 +65,6 @@ class CandidateTrainingResult:
     model: ProductionXGBoostModel
     report: dict[str, Any]
     artifact_path: Path | None = None
-
-
-@dataclass(slots=True)
-class ProductionTrainingResult:
-    detector: CandidateTrainingResult
-    family_classifier: CandidateTrainingResult
-
-    def report(self) -> dict[str, Any]:
-        return {
-            "detector": self.detector.report,
-            "family_classifier": self.family_classifier.report,
-        }
-
-
-def train_production_candidates(
-    records: Sequence[PreparedRecord] | Iterable[PreparedRecord],
-    *,
-    detector_path: str | Path | None = None,
-    family_path: str | Path | None = None,
-    estimator_factory: EstimatorFactoryProtocol | None = None,
-    parameter_overrides: Mapping[str, Any] | None = None,
-    detector_balance_seed: int = 42,
-) -> ProductionTrainingResult:
-    """Train both global candidates, then optionally persist explicit paths.
-
-    Training of both models completes before either path is touched.  This
-    avoids publishing a detector when the family candidate cannot be built.
-    Each individual replacement is an atomic ``os.replace`` in the target
-    directory.
-    """
-
-    if detector_path is not None and family_path is not None:
-        detector_target = Path(detector_path).expanduser().resolve()
-        family_target = Path(family_path).expanduser().resolve()
-        if detector_target == family_target:
-            raise ProductionModelError(
-                "detector_path y family_path deben ser artefactos distintos"
-            )
-    values = tuple(records)
-    detector = train_global_detector(
-        values,
-        estimator_factory=estimator_factory,
-        parameter_overrides=parameter_overrides,
-        balance_seed=detector_balance_seed,
-    )
-    classifier = train_global_family_classifier(
-        values,
-        estimator_factory=estimator_factory,
-        parameter_overrides=parameter_overrides,
-    )
-    if detector_path is not None:
-        _persist_result(detector, detector_path)
-    if family_path is not None:
-        _persist_result(classifier, family_path)
-    return ProductionTrainingResult(detector=detector, family_classifier=classifier)
 
 
 def train_global_detector(
@@ -162,61 +94,8 @@ def train_global_detector(
         skipped=dict(sorted(skipped.items())),
         estimator_factory=estimator_factory,
         parameter_overrides=parameter_overrides,
-        family_mapping=None,
+        taxonomy_mapping=None,
         balance_seed=balance_seed,
-    )
-    if model_path is not None:
-        _persist_result(result, model_path)
-    return result
-
-
-def train_global_family_classifier(
-    records: Sequence[PreparedRecord] | Iterable[PreparedRecord],
-    *,
-    model_path: str | Path | None = None,
-    estimator_factory: EstimatorFactoryProtocol | None = None,
-    parameter_overrides: Mapping[str, Any] | None = None,
-) -> CandidateTrainingResult:
-    """Train the global attack-only broad-family classifier."""
-
-    values = tuple(records)
-    labelled: list[tuple[PreparedRecord, str]] = []
-    skipped = Counter()
-    unmapped: list[tuple[str, str, str]] = []
-    for record in values:
-        if "multiclass" not in record.tasks:
-            skipped["task_not_declared"] += 1
-            continue
-        if record.target_is_attack is not True:
-            skipped["non_attack"] += 1
-            continue
-        if not isinstance(record.target_class, str) or not record.target_class.strip():
-            skipped["missing_or_invalid_target"] += 1
-            continue
-        try:
-            family = map_attack_family(record.dataset, record.target_class)
-        except UnmappedAttackLabelError:
-            unmapped.append((record.manifest_id, record.dataset, record.target_class))
-            continue
-        labelled.append((record, family))
-
-    if unmapped:
-        sample = ", ".join(
-            f"{manifest_id}:{dataset}/{label}"
-            for manifest_id, dataset, label in sorted(unmapped)[:5]
-        )
-        raise UnmappedAttackLabelError(
-            f"{len(unmapped)} filas de ataque no tienen familia explicita en "
-            f"{FAMILY_MAPPING_VERSION} (ejemplos: {sample})"
-        )
-
-    result = _train_candidate(
-        labelled,
-        task="attack_family",
-        skipped=dict(sorted(skipped.items())),
-        estimator_factory=estimator_factory,
-        parameter_overrides=parameter_overrides,
-        family_mapping=family_mapping_report(),
     )
     if model_path is not None:
         _persist_result(result, model_path)
@@ -262,7 +141,7 @@ def train_labelled_attack_subtype_classifier(
         skipped={},
         estimator_factory=estimator_factory,
         parameter_overrides=parameter_overrides,
-        family_mapping=taxonomy_mapping,
+        taxonomy_mapping=taxonomy_mapping,
         random_state=seed,
     )
     if model_path is not None:
@@ -396,31 +275,6 @@ def deduplicate_labelled_records(
     return tuple(kept), report
 
 
-def map_attack_family(dataset: str, target_class: str) -> str:
-    """Map one native malicious label using the versioned explicit taxonomy."""
-
-    dataset_key = _normalise_dataset(dataset)
-    label_key = _normalise_label(target_class)
-    mapping = _FAMILY_MAPPINGS.get(dataset_key)
-    if mapping is None or label_key not in mapping:
-        raise UnmappedAttackLabelError(
-            f"Etiqueta de ataque sin mapear: dataset={dataset!r}, class={target_class!r}, "
-            f"version={FAMILY_MAPPING_VERSION}"
-        )
-    return mapping[label_key]
-
-
-def family_mapping_report() -> dict[str, Any]:
-    """Return a JSON-compatible snapshot and hash of the active mapping."""
-
-    datasets = {
-        dataset: dict(sorted(mapping.items()))
-        for dataset, mapping in sorted(_NATIVE_FAMILY_MAPPINGS.items())
-    }
-    core = {"version": FAMILY_MAPPING_VERSION, "datasets": datasets}
-    return {**core, "sha256": _json_sha256(core)}
-
-
 def _train_candidate(
     labelled: Sequence[tuple[PreparedRecord, bool | str]],
     *,
@@ -428,7 +282,7 @@ def _train_candidate(
     skipped: Mapping[str, int],
     estimator_factory: EstimatorFactoryProtocol | None,
     parameter_overrides: Mapping[str, Any] | None,
-    family_mapping: Mapping[str, Any] | None,
+    taxonomy_mapping: Mapping[str, Any] | None,
     random_state: int = 42,
     balance_seed: int | None = None,
 ) -> CandidateTrainingResult:
@@ -530,8 +384,8 @@ def _train_candidate(
         task=task,
         feature_schema_sha256=feature_schema_sha256,
         family_mapping_version=(
-            str(family_mapping["version"])
-            if family_mapping is not None and family_mapping.get("version")
+            str(taxonomy_mapping["version"])
+            if taxonomy_mapping is not None and taxonomy_mapping.get("version")
             else None
         ),
     )
@@ -628,9 +482,8 @@ def _train_candidate(
         "metrics": metrics,
         "artifact": None,
     }
-    if family_mapping is not None:
-        mapping_key = "taxonomy_mapping" if task == "attack_subtype" else "family_mapping"
-        report[mapping_key] = dict(family_mapping)
+    if taxonomy_mapping is not None:
+        report["taxonomy_mapping"] = dict(taxonomy_mapping)
     return CandidateTrainingResult(model=model, report=report)
 
 
@@ -903,93 +756,13 @@ def _report_label(label: bool | str) -> str:
     return _label_key(label)
 
 
-def _normalise_dataset(value: str) -> str:
-    key = _normalise_label(value)
-    aliases = {
-        "edge_iiotset": "edge_iiotset",
-        "edgeiiotset": "edge_iiotset",
-        "ton_iot": "ton_iot",
-        "toniot": "ton_iot",
-        "bot_iot": "bot_iot",
-        "botiot": "bot_iot",
-        "iot23": "iot23",
-        "iot_23": "iot23",
-    }
-    return aliases.get(key, key)
-
-
-def _normalise_label(value: str) -> str:
-    normalised = unicodedata.normalize("NFKC", str(value)).strip().casefold()
-    return re.sub(r"[^a-z0-9]+", "_", normalised).strip("_")
-
-
-_NATIVE_FAMILY_MAPPINGS: Mapping[str, Mapping[str, str]] = {
-    "edge_iiotset": {
-        "DDoS_UDP": "ddos",
-        "DDoS_ICMP": "ddos",
-        "DDoS_TCP": "ddos",
-        "DDoS_HTTP": "ddos",
-        "SQL_injection": "injection",
-        "XSS": "injection",
-        "Uploading": "injection",
-        "Password": "bruteforce",
-        "Vulnerability_scanner": "scanning",
-        "Port_Scanning": "scanning",
-        "Fingerprinting": "scanning",
-        "Backdoor": "malware",
-        "Ransomware": "malware",
-        "MITM": "mitm",
-    },
-    "ton_iot": {
-        "dos": "ddos",
-        "ddos": "ddos",
-        "scanning": "scanning",
-        "password": "bruteforce",
-        "injection": "injection",
-        "xss": "injection",
-        "backdoor": "malware",
-        "ransomware": "malware",
-        "mitm": "mitm",
-    },
-    "bot_iot": {
-        "dos": "ddos",
-        "ddos": "ddos",
-        "reconnaissance": "scanning",
-        "theft": "exfiltration",
-    },
-    "iot23": {
-        "C&C": "botnet",
-        "C&C-FileDownload": "botnet",
-        "C&C-Torii": "botnet",
-        "PartOfAHorizontalPortScan": "scanning",
-        "DDoS": "ddos",
-        "FileDownload": "unknown_attack",
-    },
-}
-
-_FAMILY_MAPPINGS: Mapping[str, Mapping[str, str]] = {
-    dataset: {
-        _normalise_label(native_label): family
-        for native_label, family in mapping.items()
-    }
-    for dataset, mapping in _NATIVE_FAMILY_MAPPINGS.items()
-}
-
-
 __all__ = [
     "BASE_XGBOOST_PARAMETERS",
     "CandidateTrainingResult",
-    "FAMILY_MAPPING_VERSION",
     "ProductionModelError",
-    "ProductionTrainingResult",
     "ProductionXGBoostModel",
-    "UnmappedAttackLabelError",
     "deduplicate_labelled_records",
-    "family_mapping_report",
-    "map_attack_family",
     "persist_candidate_model",
     "train_global_detector",
-    "train_global_family_classifier",
     "train_labelled_attack_subtype_classifier",
-    "train_production_candidates",
 ]

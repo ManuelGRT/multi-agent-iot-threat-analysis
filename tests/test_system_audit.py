@@ -1,278 +1,242 @@
-# tests/test_system_audit.py
-"""Tests del script de auditoria de sistema (Fase 5b)."""
+"""Auditoria portable de los artefactos desplegados actuales."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import pytest
-
 import scripts.run_system_audit as audit_script
-from src.mcp.common import resolve_path
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _corpus_available() -> bool:
-    return resolve_path("standardized_dataset").exists()
+def _copy_json(source: Path, target: Path) -> dict:
+    value = json.loads(source.read_text(encoding="utf-8"))
+    target.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return value
 
 
-def _edge_available() -> bool:
-    return (PROJECT_ROOT / audit_script.EDGE_DATASET_PATH).exists()
-
-
-def _models_loadable() -> bool:
-    try:
-        import xgboost  # noqa: F401
-    except ImportError:
-        return False
-    return resolve_path("detection_model").exists() and resolve_path("attack_type_model").exists()
-
-
-def _attack_type_audit_artifacts_available() -> bool:
-    return all(
-        path.exists()
-        for path in (
-            audit_script.ATTACK_TYPE_REPORT,
-            audit_script.ATTACK_TYPE_SELECTION,
-            audit_script.ATTACK_TYPE_SIDECAR,
-            resolve_path("attack_type_model"),
-        )
+def _write_json(path: Path, value: dict) -> None:
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
     )
 
 
-# ---------------------------------------------------------------------------
-# helpers puros
-# ---------------------------------------------------------------------------
+def test_current_release_audit_is_fully_green():
+    payload = audit_script.run_audit()
 
-def test_semaforo_table_renders_all_criteria():
-    table = audit_script.semaforo_table({"a": audit_script.GREEN, "b": audit_script.RED})
-    assert "VERDE" in table and "ROJO" in table
-    assert table.count("|") >= 8
-
-
-def test_leakage_trap_event_is_actually_leaky():
-    from src.agents.final.auditor import canonical_leakage_issues
-
-    issues = canonical_leakage_issues(audit_script.leakage_trap_event())
-    kinds = {issue.split(":")[0] for issue in issues}
-    assert {
-        "campo_target_con_valor",
-        "clave_target_anidada",
-        "semantic_text_contiene_patron_target",
-    } <= kinds
-
-
-def test_smoke_flags_empty_datasets(monkeypatch):
-    monkeypatch.setattr(
-        audit_script, "smoke_datasets", lambda per: {"edge_iiotset": [], "iot23": []}
-    )
-    result = audit_script.run_smoke(2)
-    assert result["semaforo_smoke"] == audit_script.RED
-    assert result["semaforo_auditoria"] == audit_script.RED
-    assert set(result["datasets_sin_muestras"]) == {"edge_iiotset", "iot23"}
-
-
-def test_trap_check_fails_if_semantic_detector_breaks(monkeypatch):
-    """Si la deteccion de patrones en semantic_text regresionara, la trampa
-    debe ponerse en ROJO aunque las otras clases de leakage sigan saltando."""
-    import src.agents.final.auditor as auditor_mod
-
-    monkeypatch.setattr(auditor_mod, "contains_predictive_target_text", lambda text: False)
-    trap_issues = auditor_mod.canonical_leakage_issues(audit_script.leakage_trap_event())
-    kinds = {issue.split(":")[0] for issue in trap_issues}
-    assert "semantic_text_contiene_patron_target" not in kinds
-    # el criterio del script exige las TRES clases: con una rota, no hay verde
-    required = {
-        "campo_target_con_valor",
-        "clave_target_anidada",
-        "semantic_text_contiene_patron_target",
+    assert payload["todo_verde"] is True
+    assert payload["semaforos"] == {
+        "detector": audit_script.GREEN,
+        "classifier": audit_script.GREEN,
+        "catalog": audit_script.GREEN,
+        "auditor": audit_script.GREEN,
     }
-    assert not required <= kinds
-
-
-# ---------------------------------------------------------------------------
-# muestreo
-# ---------------------------------------------------------------------------
-
-@pytest.mark.skipif(not _corpus_available(), reason="corpus estandarizado no disponible")
-def test_stride_sample_covers_multiple_sources():
-    rows = audit_script.stride_sample(resolve_path("standardized_dataset"), 100)
-    assert len(rows) == 100
-    tops = set()
-    for row in rows:
-        source = str(row.get("source_file") or "").replace("\\", "/")
-        if "/" in source:
-            tops.add(source.split("/")[1])
-    # el corpus esta ordenado por dataset: el stride debe cruzar varios
-    assert len(tops) >= 2, tops
-
-
-@pytest.mark.skipif(not _corpus_available(), reason="corpus estandarizado no disponible")
-def test_sample_rows_mixes_attack_and_benign():
-    rows = audit_script.sample_rows(
-        resolve_path("standardized_dataset"), lambda row: True, 4
+    assert payload["results"]["detector"]["splits"] == {
+        "train": 16496,
+        "validation": 3536,
+        "test": 3572,
+    }
+    assert payload["results"]["classifier"]["splits"] == {
+        "train": 5600,
+        "val": 1200,
+        "test": 1200,
+    }
+    assert payload["results"]["classifier"]["training_taxonomy_sha256"] == (
+        "d016e777a545c78361adb1c05352a70f36e0022c5f85e5aaf4f8e379655bd6ed"
     )
-    labels = {bool((row.get("target") or {}).get("is_attack")) for row in rows}
-    assert labels == {True, False}
-
-
-# ---------------------------------------------------------------------------
-# semaforo y contrato del detector desplegado
-# ---------------------------------------------------------------------------
-
-def test_batch_detection_red_without_frozen_evaluation(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        audit_script,
-        "DETECTION_EVALUATION",
-        tmp_path / "missing-detector-evaluation.json",
+    assert payload["results"]["classifier"]["runtime_taxonomy_sha256"] == (
+        "060a45a18e9a99e302467a12a358fe1f346091707a75375e2082a98e3506fae2"
     )
-    result = audit_script.batch_detection(tolerance=0.02)
-    assert result["artefacto_congelado_encontrado"] is False
-    assert result["semaforo"] == audit_script.RED
+    assert payload["results"]["catalog"]["version"] == "3.0"
+    assert payload["results"]["auditor"]["detected"] == 16
+    assert payload["results"]["auditor"]["false_rejects"] == 0
 
 
-@pytest.mark.skipif(not _models_loadable(), reason="modelos no disponibles")
-def test_batch_detection_verifies_the_deployed_balanced_artifact():
-    result = audit_script.batch_detection(tolerance=0.02)
-
-    assert result["modo_evaluacion"] == "metricas_congeladas_hash_verificado"
-    assert result["metricas_recalculadas"] is False
-    assert result["ficha_valida"] is True
-    assert result["hash_modelo_coincide"] is True
-    assert result["contrato_modelo_valido"] is True
-    assert result["corpus_balanceado"] == 23604
-    assert result["n_train"] == 16496
-    assert result["n_validation"] == 3536
-    assert result["n_test"] == 3572
-    assert result["f1_ataque_congelado"] == pytest.approx(0.9600223651104277)
-    assert result["semaforo"] == audit_script.GREEN
-
-
-@pytest.mark.skipif(not _models_loadable(), reason="modelos no disponibles")
-def test_batch_detection_rejects_internally_inconsistent_metadata(
+def test_detector_audit_rejects_a_reference_for_another_model(
     tmp_path, monkeypatch
 ):
-    payload = json.loads(audit_script.DETECTION_EVALUATION.read_text(encoding="utf-8"))
-    payload["balancing"]["rows"] = 23602
-    corrupted = tmp_path / "corrupted-detector-evaluation.json"
-    corrupted.write_text(json.dumps(payload), encoding="utf-8")
-    monkeypatch.setattr(audit_script, "DETECTION_EVALUATION", corrupted)
+    path = tmp_path / "detector.json"
+    reference = _copy_json(audit_script.DETECTOR_REFERENCE, path)
+    reference["artifact"]["sha256"] = "0" * 64
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "DETECTOR_REFERENCE", path)
 
-    result = audit_script.batch_detection(tolerance=0.02)
+    result = audit_script.audit_detector()
 
-    assert result["ficha_valida"] is False
-    assert "balanced_rows" in result["incidencias_ficha"]
     assert result["semaforo"] == audit_script.RED
+    assert "artifact_sha256" in result["issues"]
 
 
-@pytest.mark.skipif(
-    not (_models_loadable() and _attack_type_audit_artifacts_available()),
-    reason="modelo o artefactos del clasificador de 16 tipos no disponibles",
-)
-def test_batch_attack_type_reports_frozen_metrics_if_campaign_is_unavailable(monkeypatch):
-    monkeypatch.setattr(
-        audit_script,
-        "_resolve_campaign_inputs",
-        lambda report: {
-            "available": False,
-            "integrity_ok": True,
-            "paths": {"manifests": [], "standardized_results": []},
-            "missing": ["input_ausente.jsonl"],
-            "mismatches": [],
-        },
-    )
+def test_detector_audit_rejects_another_balanced_selection(tmp_path, monkeypatch):
+    path = tmp_path / "detector.json"
+    reference = _copy_json(audit_script.DETECTOR_REFERENCE, path)
+    reference["balancing"]["selected_manifest_ids_sha256"] = "0" * 64
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "DETECTOR_REFERENCE", path)
 
-    result = audit_script.batch_attack_type(tolerance=0.02)
+    result = audit_script.audit_detector()
 
-    assert result["modo_evaluacion"] == "metricas_congeladas_hash_verificado"
-    assert result["metricas_recalculadas"] is False
-    assert result["hash_modelo_coincide"] is True
-    assert result["seleccion_verificada"] is True
-    assert result["sidecar_verificado"] is True
-    assert result["n_test"] == 1200
-    assert result["numero_tipos"] == 16
-    assert set(result["soporte_por_tipo"].values()) == {75}
-    assert result["metricas_congeladas"]["f1_weighted"] == pytest.approx(
-        0.8916753705196386
-    )
+    assert result["semaforo"] == audit_script.RED
+    assert "selection_release_sha256" in result["issues"]
+
+
+def test_classifier_audit_rejects_a_non_operational_threshold(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "classifier.json"
+    reference = _copy_json(audit_script.CLASSIFIER_REFERENCE, path)
+    reference["model"]["operational_contract"]["confidence_threshold"] = 0.8
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "CLASSIFIER_REFERENCE", path)
+
+    result = audit_script.audit_classifier()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "threshold_reference" in result["issues"]
+
+
+def test_classifier_audit_rejects_a_stale_runtime_taxonomy(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "classifier.json"
+    reference = _copy_json(audit_script.CLASSIFIER_REFERENCE, path)
+    reference["taxonomy"]["runtime_taxonomy_sha256"] = "0" * 64
+    reference["hashes"]["runtime_taxonomy"] = "0" * 64
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "CLASSIFIER_REFERENCE", path)
+
+    result = audit_script.audit_classifier()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "runtime_taxonomy_sha256" in result["issues"]
+
+
+def test_classifier_audit_rejects_another_test_split(tmp_path, monkeypatch):
+    path = tmp_path / "classifier.json"
+    reference = _copy_json(audit_script.CLASSIFIER_REFERENCE, path)
+    reference["hashes"]["test"] = "0" * 64
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "CLASSIFIER_REFERENCE", path)
+
+    result = audit_script.audit_classifier()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "release_hash:test" in result["issues"]
+
+
+def test_classifier_reference_fixes_balanced_16_type_split():
+    result = audit_script.audit_classifier()
+
     assert result["semaforo"] == audit_script.GREEN
+    assert result["corpus_rows"] == 8000
+    assert result["per_class"] == 500
+    assert result["splits"] == {"train": 5600, "val": 1200, "test": 1200}
+    assert result["test_top3"] == 0.98
+    assert result["selective"]["threshold"] == 0.65
 
 
-@pytest.mark.skipif(
-    not (_models_loadable() and _attack_type_audit_artifacts_available()),
-    reason="modelo o artefactos del clasificador de 16 tipos no disponibles",
-)
-def test_batch_attack_type_reproduces_exact_frozen_test_when_inputs_exist():
-    inventory = audit_script._resolve_campaign_inputs(
-        json.loads(audit_script.ATTACK_TYPE_REPORT.read_text(encoding="utf-8"))
-    )
-    if not inventory["available"]:
-        pytest.skip("inputs originales de la campana no disponibles")
+def test_catalog_audit_rejects_an_unpinned_catalog(tmp_path, monkeypatch):
+    path = tmp_path / "catalog-reference.json"
+    reference = _copy_json(audit_script.CATALOG_REFERENCE, path)
+    reference["artifact"]["sha256"] = "f" * 64
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "CATALOG_REFERENCE", path)
 
-    result = audit_script.batch_attack_type(tolerance=0.02)
+    result = audit_script.audit_catalog()
 
-    assert result["modo_evaluacion"] == "test_exacto_recalculado"
-    assert result["metricas_recalculadas"] is True
-    assert result["reproduccion_exacta"] is True
-    assert result["n_test"] == 1200
-    assert result["numero_tipos"] == 16
-    assert result["metricas_recalculadas_test"]["accuracy"] == pytest.approx(
-        0.8908333333333334
-    )
-    assert result["metricas_recalculadas_test"]["top3_accuracy"] == pytest.approx(0.98)
-    assert result["metricas_recalculadas_test"]["selective"]["threshold"] == 0.65
+    assert result["semaforo"] == audit_script.RED
+    assert "artifact_sha256" in result["issues"]
+
+
+def test_catalog_audit_rejects_incorrect_reference_registry_counts(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "catalog-reference.json"
+    reference = _copy_json(audit_script.CATALOG_REFERENCE, path)
+    reference["reference_catalog_counts"]["capec_patterns"] = 15
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "CATALOG_REFERENCE", path)
+
+    result = audit_script.audit_catalog()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "reference_catalog_counts" in result["issues"]
+
+
+def test_auditor_mutations_detect_the_expected_reason():
+    result = audit_script.audit_auditor()
+
     assert result["semaforo"] == audit_script.GREEN
+    assert result["mutations"] == result["detected"] == 16
+    assert result["false_rejects"] == 0
+    assert all(row["detected"] for row in result["results"])
+    assert {row["verdict"] for row in result["results"]} <= {"review", "reject"}
 
 
-# ---------------------------------------------------------------------------
-# E2E del script (rapido: sin batch)
-# ---------------------------------------------------------------------------
+def test_auditor_evaluation_rejects_a_wrong_expected_check(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "auditor-reference.json"
+    reference = _copy_json(audit_script.AUDITOR_REFERENCE, path)
+    reference["mutations"][0]["expected_check"] = "chequeo_que_no_existe"
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "AUDITOR_REFERENCE", path)
 
-def test_main_rejects_absolute_report_prefix_before_running_checks(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(
-        audit_script,
-        "run_smoke",
-        lambda *_args, **_kwargs: pytest.fail("no debe ejecutar la auditoria"),
+    result = audit_script.audit_auditor()
+
+    assert result["semaforo"] == audit_script.RED
+    assert any(
+        issue.startswith("mutation_not_detected:") for issue in result["issues"]
     )
 
-    rc = audit_script.main(["--out-prefix", str(tmp_path / "fuera")])
 
-    assert rc == 2
+def test_auditor_evaluation_rejects_duplicate_mutation_ids(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "auditor-reference.json"
+    reference = _copy_json(audit_script.AUDITOR_REFERENCE, path)
+    reference["mutations"][1] = dict(reference["mutations"][0])
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "AUDITOR_REFERENCE", path)
+
+    result = audit_script.audit_auditor()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "mutation_contract" in result["issues"]
+
+
+def test_main_no_write_returns_success(capsys):
+    assert audit_script.main(["--no-write"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["todo_verde"] is True
+    assert output["outputs"] == {}
+
+
+def test_main_writes_only_inside_artifacts(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(audit_script, "artifacts_dir", lambda: tmp_path)
+
+    assert audit_script.main(["--out-prefix", "current-release"]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert Path(output["outputs"]["json"]) == tmp_path / "current-release.json"
+    assert Path(output["outputs"]["markdown"]) == tmp_path / "current-release.md"
+    assert (tmp_path / "current-release.json").is_file()
+    assert (tmp_path / "current-release.md").is_file()
+
+
+def test_main_rejects_an_escaping_report_prefix(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(audit_script, "artifacts_dir", lambda: tmp_path)
+
+    assert audit_script.main(["--out-prefix", "../escape"]) == 2
     assert "prefijo de informe no permitido" in capsys.readouterr().out
 
-@pytest.mark.skipif(
-    not (_models_loadable() and _corpus_available() and _edge_available()),
-    reason="modelos o datasets no disponibles",
-)
-def test_main_skip_batch_produces_report_with_green_core():
-    prefix = "informe_auditoria_pytest_tmp"
-    md_path = PROJECT_ROOT / "artifacts" / f"{prefix}.md"
-    json_path = PROJECT_ROOT / "artifacts" / f"{prefix}.json"
-    try:
-        rc = audit_script.main(
-            [
-                "--smoke-per-dataset", "1",
-                "--leakage-sample", "4",
-                "--skip-batch",
-                "--out-prefix", prefix,
-            ]
-        )
-        # con --skip-batch los semaforos batch quedan AMBAR -> exit 1
-        assert rc == 1
-        payload = json.loads(json_path.read_text(encoding="utf-8"))
-        semaforos = payload["semaforos"]
-        assert semaforos["smoke_e2e"] == audit_script.GREEN
-        assert semaforos["auditoria_por_caso"] == audit_script.GREEN
-        assert semaforos["baselines_congelados_vs_jorge"] == audit_script.GREEN
-        assert semaforos["cobertura_capec_jorge"] == audit_script.GREEN
-        assert semaforos["target_leakage"] == audit_script.GREEN
-        assert semaforos["batch_deteccion_desplegado"] == audit_script.AMBER
-        assert semaforos["batch_tipo_ataque_desplegado"] == audit_script.AMBER
-        assert "batch_tipo_ataque" in payload
-        assert payload["todo_verde"] is False
-        assert md_path.exists()
-        assert "Semaforos" in md_path.read_text(encoding="utf-8")
-    finally:
-        md_path.unlink(missing_ok=True)
-        json_path.unlink(missing_ok=True)
+
+def test_portable_audit_has_no_historical_dataset_or_baseline_dependency():
+    source = Path(audit_script.__file__).read_text(encoding="utf-8")
+
+    assert "eval_validacion_por_dataset" not in source
+    assert "jorge_and_current_baselines" not in source
+    assert "standardized_dataset" not in source
+    assert "artifacts/validation_2026" not in source

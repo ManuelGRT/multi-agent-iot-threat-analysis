@@ -1,5 +1,5 @@
 # tests/test_auditor.py
-"""Tests del agente de auditoria (Fase 5a) con casos sinteticos.
+"""Tests del agente auditor con casos sinteticos.
 
 Incluye el caso trampa con target leakage que el auditor DEBE detectar
 (criterio de aceptacion del plan).
@@ -26,9 +26,14 @@ from src.contracts.case import (
     DetectionInfo,
     ExplanationInfo,
     JudgeInfo,
+    MitigationItem,
     StandardizationInfo,
     ThreatReference,
     TraceEntry,
+)
+from src.mcp.threat_catalog import (
+    THREAT_INTEL_CATALOG_VERSION,
+    expected_catalog_contract,
 )
 from tests.test_final_agents import CANONICAL_EVENT
 
@@ -77,21 +82,7 @@ def clean_attack_case(**overrides) -> CaseResult:
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             top_scores={"DDoS_TCP": 0.95, "DDoS_UDP": 0.03, "XSS": 0.02},
         ),
-        explanation=ExplanationInfo(
-            summary="DDoS TCP",
-            mitigations=["rate_limit"],
-            references=[ThreatReference(attack_id="T1498", source="catalog")],
-            confidence=0.95,
-            attack_type="DDoS_TCP",
-            taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
-            catalog_scope="attack_type",
-            catalog_version="2.0",
-            catalog_taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
-            catalog_compatible_taxonomy_versions=[
-                MULTIDATASET_TAXONOMY_VERSION,
-            ],
-            source="catalog",
-        ),
+        explanation=typed_explanation(),
         judge=JudgeInfo(
             action="approve",
             approved=True,
@@ -110,20 +101,30 @@ def typed_explanation(
     attack_type: str = "DDoS_TCP",
     taxonomy_version: str = MULTIDATASET_TAXONOMY_VERSION,
 ) -> ExplanationInfo:
+    expected = expected_catalog_contract(attack_type, "network_flow")
+    mitigation_items = [
+        MitigationItem(
+            text=item["text"],
+            phase=item["phase"],
+            source="catalog",
+        )
+        for item in expected["items"]
+    ]
     return ExplanationInfo(
         summary=attack_type,
-        mitigations=["rate_limit"],
-        references=[ThreatReference(attack_id="T1498", source="catalog")],
+        mitigations=[item.text for item in mitigation_items],
+        mitigation_items=mitigation_items,
+        references=[ThreatReference(**item) for item in expected["references"]],
         confidence=0.95,
         attack_type=attack_type,
         taxonomy_version=taxonomy_version,
         catalog_scope="attack_type",
-        catalog_version="2.0",
+        catalog_version=THREAT_INTEL_CATALOG_VERSION,
         catalog_taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
-        catalog_compatible_taxonomy_versions=[
-            MULTIDATASET_TAXONOMY_VERSION,
-            JORGE_TAXONOMY_VERSION,
-        ],
+        catalog_compatible_taxonomy_versions=list(
+            expected["compatible_taxonomy_versions"]
+        ),
+        reference_quality=expected["reference_quality"],
         source="catalog",
     )
 
@@ -223,7 +224,7 @@ def test_auditor_accepts_multidataset_attack_type_contract():
     assert auditor.audit(case).verdict == "approve"
 
 
-def test_auditor_validates_full_attack_type_contract_and_dynamic_threshold():
+def test_auditor_rejects_threshold_that_differs_from_operational_contract():
     case = clean_attack_case(
         classification=ClassificationInfo(
             attack_type="DDoS_TCP",
@@ -244,14 +245,14 @@ def test_auditor_validates_full_attack_type_contract_and_dynamic_threshold():
         ),
     )
     report = auditor.audit(case)
-    assert report.verdict == "review", report.issues
+    assert report.verdict == "reject", report.issues
     threshold_check = next(
         check
         for check in report.checks
-        if check.check == "umbral_confianza_clasificacion_derivada"
+        if check.check == "consistencia_umbral_clasificacion_operativo"
     )
-    assert threshold_check.passed
-    assert "threshold=0.81" in (threshold_check.detail or "")
+    assert not threshold_check.passed
+    assert "recibido=0.81" in (threshold_check.detail or "")
 
 
 def test_auditor_rejects_wrong_attack_type_taxonomy_and_invalid_top_score():
@@ -281,6 +282,31 @@ def test_auditor_rejects_wrong_attack_type_taxonomy_and_invalid_top_score():
     assert any("consistencia_top_scores_tipos" in issue for issue in report.issues)
 
 
+def test_auditor_rejects_the_historical_14_class_taxonomy_at_runtime():
+    case = clean_attack_case(
+        classification=ClassificationInfo(
+            attack_type="DDoS_TCP",
+            confidence=0.91,
+            decision_threshold=0.65,
+            model_task="attack_type",
+            taxonomy_version=JORGE_TAXONOMY_VERSION,
+            top_scores={"DDoS_TCP": 0.91, "DDoS_UDP": 0.06, "XSS": 0.03},
+        ),
+        explanation=typed_explanation(taxonomy_version=JORGE_TAXONOMY_VERSION),
+    )
+
+    report = auditor.audit(case)
+
+    assert report.verdict == "reject"
+    taxonomy_check = next(
+        check
+        for check in report.checks
+        if check.check == "consistencia_version_taxonomia"
+    )
+    assert not taxonomy_check.passed
+    assert "clases=16" in (taxonomy_check.detail or "")
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected_check"),
     [
@@ -291,7 +317,7 @@ def test_auditor_rejects_wrong_attack_type_taxonomy_and_invalid_top_score():
             "consistencia_mitigacion_taxonomia",
         ),
         ("catalog_scope", "family", "consistencia_mitigacion_catalogo_tipado"),
-        ("catalog_version", None, "consistencia_mitigacion_catalogo_tipado"),
+        ("catalog_version", "2.0", "consistencia_mitigacion_catalogo_tipado"),
         (
             "catalog_compatible_taxonomy_versions",
             [JORGE_TAXONOMY_VERSION],
@@ -326,6 +352,41 @@ def test_auditor_rejects_typed_mitigation_contract_mismatch(
     assert report.verdict == "reject"
     failed = next(check for check in report.checks if check.check == expected_check)
     assert failed.passed is False
+
+
+def test_auditor_rejects_an_invented_catalog_mitigation():
+    explanation = typed_explanation()
+    explanation.mitigation_items[0].text = (
+        "accion inventada que no figura en el catalogo"
+    )
+    explanation.mitigations[0] = "accion inventada que no figura en el catalogo"
+
+    report = auditor.audit(clean_attack_case(explanation=explanation))
+
+    assert report.verdict == "reject"
+    content_check = next(
+        check
+        for check in report.checks
+        if check.check == "consistencia_contenido_catalogo_tipado"
+    )
+    assert not content_check.passed
+    assert "catalog_mitigation_set_mismatch" in (content_check.detail or "")
+
+
+def test_auditor_rejects_an_invented_reference_marked_as_catalog():
+    explanation = typed_explanation()
+    explanation.references[0].attack_id = "T9999"
+
+    report = auditor.audit(clean_attack_case(explanation=explanation))
+
+    assert report.verdict == "reject"
+    content_check = next(
+        check
+        for check in report.checks
+        if check.check == "consistencia_contenido_catalogo_tipado"
+    )
+    assert not content_check.passed
+    assert "catalog_reference_set_mismatch" in (content_check.detail or "")
 
 
 def test_clean_benign_case_is_approved():

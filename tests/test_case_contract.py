@@ -19,6 +19,7 @@ from src.contracts.case import (
     new_case_id,
 )
 from src.orchestration.state import append_trace
+from src.mcp.threat_catalog import THREAT_INTEL_CATALOG_VERSION
 
 
 def test_new_case_id_format_and_uniqueness():
@@ -63,7 +64,7 @@ def test_case_result_full_serialization_roundtrip():
             attack_type="DDoS_TCP",
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             catalog_scope="attack_type",
-            catalog_version="2.0",
+            catalog_version=THREAT_INTEL_CATALOG_VERSION,
             catalog_taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             catalog_compatible_taxonomy_versions=[
                 MULTIDATASET_TAXONOMY_VERSION,
@@ -94,7 +95,10 @@ def test_case_result_full_serialization_roundtrip():
     assert payload["explanation"]["attack_type"] == "DDoS_TCP"
     assert "attack_family" not in payload["classification"]
     assert payload["explanation"]["catalog_scope"] == "attack_type"
-    assert payload["explanation"]["catalog_version"] == "2.0"
+    assert (
+        payload["explanation"]["catalog_version"]
+        == THREAT_INTEL_CATALOG_VERSION
+    )
     assert (
         payload["explanation"]["catalog_taxonomy_version"]
         == MULTIDATASET_TAXONOMY_VERSION
@@ -111,7 +115,7 @@ def test_case_result_full_serialization_roundtrip():
     assert restored.explanation.attack_type == "DDoS_TCP"
     assert restored.explanation.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
     assert restored.explanation.catalog_scope == "attack_type"
-    assert restored.explanation.catalog_version == "2.0"
+    assert restored.explanation.catalog_version == THREAT_INTEL_CATALOG_VERSION
     assert set(restored.explanation.catalog_compatible_taxonomy_versions) == {
         JORGE_TAXONOMY_VERSION,
         MULTIDATASET_TAXONOMY_VERSION,
@@ -141,7 +145,7 @@ def test_from_orchestrator_state_bridges_existing_contract():
             "modality": "network_flow",
             "schema_profile": "network_flow",
             "mapping_confidence": 0.9,
-            "origin": {"parser": "adapter_iot23"},
+            "origin": {"parser": "mistral"},
         },
         "ingest_output": {"mapping_confidence": 0.9, "modality": "network_flow"},
         "detection_output": {
@@ -149,7 +153,7 @@ def test_from_orchestrator_state_bridges_existing_contract():
             "is_malicious": True,
             "probability": 0.95,
             "evidence": ["dst_port=23"],
-            "model_name": "rule_based",
+            "model_name": "xgboost_detection_balanced_by_origin_20260905",
             "next_route": "classify",
             "abstain": False,
         },
@@ -175,8 +179,17 @@ def test_from_orchestrator_state_bridges_existing_contract():
             "issues": [],
         },
         "trace": [
-            {"agent": "ingest", "tool": "adapter_iot23", "status": "ok"},
-            {"agent": "detector", "status": "ok", "confidence": 0.95},
+            {
+                "agent": "final_standardizer",
+                "tool": "standardize_event",
+                "status": "ok",
+            },
+            {
+                "agent": "final_detector",
+                "tool": "detect_event",
+                "status": "ok",
+                "confidence": 0.95,
+            },
         ],
     }
 
@@ -253,7 +266,7 @@ def test_from_orchestrator_state_preserves_typed_mitigation_contract():
             "attack_type": "Command_and_Control",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
             "catalog_scope": "attack_type",
-            "catalog_version": "2.0",
+            "catalog_version": THREAT_INTEL_CATALOG_VERSION,
             "catalog_taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
             "catalog_compatible_taxonomy_versions": [
                 MULTIDATASET_TAXONOMY_VERSION,
@@ -276,7 +289,7 @@ def test_from_orchestrator_state_preserves_typed_mitigation_contract():
     assert case.explanation.attack_type == "Command_and_Control"
     assert case.explanation.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
     assert case.explanation.catalog_scope == "attack_type"
-    assert case.explanation.catalog_version == "2.0"
+    assert case.explanation.catalog_version == THREAT_INTEL_CATALOG_VERSION
     assert (
         case.explanation.catalog_taxonomy_version
         == MULTIDATASET_TAXONOMY_VERSION

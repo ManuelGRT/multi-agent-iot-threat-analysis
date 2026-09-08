@@ -1,9 +1,8 @@
 # src/agents/final/__init__.py
-"""Agentes finales del sistema (Fase 3 del plan de cierre).
+"""Agentes operativos del sistema multiagente.
 
-Sustituyen a los agentes por reglas/LLM del orquestador original usando las
-tools MCP con los modelos .joblib preparados. Cada agente registra un
-``TraceEntry`` con inicio, fin, confianza y errores en la traza del caso.
+Usan herramientas MCP y los modelos ``joblib`` desplegados. Cada agente
+registra inicio, fin, confianza y errores en la traza del caso.
 """
 from src.agents.final.final_standardizer import FinalStandardizer
 from src.agents.final.final_detector import FinalDetector

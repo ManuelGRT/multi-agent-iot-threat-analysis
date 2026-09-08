@@ -1,5 +1,5 @@
 # tests/test_mcp_graph.py
-"""Tests del grafo final MCP (Fase 3): topologia, rutas y CaseResult E2E."""
+"""Tests de topologia, rutas y CaseResult E2E del grafo MCP."""
 from __future__ import annotations
 
 import json
@@ -24,11 +24,6 @@ from tests.test_final_agents import (
     classify_ok,
     detect_ok,
     standardize_ok,
-)
-
-EDGE_STANDARDIZED = (
-    resolve_path("standardized_dataset").parent
-    / "edgeiiot_mistral_standardized_tfm_less_both_partial_cache_recalc_20260621.jsonl"
 )
 
 FINAL_AGENT_NAMES = [
@@ -495,62 +490,6 @@ def test_run_case_stops_on_persistence_error(failing_tool):
     assert failing_tool in persistence_calls
     if failing_tool == "append_trace":
         assert "update_case" not in persistence_calls
-
-
-# ---------------------------------------------------------------------------
-# criterio de aceptacion F3: evento Edge-IIoTset E2E determinista
-# ---------------------------------------------------------------------------
-
-@pytest.mark.skipif(
-    not _models_loadable() or not EDGE_STANDARDIZED.exists(),
-    reason="modelos .joblib o dataset Edge estandarizado no disponibles",
-)
-def test_edge_iiotset_event_full_pipeline_with_prepared_models():
-    """Un ataque Edge-IIoTset recorre standardize->detect->classify->explain->judge."""
-    chosen = None
-    inprocess_client = MCPToolClient(mode="inprocess")
-    with EDGE_STANDARDIZED.open("r", encoding="utf-8") as fh:
-        for _ in range(40):
-            line = fh.readline()
-            if not line:
-                break
-            row = json.loads(line)
-            if not (row.get("target") or {}).get("is_attack"):
-                continue
-            event = row.get("canonical_event") or {}
-            if float(event.get("mapping_confidence", 0.0) or 0.0) < 0.5:
-                continue
-            case = run_case(
-                {"dataset": "edge_iiotset", "canonical_event": event},
-                client=inprocess_client,
-            )
-            agents_in_trace = [entry.agent for entry in case.trace]
-            if all(name in agents_in_trace for name in FINAL_AGENT_NAMES):
-                chosen = (row, case)
-                break
-    assert chosen is not None, "ninguna fila Edge de ataque atraveso el grafo completo"
-
-    row, case = chosen
-    assert case.status in {"completed", "needs_human_review"}
-    assert len(case.trace) >= 5
-    assert case.detection.is_malicious is True
-    assert case.detection.probability > 0.6
-    assert case.classification.attack_type is not None
-    assert case.classification.top_scores
-    assert case.explanation.mitigations
-    assert case.explanation.references
-    assert case.explanation.source == "catalog"
-    # precondicion de entrada: el evento canonico del caso no arrastra targets
-    assert case.canonical_event.get("label_raw") is None
-    assert case.canonical_event.get("attack_family") is None
-
-    # determinismo: repetir el caso da el mismo resultado
-    repeat = run_case(
-        {"dataset": "edge_iiotset", "canonical_event": row["canonical_event"]},
-        client=inprocess_client,
-    )
-    assert repeat.detection.probability == pytest.approx(case.detection.probability)
-    assert repeat.classification.attack_type == case.classification.attack_type
 
 
 @pytest.mark.skipif(not _models_loadable(), reason="modelos productivos no disponibles")

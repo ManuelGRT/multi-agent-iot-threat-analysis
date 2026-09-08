@@ -83,8 +83,9 @@ La carpeta `artifacts/validation_2026/standardized/` completa:
 - `<dataset>_standardized.jsonl` (5 ficheros)
 - `<dataset>_run_summary.json` (5 ficheros)
 
-Con eso se ejecutan las Fases D-F (entrenamiento/evaluación limpios,
-comparativa con Jorge y actualización de memoria) en el equipo principal.
+La campaña de estandarización termina al verificar la cobertura LLM completa.
+El entrenamiento y la evaluación de los modelos vigentes se ejecutan después,
+en el equipo principal, mediante sus scripts específicos.
 
 ## Criterios de calidad de la campaña
 

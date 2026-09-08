@@ -65,7 +65,6 @@ def _config(root: Path, **overrides) -> campaign.CampaignConfig:
         "repo": root,
         "manifest_dir": root / "manifests",
         "results_dir": root / "standardized",
-        "evaluation_dir": root / "evaluation",
         "state_dir": root / "state",
         "python_executable": "python-test",
         "workers": 3,
@@ -145,33 +144,23 @@ def test_manifest_inventory_rejects_duplicate_ids_across_datasets(tmp_path):
         campaign.load_manifest_inventory(tmp_path / "manifests")
 
 
-def test_commands_and_phase_environments_are_explicit_and_secret_safe(tmp_path):
+def test_standardization_command_and_environment_are_explicit_and_secret_safe(tmp_path):
     secret = "super-secret-key"
     config = _config(tmp_path, workers=7, provider="mistral", model="fixed-model")
 
     standardize = campaign.standardization_command(config)
-    evaluate = campaign.evaluation_command(config)
     phase_c_env = campaign.standardization_environment(
         config,
         {"PATH": "safe", "MISTRAL_API_KEY": secret, "OTHER_TOKEN": "remove-later"},
     )
-    evaluation_env = campaign.evaluation_environment(phase_c_env)
 
     assert standardize[-3:] == ("--workers", "7", "--retry-failures")
-    assert "--manifest-dir" in evaluate
-    assert str(config.manifest_dir) in evaluate
-    assert str(config.results_dir) in evaluate
-    assert str(config.evaluation_dir) in evaluate
-    assert evaluate[evaluate.index("--provider") + 1] == "mistral"
-    assert evaluate[evaluate.index("--model") + 1] == "fixed-model"
-    assert secret not in " ".join(standardize + evaluate)
+    assert secret not in " ".join(standardize)
     assert phase_c_env["MISTRAL_API_KEY"] == secret
     assert "OTHER_TOKEN" not in phase_c_env
     assert phase_c_env["LLM_PROVIDER"] == "mistral"
     assert phase_c_env["INGEST_LLM_MODEL"] == "fixed-model"
-    assert "MISTRAL_API_KEY" not in evaluation_env
-    assert "OTHER_TOKEN" not in evaluation_env
-    assert evaluation_env["PATH"] == "safe"
+    assert phase_c_env["PATH"] == "safe"
 
 
 def test_logged_process_receives_explicit_environment_and_compacts_log(tmp_path):
@@ -217,12 +206,12 @@ def test_wait_and_backoff_are_split_into_at_most_sixty_seconds():
     assert poll_sleeps == [60.0, 60.0, 5.0]
 
 
-def test_complete_campaign_needs_no_key_and_evaluator_gets_sanitized_env(
+def test_complete_campaign_needs_no_key_and_launches_no_obsolete_evaluator(
     tmp_path,
     monkeypatch,
+    capsys,
 ):
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
-    monkeypatch.setenv("ANOTHER_SECRET", "must-not-leak")
     _manifest(tmp_path, "sample", ["a", "b"])
     _write_jsonl(
         tmp_path / "standardized" / "sample_standardized.jsonl",
@@ -237,16 +226,17 @@ def test_complete_campaign_needs_no_key_and_evaluator_gets_sanitized_env(
     config = _config(tmp_path)
     assert campaign.run_campaign(config, process_runner=fake_runner) == 0
 
-    assert len(calls) == 1
-    assert calls[0][0][2] == "scripts/eval_validacion_por_dataset.py"
-    assert "MISTRAL_API_KEY" not in calls[0][4]
-    assert "ANOTHER_SECRET" not in calls[0][4]
+    assert calls == []
     checkpoint = json.loads(config.checkpoint_path.read_text(encoding="utf-8"))
     assert checkpoint["phase"] == "complete"
     assert checkpoint["provider"] == "mistral"
     assert checkpoint["model"] == "mistral-small-2603"
     assert checkpoint["status"]["complete"] is True
+    assert checkpoint["completed_scope"] == "llm_standardization"
     assert checkpoint["counters"]["rounds_started"] == 0
+    output = capsys.readouterr().out
+    assert "Estandarizacion cerrada" in output
+    assert "runners actuales" in output
 
 
 def test_incomplete_campaign_requires_key_only_before_standardization(
@@ -266,7 +256,7 @@ def test_incomplete_campaign_requires_key_only_before_standardization(
     assert calls == []
 
 
-def test_campaign_retries_until_complete_and_scrubs_key_from_evaluation(
+def test_campaign_retries_until_standardization_is_complete(
     tmp_path,
     monkeypatch,
 ):
@@ -288,10 +278,9 @@ def test_campaign_retries_until_complete_and_scrubs_key_from_evaluation(
 
     assert campaign.run_campaign(_config(tmp_path), process_runner=fake_runner) == 0
 
-    assert len(calls) == 3
+    assert len(calls) == 2
     assert calls[0][1]["MISTRAL_API_KEY"] == "only-phase-c"
     assert calls[1][1]["MISTRAL_API_KEY"] == "only-phase-c"
-    assert "MISTRAL_API_KEY" not in calls[2][1]
 
 
 def test_no_progress_requires_three_consecutive_rounds_and_checkpoints_codes(
@@ -349,7 +338,7 @@ def test_progress_resets_no_progress_counter_and_max_rounds_is_distinct(
     assert checkpoint["counters"]["total_new_llm_successes"] == 1
 
 
-def test_existing_pid_is_waited_before_complete_evaluation_without_key(
+def test_existing_pid_is_waited_before_complete_standardization_without_key(
     tmp_path,
     monkeypatch,
 ):
@@ -374,8 +363,7 @@ def test_existing_pid_is_waited_before_complete_evaluation_without_key(
     ) == 0
 
     assert sleeps == [0.25]
-    assert len(calls) == 1
-    assert calls[0][0][2] == "scripts/eval_validacion_por_dataset.py"
+    assert calls == []
 
 
 def test_real_runner_rejects_custom_incomplete_directories_before_launch(tmp_path):
@@ -408,3 +396,4 @@ def test_parser_defaults_allow_long_campaign_and_fixed_model():
     assert args.max_no_progress_rounds == 3
     assert args.provider == "mistral"
     assert args.model == "mistral-small-2603"
+    assert not hasattr(args, "evaluation_dir")

@@ -1,14 +1,12 @@
-"""Preparacion reproducible de clasificadores multidataset de ataques.
+"""Preparacion reproducible del clasificador multidataset de 16 ataques.
 
-El modulo no entrena modelos. Resuelve la taxonomia, elimina duplicados y
-selecciona corpus balanceados. Conserva el protocolo historico basado en las
-particiones de ``validation_2026`` y ofrece, por separado, un protocolo que
-selecciona primero el corpus y crea despues un split especifico del
-clasificador, estratificado por clase y procedencia.
+El modulo no entrena modelos. Resuelve la taxonomia vigente, elimina
+duplicados, selecciona un corpus global balanceado y crea un split 70/15/15
+estratificado por clase y procedencia.
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict, deque
+from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 import hashlib
 from itertools import combinations
@@ -17,13 +15,10 @@ import random
 from typing import Any, Iterable, Mapping, Sequence
 
 from src.contracts.attack_taxonomy import (
-    JORGE_ATTACK_CLASSES,
-    JORGE_TAXONOMY_VERSION,
     MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
     normalise_dataset,
     normalise_taxonomy_token,
-    resolve_jorge_class,
     resolve_multidataset_class,
 )
 from src.eval.classifier_targets import MappingContext
@@ -71,94 +66,6 @@ def classifier_origins(dataset: str, source_file: str) -> tuple[str, str]:
     else:
         raise ValueError(f"Fichero TON-IoT de modalidad desconocida: {source_file!r}")
     return dataset_origin, detail
-
-
-def map_classifier_records(
-    records: Iterable[PreparedRecord],
-    *,
-    native_subclasses: Mapping[str, str] | None = None,
-) -> tuple[
-    tuple[MappedClassifierRecord, ...],
-    tuple[RejectedClassifierRecord, ...],
-    dict[str, Any],
-]:
-    """Mapea ataques a las 14 clases sin convertir ambiguedades en etiquetas."""
-
-    subclasses = native_subclasses or {}
-    mapped: list[MappedClassifierRecord] = []
-    rejected: list[RejectedClassifierRecord] = []
-    status_counts: Counter[str] = Counter()
-    reason_counts: Counter[str] = Counter()
-    mapped_by_dataset: dict[str, Counter[str]] = defaultdict(Counter)
-
-    for record in records:
-        if "multiclass" not in record.tasks:
-            status_counts["task_not_declared"] += 1
-            continue
-        if not isinstance(record.target_is_attack, bool):
-            raise ValueError(
-                f"{record.manifest_id}: target_is_attack invalido para multiclass"
-            )
-        resolution = resolve_jorge_class(
-            record.dataset,
-            record.target_class,
-            subclasses.get(record.manifest_id),
-        )
-        if record.target_is_attack is False:
-            if resolution.status != "benign":
-                raise ValueError(
-                    f"{record.manifest_id}: target benigno incoherente con "
-                    f"target_class={record.target_class!r}"
-                )
-            status_counts["non_attack"] += 1
-            continue
-        native_subclass = subclasses.get(record.manifest_id)
-        if resolution.status == "benign":
-            raise ValueError(
-                f"{record.manifest_id}: target de ataque incoherente con clase benigna"
-            )
-        status_counts[resolution.status] += 1
-        reason_counts[resolution.reason] += 1
-        if resolution.status != "exact" or resolution.attack_type is None:
-            rejected.append(
-                RejectedClassifierRecord(
-                    record=record,
-                    status=resolution.status,
-                    reason=resolution.reason,
-                    native_subclass=native_subclass,
-                )
-            )
-            continue
-        dataset_origin, detailed_origin = classifier_origins(
-            record.dataset, record.source_file
-        )
-        mapped.append(
-            MappedClassifierRecord(
-                record=record,
-                label=resolution.attack_type,
-                dataset_origin=dataset_origin,
-                detailed_origin=detailed_origin,
-                mapping_reason=resolution.reason,
-                mapping_status=resolution.status,
-            )
-        )
-        mapped_by_dataset[dataset_origin][resolution.attack_type] += 1
-
-    mapped.sort(key=lambda item: item.record.manifest_id)
-    rejected.sort(key=lambda item: item.record.manifest_id)
-    report = {
-        "taxonomy_version": JORGE_TAXONOMY_VERSION,
-        "input_rows": sum(status_counts.values()),
-        "mapped_rows": len(mapped),
-        "rejected_attack_rows": len(rejected),
-        "status_counts": dict(sorted(status_counts.items())),
-        "reason_counts": dict(sorted(reason_counts.items())),
-        "mapped_by_dataset": {
-            dataset: dict(sorted(counts.items()))
-            for dataset, counts in sorted(mapped_by_dataset.items())
-        },
-    }
-    return tuple(mapped), tuple(rejected), report
 
 
 def map_multidataset_classifier_records(
@@ -271,17 +178,6 @@ def map_multidataset_classifier_records(
     return tuple(mapped), tuple(rejected), report
 
 
-def deduplicate_mapped_records(
-    records: Sequence[MappedClassifierRecord] | Iterable[MappedClassifierRecord],
-) -> tuple[tuple[MappedClassifierRecord, ...], dict[str, Any]]:
-    """Deduplica globalmente antes del balanceo y falla cerrado entre splits."""
-
-    mapped, rejected, report = deduplicate_classifier_universe(records, ())
-    if rejected:
-        raise AssertionError("El wrapper de deduplicacion mapeada genero rechazados")
-    return mapped, report
-
-
 def deduplicate_classifier_universe(
     mapped_records: Sequence[MappedClassifierRecord] | Iterable[MappedClassifierRecord],
     rejected_records: Sequence[RejectedClassifierRecord]
@@ -389,113 +285,14 @@ def deduplicate_classifier_universe(
     return kept_mapped, kept_rejected, report
 
 
-def balance_classifier_splits(
-    records: Sequence[MappedClassifierRecord] | Iterable[MappedClassifierRecord],
-    *,
-    per_class_total: int | None = None,
-    seed: int = 42,
-    classes: Sequence[str] = JORGE_ATTACK_CLASSES,
-) -> tuple[tuple[MappedClassifierRecord, ...], dict[str, Any]]:
-    """Balancea las clases indicadas por split y diversifica su procedencia."""
-
-    values = tuple(records)
-    expected_classes = tuple(str(label) for label in classes)
-    if not expected_classes or len(expected_classes) != len(set(expected_classes)):
-        raise ValueError("classes debe contener etiquetas unicas y no estar vacio")
-    available = _support_report(values)
-    present = set(available["class_counts"])
-    expected = set(expected_classes)
-    if present != expected:
-        missing = sorted(expected - present)
-        unexpected = sorted(present - expected)
-        raise ValueError(
-            f"Taxonomia incompleta para balancear; missing={missing}, unexpected={unexpected}"
-        )
-
-    cycles = min(
-        int(available["splits"][split]["class_counts"].get(label, 0)) // units
-        for split, units in SPLIT_UNITS.items()
-        for label in expected_classes
-    )
-    if per_class_total is not None:
-        if (
-            isinstance(per_class_total, bool)
-            or not isinstance(per_class_total, int)
-            or per_class_total <= 0
-        ):
-            raise ValueError("per_class_total debe ser un entero positivo")
-        if per_class_total % TOTAL_UNITS:
-            raise ValueError(
-                f"per_class_total debe ser multiplo de {TOTAL_UNITS} para 70/15/15"
-            )
-        requested_cycles = per_class_total // TOTAL_UNITS
-        if requested_cycles > cycles:
-            raise ValueError(
-                f"Cuota solicitada {per_class_total} superior al maximo {cycles * TOTAL_UNITS}"
-            )
-        cycles = requested_cycles
-    if cycles < 1:
-        raise ValueError("No hay soporte para una unidad completa 70/15/15 por clase")
-
-    quotas = {split: units * cycles for split, units in SPLIT_UNITS.items()}
-    selected: list[MappedClassifierRecord] = []
-    for split in SPLIT_UNITS:
-        for label in expected_classes:
-            candidates = [
-                item
-                for item in values
-                if item.record.split == split and item.label == label
-            ]
-            selected.extend(
-                _fair_select_by_dataset_and_origin(
-                    candidates,
-                    quotas[split],
-                    seed=f"{seed}:{split}:{label}",
-                )
-            )
-
-    selected.sort(
-        key=lambda item: (
-            list(SPLIT_UNITS).index(item.record.split),
-            item.label,
-            item.record.manifest_id,
-        )
-    )
-    selected_support = _support_report(selected)
-    for split, quota in quotas.items():
-        counts = selected_support["splits"][split]["class_counts"]
-        if any(counts.get(label) != quota for label in expected_classes):
-            raise AssertionError(f"Balance incompleto en {split}: {counts}")
-    identifiers = [item.record.manifest_id for item in selected]
-    if len(identifiers) != len(set(identifiers)):
-        raise AssertionError("El balanceo selecciono una fila mas de una vez")
-
-    report = {
-        "policy": "global_class_balance_then_max_min_dataset_origin_diversification",
-        "seed": seed,
-        "ratio_units": dict(SPLIT_UNITS),
-        "classes": list(expected_classes),
-        "cycles": cycles,
-        "per_class_total": cycles * TOTAL_UNITS,
-        "quotas_per_class": quotas,
-        "available": available,
-        "selected": selected_support,
-        "selected_rows": len(selected),
-        "selection_sha256": _selection_sha256(selected),
-        "split_membership_preserved": True,
-        "sampling_with_replacement": False,
-    }
-    return tuple(selected), report
-
-
 def build_balanced_stratified_classifier_corpus(
     records: Sequence[MappedClassifierRecord] | Iterable[MappedClassifierRecord],
     *,
     per_class_total: int | None = None,
     seed: int = 42,
-    classes: Sequence[str] = JORGE_ATTACK_CLASSES,
+    classes: Sequence[str] = MULTIDATASET_ATTACK_CLASSES,
 ) -> tuple[tuple[MappedClassifierRecord, ...], dict[str, Any]]:
-    """Selecciona primero un corpus balanceado y despues crea su split.
+    """Construye el corpus balanceado del clasificador actual de 16 tipos.
 
     La cuota automatica es el menor soporte global entre clases. El split de
     la campana fuente no interviene en la seleccion ni en la asignacion nueva.
@@ -1014,108 +811,6 @@ def balanced_origin_test_views(
     return views
 
 
-def shared_dataset_test_views(
-    records: Sequence[MappedClassifierRecord] | Iterable[MappedClassifierRecord],
-    *,
-    seed: int = 42,
-    detailed: bool = False,
-) -> dict[str, dict[str, tuple[MappedClassifierRecord, ...]]]:
-    """Construye pares con igual clase y soporte para comparar datasets."""
-
-    test = [item for item in records if item.record.split == "test"]
-    origin_key = (
-        (lambda item: item.detailed_origin)
-        if detailed
-        else (lambda item: item.dataset_origin)
-    )
-    origins = sorted({origin_key(item) for item in test})
-    output: dict[str, dict[str, tuple[MappedClassifierRecord, ...]]] = {}
-    for left_index, left in enumerate(origins):
-        for right in origins[left_index + 1 :]:
-            left_rows = [item for item in test if origin_key(item) == left]
-            right_rows = [item for item in test if origin_key(item) == right]
-            left_counts = Counter(item.label for item in left_rows)
-            right_counts = Counter(item.label for item in right_rows)
-            shared = sorted(set(left_counts).intersection(right_counts))
-            if not shared:
-                continue
-            quota = min(
-                min(left_counts[label], right_counts[label]) for label in shared
-            )
-            pair: dict[str, tuple[MappedClassifierRecord, ...]] = {}
-            for origin, rows in ((left, left_rows), (right, right_rows)):
-                selected: list[MappedClassifierRecord] = []
-                for label in shared:
-                    candidates = [item for item in rows if item.label == label]
-                    ordered = _deterministic_shuffle(
-                        candidates, f"{seed}:shared:{left}:{right}:{origin}:{label}"
-                    )
-                    selected.extend(ordered[:quota])
-                selected.sort(key=lambda item: (item.label, item.record.manifest_id))
-                pair[origin] = tuple(selected)
-            output[f"{left}__vs__{right}"] = pair
-    return output
-
-
-def _fair_select_by_dataset_and_origin(
-    records: Sequence[MappedClassifierRecord],
-    count: int,
-    *,
-    seed: str,
-) -> list[MappedClassifierRecord]:
-    if count > len(records):
-        raise ValueError(f"Se solicitaron {count} filas de un pool de {len(records)}")
-
-    by_dataset: dict[str, list[MappedClassifierRecord]] = defaultdict(list)
-    for item in records:
-        by_dataset[item.dataset_origin].append(item)
-
-    dataset_queues: dict[str, deque[MappedClassifierRecord]] = {}
-    for dataset, rows in sorted(by_dataset.items()):
-        origin_groups: dict[str, list[MappedClassifierRecord]] = defaultdict(list)
-        for item in rows:
-            origin_groups[item.detailed_origin].append(item)
-        interleaved = _round_robin_groups(
-            origin_groups,
-            seed=f"{seed}:dataset:{dataset}",
-        )
-        dataset_queues[dataset] = deque(interleaved)
-
-    dataset_order = sorted(dataset_queues)
-    random.Random(f"{seed}:dataset-order").shuffle(dataset_order)
-    selected: list[MappedClassifierRecord] = []
-    while len(selected) < count:
-        progressed = False
-        for dataset in dataset_order:
-            queue = dataset_queues[dataset]
-            if queue:
-                selected.append(queue.popleft())
-                progressed = True
-                if len(selected) == count:
-                    break
-        if not progressed:
-            raise AssertionError("El reparto por origen agoto el pool prematuramente")
-    return selected
-
-
-def _round_robin_groups(
-    groups: Mapping[str, Sequence[MappedClassifierRecord]],
-    *,
-    seed: str,
-) -> list[MappedClassifierRecord]:
-    queues: dict[str, deque[MappedClassifierRecord]] = {}
-    for name, values in sorted(groups.items()):
-        queues[name] = deque(_deterministic_shuffle(values, f"{seed}:{name}"))
-    order = sorted(queues)
-    random.Random(f"{seed}:order").shuffle(order)
-    output: list[MappedClassifierRecord] = []
-    while any(queues.values()):
-        for name in order:
-            if queues[name]:
-                output.append(queues[name].popleft())
-    return output
-
-
 def _deterministic_shuffle(
     records: Sequence[MappedClassifierRecord] | Iterable[MappedClassifierRecord],
     seed: str,
@@ -1209,13 +904,9 @@ __all__ = [
     "MappedClassifierRecord",
     "RejectedClassifierRecord",
     "SPLIT_UNITS",
-    "balance_classifier_splits",
     "balanced_origin_test_views",
     "build_balanced_stratified_classifier_corpus",
     "classifier_origins",
     "deduplicate_classifier_universe",
-    "deduplicate_mapped_records",
-    "map_classifier_records",
     "map_multidataset_classifier_records",
-    "shared_dataset_test_views",
 ]

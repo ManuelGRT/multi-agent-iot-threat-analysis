@@ -1,5 +1,5 @@
 # src/agents/final/auditor.py
-"""Agente de auditoria E2E — auditoria por caso (Fase 5a del plan de cierre).
+"""Agente de auditoria E2E posterior al cierre de cada caso.
 
 Valida un ``CaseResult`` terminado en cuatro dimensiones:
 
@@ -14,8 +14,8 @@ Valida un ``CaseResult`` terminado en cuatro dimensiones:
    clasificacion deben haberse traducido en revision humana cuando toca.
 
 Veredicto: ``approve`` (limpio) / ``review`` (correctamente derivado a humano)
-/ ``reject`` (fallo duro: el caso no es fiable). La auditoria batch de sistema
-(Fase 5b) vive en ``scripts/run_system_audit.py`` y usa este mismo auditor.
+/ ``reject`` (fallo estructural: el caso no es fiable). La auditoria portable
+de ``scripts/run_system_audit.py`` usa este mismo agente.
 """
 from __future__ import annotations
 
@@ -24,9 +24,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from src.contracts.attack_taxonomy import (
+    MULTIDATASET_ATTACK_CLASSES,
     MULTIDATASET_TAXONOMY_VERSION,
-    SUPPORTED_ATTACK_TAXONOMY_VERSIONS,
-    attack_classes_for_taxonomy,
 )
 from src.contracts.leakage import (
     contains_predictive_target_text,
@@ -35,6 +34,10 @@ from src.contracts.leakage import (
     is_predictive_target_value,
 )
 from src.contracts.case import CaseResult
+from src.mcp.threat_catalog import (
+    THREAT_INTEL_CATALOG_VERSION,
+    catalog_output_issues,
+)
 
 GRAY_ZONE_LOW = 0.4
 GRAY_ZONE_HIGH = 0.6
@@ -240,21 +243,18 @@ class CaseAuditor:
                 ),
             )
         attack_classes: tuple[str, ...] = ()
-        taxonomy_supported = False
         if detection.is_malicious:
             add(
                 "consistencia_modelo_por_tipo",
                 classification.model_task == "attack_type",
                 detail=f"model_task={classification.model_task}",
             )
-            try:
-                attack_classes = attack_classes_for_taxonomy(
-                    classification.taxonomy_version
-                )
-            except ValueError:
-                pass
-            else:
-                taxonomy_supported = True
+            taxonomy_supported = (
+                classification.taxonomy_version
+                == MULTIDATASET_TAXONOMY_VERSION
+            )
+            if taxonomy_supported:
+                attack_classes = MULTIDATASET_ATTACK_CLASSES
             add(
                 "consistencia_tipo_ataque_presente",
                 classification.attack_type is not None,
@@ -265,7 +265,20 @@ class CaseAuditor:
                 taxonomy_supported,
                 detail=(
                     f"recibida={classification.taxonomy_version} "
-                    f"soportadas={list(SUPPORTED_ATTACK_TAXONOMY_VERSIONS)}"
+                    f"esperada={MULTIDATASET_TAXONOMY_VERSION} "
+                    f"clases={len(MULTIDATASET_ATTACK_CLASSES)}"
+                ),
+            )
+            add(
+                "consistencia_umbral_clasificacion_operativo",
+                abs(
+                    float(classification.decision_threshold)
+                    - REVIEW_CLASSIFICATION_CONFIDENCE
+                )
+                <= 1e-9,
+                detail=(
+                    f"recibido={classification.decision_threshold} "
+                    f"esperado={REVIEW_CLASSIFICATION_CONFIDENCE}"
                 ),
             )
             invalid_scores = {
@@ -341,8 +354,11 @@ class CaseAuditor:
             add(
                 "consistencia_mitigacion_catalogo_tipado",
                 case.explanation.catalog_scope == "attack_type"
-                and bool(case.explanation.catalog_version)
+                and case.explanation.catalog_version
+                == THREAT_INTEL_CATALOG_VERSION
                 and case.explanation.catalog_taxonomy_version
+                == MULTIDATASET_TAXONOMY_VERSION
+                and classification.taxonomy_version
                 == MULTIDATASET_TAXONOMY_VERSION
                 and classification.taxonomy_version
                 in case.explanation.catalog_compatible_taxonomy_versions,
@@ -354,6 +370,16 @@ class CaseAuditor:
                     f"{case.explanation.catalog_compatible_taxonomy_versions} "
                     f"taxonomia_clasificador={classification.taxonomy_version}"
                 ),
+            )
+            catalog_issues = catalog_output_issues(
+                case.explanation,
+                attack_type=classification.attack_type,
+                schema_profile=case.canonical_event.get("schema_profile"),
+            )
+            add(
+                "consistencia_contenido_catalogo_tipado",
+                not catalog_issues,
+                detail=("; ".join(catalog_issues) if catalog_issues else None),
             )
             add(
                 "consistencia_veredicto_juez_tipo_ataque",
@@ -510,7 +536,7 @@ class CaseAuditor:
 
     # ------------------------------------------------------------------
     def audit_batch(self, cases: list[CaseResult]) -> dict[str, Any]:
-        """Resumen agregado para la auditoria de sistema (Fase 5b)."""
+        """Resume los veredictos de auditoria de varios casos cerrados."""
         reports = [self.audit(case) for case in cases]
         by_verdict = {"approve": 0, "review": 0, "reject": 0}
         for report in reports:

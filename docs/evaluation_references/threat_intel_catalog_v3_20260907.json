@@ -1,0 +1,62 @@
+{
+  "schema_version": "threat-intel-catalog-evaluation-v1",
+  "generated_at": "2026-09-07",
+  "artifact": {
+    "filename": "threat_intel_catalog.json",
+    "bytes": 19446,
+    "sha256": "b282a389111bd5fc8d54170f2b045ad33a5cd79ec000f1a22efa26b0276a21ae",
+    "version": "3.0"
+  },
+  "taxonomy": {
+    "version": "multidataset_attack_type_v1_2026-09-06",
+    "class_count": 16,
+    "classes": [
+      "Backdoor",
+      "DDoS_HTTP",
+      "DDoS_ICMP",
+      "DDoS_TCP",
+      "DDoS_UDP",
+      "Fingerprinting",
+      "MITM",
+      "Password",
+      "Port_Scanning",
+      "Ransomware",
+      "SQL_injection",
+      "Uploading",
+      "Vulnerability_scanner",
+      "XSS",
+      "DoS",
+      "Command_and_Control"
+    ]
+  },
+  "mitigations_per_attack_type": {
+    "Backdoor": 5,
+    "DDoS_HTTP": 5,
+    "DDoS_ICMP": 5,
+    "DDoS_TCP": 5,
+    "DDoS_UDP": 5,
+    "Fingerprinting": 5,
+    "MITM": 5,
+    "Password": 5,
+    "Port_Scanning": 5,
+    "Ransomware": 5,
+    "SQL_injection": 5,
+    "Uploading": 5,
+    "Vulnerability_scanner": 5,
+    "XSS": 5,
+    "DoS": 5,
+    "Command_and_Control": 6
+  },
+  "reference_catalog_counts": {
+    "attack_techniques": 10,
+    "capec_patterns": 16,
+    "attack_mitigation_refs": 8
+  },
+  "validation": {
+    "coverage": "16/16",
+    "minimum_mitigations_per_type": 5,
+    "lookup_scope": "attack_type",
+    "broad_family_mapping_present": false,
+    "historical_jorge_table_present": false
+  }
+}

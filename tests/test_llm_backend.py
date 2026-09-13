@@ -229,7 +229,7 @@ async def test_openai_compatible_agent_retries_transient_connection_errors(
     monkeypatch.delenv("MISTRAL_RETRY_WAIT_SECONDS", raising=False)
     monkeypatch.delenv("OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS", raising=False)
 
-    agent = MistralChatAgent(model="ministral-8b-latest", timeout_seconds=7)
+    agent = MistralChatAgent(model="mistral-small-2603", timeout_seconds=7)
     result = await agent.invoke_json("system", {"row": 1}, {"type": "object"})
 
     assert result == {"event_id": "after-connect-retry"}
@@ -272,7 +272,7 @@ async def test_openai_compatible_agent_raises_after_connection_retries(monkeypat
     monkeypatch.delenv("MISTRAL_RETRY_WAIT_SECONDS", raising=False)
     monkeypatch.delenv("OPENAI_COMPATIBLE_RETRY_WAIT_SECONDS", raising=False)
 
-    agent = MistralChatAgent(model="ministral-8b-latest", timeout_seconds=7)
+    agent = MistralChatAgent(model="mistral-small-2603", timeout_seconds=7)
     with pytest.raises(base.httpx.ConnectError, match="dns failure 3") as exc_info:
         await agent.invoke_json("system", {"row": 1}, {"type": "object"})
 
@@ -312,7 +312,7 @@ async def test_connection_retries_do_not_retry_unconfigured_http_errors(monkeypa
     monkeypatch.setenv("MISTRAL_API_KEY", "test-secret")
     monkeypatch.setenv("MISTRAL_CONNECTION_RETRIES", "3")
 
-    agent = MistralChatAgent(model="ministral-8b-latest", timeout_seconds=7)
+    agent = MistralChatAgent(model="mistral-small-2603", timeout_seconds=7)
     with pytest.raises(base.httpx.HTTPStatusError):
         await agent.invoke_json("system", {"row": 1}, {"type": "object"})
 
@@ -326,7 +326,7 @@ def test_direct_api_agents_use_provider_env_keys(monkeypatch):
     monkeypatch.delenv("MISTRAL_CONNECTION_RETRIES", raising=False)
     monkeypatch.delenv("OPENAI_COMPATIBLE_CONNECTION_RETRIES", raising=False)
 
-    mistral = MistralChatAgent(model="mistral-small-latest")
+    mistral = MistralChatAgent(model="mistral-small-2603")
     google = GoogleAIStudioChatAgent(model="gemini-2.5-flash")
 
     assert mistral.api_key == "mistral-secret"

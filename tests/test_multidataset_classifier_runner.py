@@ -237,7 +237,9 @@ def test_portable_reference_builder_strips_local_paths_and_keeps_ton_views():
 def test_versioned_portable_reference_matches_deployed_classifier_contract():
     path = (
         Path(__file__).resolve().parents[1]
-        / "docs"
+        / "src"
+        / "eval"
+        / "data"
         / "evaluation_references"
         / "xgboost_attack_type_multidataset16_balanced500_20260907.json"
     )

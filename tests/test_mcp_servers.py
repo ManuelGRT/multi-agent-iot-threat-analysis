@@ -458,10 +458,12 @@ def test_threat_intel_contextualizes_with_authoritative_catalog_and_filtered_con
     assert set(prompt["classification"]) == {
         "attack_type",
         "confidence",
+        "decision_threshold",
         "model_task",
         "taxonomy_version",
         "top_scores",
     }
+    assert prompt["classification"]["decision_threshold"] == 0.65
 
     prompt_catalog = prompt["catalog"]
     assert prompt_catalog["attack_type"] == catalog["attack_type"]

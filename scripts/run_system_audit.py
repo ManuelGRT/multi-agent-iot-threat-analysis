@@ -43,7 +43,7 @@ from src.mcp.common import artifacts_dir, resolve_confined_path, resolve_path
 
 
 GREEN, RED = "VERDE", "ROJO"
-REFERENCE_ROOT = PROJECT_ROOT / "docs" / "evaluation_references"
+REFERENCE_ROOT = PROJECT_ROOT / "src" / "eval" / "data" / "evaluation_references"
 DETECTOR_REFERENCE = (
     REFERENCE_ROOT / "xgboost_detection_balanced_by_origin_20260905.json"
 )

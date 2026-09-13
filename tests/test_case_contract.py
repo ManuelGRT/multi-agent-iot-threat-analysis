@@ -47,7 +47,7 @@ def test_case_result_full_serialization_roundtrip():
         raw_input={"dataset": "edge_iiotset", "row_id": 7},
         canonical_event={"event_id": "evt-1", "modality": "network_flow"},
         standardization=StandardizationInfo(
-            model="mistral-small-latest", mapping_confidence=0.92, from_cache=True
+            model="mistral-small-2603", mapping_confidence=0.92, from_cache=True
         ),
         detection=DetectionInfo(is_malicious=True, probability=0.97, model_name="xgb_std_edge"),
         classification=ClassificationInfo(

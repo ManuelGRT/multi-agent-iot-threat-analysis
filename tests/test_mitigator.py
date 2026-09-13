@@ -536,6 +536,10 @@ def test_all_16_attack_types_are_contextualized_and_approved_when_anchored(
 
     sent = tool_client.backend_calls[0]["user_payload"]
     assert sent["classification"]["attack_type"] == attack_type
+    assert sent["classification"]["decision_threshold"] == 0.65
+    assert "Distingue siempre detection.probability" in tool_client.backend_calls[0][
+        "system_prompt"
+    ]
     assert "attack_family" not in sent["classification"]
     assert "attack_subtype" not in sent["classification"]
     assert (

@@ -237,11 +237,10 @@ solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
 | `src/agents/final/` | Cinco agentes operacionales y el auditor posterior independiente |
 | `src/mcp/` | Tres servidores MCP: inferencia, persistencia de caché/casos/trazas y catálogo de amenazas con contextualización Mistral; incluye modelos y catálogo empaquetados |
 | `src/orchestration/` | Grafo LangGraph del flujo final y su estado |
-| `src/eval/` | Sanitización, entrenamiento y evaluación exclusivamente offline |
+| `src/eval/` | Sanitización, entrenamiento y evaluación exclusivamente offline; incluye las referencias congeladas de auditoría |
 | `src/api/` | API FastAPI + visor web (`static/index.html`) |
 | `scripts/` | Utilidades offline de entrenamiento, evaluación y validación |
-| `docs/` | Arquitectura, guion de demostración y material para la memoria |
-| `tests/` | Suite automatizada completa |
+| `tests/` | Suite automatizada esencial del sistema y de sus contratos operativos |
 
 El repositorio de despliegue no contiene adaptadores, agentes alternativos ni
 grafos legacy. La sanitización se conserva como herramienta offline para

@@ -288,12 +288,19 @@ class _PersistentStdioServer:
         self._requests = asyncio.Queue()
         self._loop_ready.set()
 
+        child_env = dict(os.environ)
+        # Comunica al servidor hijo el plazo real de este cliente, incluso si
+        # se proporciono mediante el constructor en lugar del entorno. Las
+        # tools con trabajo remoto pueden asi reservar margen para serializar
+        # un error controlado antes de que el transporte las cancele.
+        child_env[CLIENT_MODE_ENV] = "stdio"
+        child_env[STDIO_TIMEOUT_ENV] = f"{self.timeout_seconds:g}"
         params = StdioServerParameters(
             command=self.python_executable,
             args=["-m", SERVER_MODULES[self.server]],
             # El proceso hijo recibe la configuracion capturada al arrancar el
             # servidor: Mistral, rutas SQLite, artefactos y demas parametros.
-            env=dict(os.environ),
+            env=child_env,
         )
         async with stdio_client(params) as (read, write):
             async with ClientSession(
@@ -532,10 +539,13 @@ async def list_tools_stdio(
 
     resolved_timeout = _resolve_stdio_timeout_seconds(timeout_seconds)
 
+    child_env = dict(os.environ)
+    child_env[CLIENT_MODE_ENV] = "stdio"
+    child_env[STDIO_TIMEOUT_ENV] = f"{resolved_timeout:g}"
     params = StdioServerParameters(
         command=python_executable or sys.executable,
         args=["-m", SERVER_MODULES[server]],
-        env=dict(os.environ),
+        env=child_env,
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(

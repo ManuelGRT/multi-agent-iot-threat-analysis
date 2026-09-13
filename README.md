@@ -24,7 +24,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 | **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Consulta mediante el servidor MCP `case_memory` una caché SQLite por hash exacto, que reutiliza únicamente éxitos previos de Mistral y reconstruye la identidad del caso actual. En un *cache miss*, solicita a `inference` que Mistral seleccione las columnas y genere el evento canónico, y devuelve el éxito a `case_memory` para almacenarlo | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase balanceado: identifica directamente uno de los 16 tipos de ataque | Tipo, confianza y top-3 de tipos; si la confianza es < 0,65, el caso va a revisión |
-| **Mitigador** | Consulta por `attack_type` la entrada específica del **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarla con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; cualquier mitigación o referencia adicional se descarta |
+| **Mitigador** | Invoca `threat_intel.suggest_mitigations` para consultar por `attack_type` el **catálogo verificable** (ATT&CK + CAPEC) y `threat_intel.contextualize_mitigations` para solicitar la contextualización con Mistral | Si el LLM falla conserva el catálogo; cualquier mitigación o referencia adicional se descarta |
 | **Juez** | Aplica reglas deterministas sobre el caso completo y comprueba que clasificación y mitigación conserven el mismo tipo | Aprobar o derivar a revisión humana |
 | **Auditor** | Revisa a posteriori el caso cerrado, incluida la coherencia del tipo entre clasificador, catálogo, mitigador, juez y persistencia | Aprobar, revisar o rechazar |
 
@@ -60,7 +60,9 @@ Ideas clave del diseño:
   persistir el resultado. El modo `inprocess` conserva el mismo contrato, pero
   queda reservado para la demostración rápida y las pruebas que no evalúan el
   transporte.
-- **El LLM del mitigador está anclado**: puede redactar la explicación y
+- **El LLM del mitigador se consume mediante MCP y está anclado**: el agente
+  no accede directamente a Mistral; solicita la contextualización al servidor
+  `threat_intel`. El modelo puede redactar la explicación y
   contextualizar exclusivamente las bases numeradas del catálogo. No puede añadir
   mitigaciones ni referencias: cualquier elemento sin una base válida se descarta.
   Para la decisión operacional se comprueba si las cinco primeras bases quedaron
@@ -154,14 +156,23 @@ juez como abstención y revisión humana. La ruta final nunca usa adaptadores.
 en una demo; una fila tabular realiza selección y extracción por separado).
 En el endpoint final, todos los casos se persisten en la memoria SQLite y, si
 el detector confirma un caso malicioso, el mitigador intenta siempre la
-contextualización anclada con Mistral. Si el modelo no está disponible, el
-caso conserva las contramedidas y referencias verificables del catálogo. Este
-cliente reintenta por defecto tres veces los fallos transitorios de conexión
-(incluidos DNS y timeout de conexión), con esperas breves de 1, 2 y 4 segundos.
-`MISTRAL_CONNECTION_RETRIES` permite ajustar o desactivar esos reintentos.
-Después de agotarlos se aplica la ruta de reserva correspondiente. Este
-es el único *fallback* del flujo: la estandarización no dispone de una ruta
-offline ni determinista para sustituir a Mistral en un *cache miss*.
+contextualización anclada llamando a `threat_intel` mediante MCP. Es el proceso
+de ese servidor el que accede a Mistral. Si el modelo no está disponible, el
+caso conserva las contramedidas y referencias verificables del catálogo. Los
+clientes Mistral admiten hasta tres reintentos por defecto ante fallos
+transitorios de conexión (incluidos DNS y timeout de conexión), con esperas
+breves de 1, 2 y 4 segundos. `MISTRAL_CONNECTION_RETRIES` permite ajustar o
+desactivar ese máximo. En mitigación, los intentos se detienen antes si agotan
+el presupuesto total descrito a continuación. La estandarización no dispone de
+una ruta offline ni determinista para sustituir a Mistral en un *cache miss*;
+el fallback al catálogo pertenece únicamente al mitigador.
+
+`MITIGATOR_LLM_TIMEOUT_SECONDS` limita cada intento HTTP interno a 60 segundos.
+`MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS` acota en 105 segundos la operación
+completa, incluidos los reintentos, por debajo de los 120 segundos de
+`MCP_STDIO_TIMEOUT_SECONDS`. Los tres reintentos siguen disponibles ante
+fallos rápidos; si consumen el presupuesto total, `threat_intel` devuelve un
+error controlado y el agente conserva el catálogo antes de que venza MCP.
 
 El modo `inprocess` del bloque anterior evita crear procesos MCP durante una
 demostración local. Para probar el mismo visor atravesando el protocolo real,
@@ -180,8 +191,9 @@ Invoke-RestMethod http://127.0.0.1:8000/cases/<case_id>/audit
 
 Devuelve el `CaseResult` completo. La persistencia y la contextualización LLM
 anclada son políticas obligatorias de `/cases/analyze`, no parámetros del
-cliente. El proveedor online está fijado a Mistral y el modelo se puede elegir
-mediante `MITIGATOR_LLM_MODEL`; si falla, hay *fallback* total al catálogo.
+cliente. El proveedor online está fijado a Mistral y el servidor `threat_intel`
+selecciona el modelo mediante `MITIGATOR_LLM_MODEL`; si falla, hay *fallback*
+total al catálogo.
 La superficie pública se limita a `POST /cases/analyze`, que acepta `row` o
 `text`, `GET /cases/{case_id}/audit` y `GET /health`. Los endpoints antiguos
 responden `404`; un campo `canonical_event` enviado al endpoint vigente se
@@ -223,7 +235,7 @@ solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
 |---|---|
 | `src/contracts/` | Esquemas Pydantic: evento canónico, salidas de agentes, `CaseResult` y traza |
 | `src/agents/final/` | Cinco agentes operacionales y el auditor posterior independiente |
-| `src/mcp/` | Tres servidores MCP: inferencia, persistencia de caché/casos/trazas y catálogo de amenazas; incluye modelos y catálogo empaquetados |
+| `src/mcp/` | Tres servidores MCP: inferencia, persistencia de caché/casos/trazas y catálogo de amenazas con contextualización Mistral; incluye modelos y catálogo empaquetados |
 | `src/orchestration/` | Grafo LangGraph del flujo final y su estado |
 | `src/eval/` | Sanitización, entrenamiento y evaluación exclusivamente offline |
 | `src/api/` | API FastAPI + visor web (`static/index.html`) |

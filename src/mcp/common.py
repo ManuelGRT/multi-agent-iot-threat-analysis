@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-MCP_LAYER_VERSION = "0.3.0"
+MCP_LAYER_VERSION = "0.4.0"
 
 
 def repo_root() -> Path:

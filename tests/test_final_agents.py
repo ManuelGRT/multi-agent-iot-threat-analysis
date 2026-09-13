@@ -56,8 +56,9 @@ LEAKY_EVENT = {
 class StubClient:
     """Cliente MCP de pruebas: respuestas fijas por (server, tool).
 
-    Las tools no sobreescritas se delegan al cliente in-process real (util
-    para threat_intel, que es local y determinista).
+    Las tools no sobreescritas se delegan al cliente in-process real. Esto es
+    útil para las consultas catalogadas deterministas de ``threat_intel``; las
+    pruebas que activan su contextualización Mistral deben sobreescribirla.
     """
 
     def __init__(self, overrides: dict | None = None):

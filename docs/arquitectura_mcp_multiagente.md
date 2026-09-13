@@ -52,7 +52,7 @@ cerrarlo mediante `with MCPToolClient(...)` o `close()`.
 |---|---|---|
 | `inference` | `src/mcp/inference_server.py` | Estandarización Mistral viva, validación canónica, detección y clasificación con los modelos empaquetados; no abre almacenamiento persistente |
 | `case_memory` | `src/mcp/case_memory_server.py` | Lectura y escritura de la caché de estandarización, los casos y sus trazas en SQLite |
-| `threat_intel` | `src/mcp/threat_intel_server.py` | Catálogo versionado ATT&CK/CAPEC y mitigaciones verificables |
+| `threat_intel` | `src/mcp/threat_intel_server.py` | Catálogo versionado ATT&CK/CAPEC, mitigaciones verificables y llamada Mistral para contextualizarlas |
 
 Los servidores históricos de datasets y evaluación no forman parte del
 runtime. Los datos crudos, métricas y procesos experimentales pertenecen al
@@ -69,7 +69,7 @@ controlada sin convertir una excepción en un resultado benigno.
 | `FinalStandardizer` | Entrada limpia `row` o `text`; busca un éxito Mistral por hash exacto y, ante un *miss*, llama obligatoriamente a Mistral | Evento canónico, procedencia y confianza; cualquier fallo o confianza menor de 0,5 deriva al juez |
 | `FinalDetector` | Modelo XGBoost binario empaquetado | Veredicto y probabilidad; zona gris `[0.4, 0.6]` implica abstención |
 | `FinalClassifier` | Modelo XGBoost multiclase balanceado y empaquetado | Uno de 16 tipos, confianza y top-3 de tipos; confianza menor de 0,65 solicita revisión |
-| `FinalMitigator` | Consulta directa del catálogo por `attack_type` y contextualización Mistral por defecto | Explicación, recomendaciones y referencias específicas del tipo, con procedencia explícita |
+| `FinalMitigator` | Invoca por MCP las tools `suggest_mitigations` y `contextualize_mitigations` de `threat_intel` | Explicación, recomendaciones y referencias específicas del tipo, con procedencia explícita |
 | `FinalJudge` | Reglas sobre todas las salidas y errores; comprueba que clasificador y mitigador conserven el mismo tipo | `approve` o `human_interrupt` |
 | `CaseAuditor` | Revisión posterior del caso persistido | `approve`, `review` o `reject` por coherencia del tipo, trazabilidad, umbrales y fugas |
 
@@ -131,15 +131,20 @@ probabilidad. No calcula ni persiste una familia amplia.
 
 El mitigador trabaja en dos capas:
 
-1. `threat_intel` recibe el `attack_type` predicho y consulta directamente su
+1. El agente invoca `threat_intel.suggest_mitigations` con el `attack_type`
+   predicho; el servidor consulta directamente su
    entrada del catálogo versionado para obtener mitigaciones por fase y
    referencias ATT&CK/CAPEC verificables. No existe una consulta intermedia ni
    una ruta de reserva por familia amplia.
-2. Mistral intenta contextualizar esa base para el evento observado.
+2. El agente invoca `threat_intel.contextualize_mitigations`. El servidor
+   resuelve otra vez la entrada autoritativa y llama a Mistral dentro de su
+   propio proceso; el agente nunca accede directamente al proveedor.
 
-El validador conserva la procedencia de cada elemento y descarta cualquier
+El servidor valida estrictamente el contrato JSON devuelto por Mistral antes
+de responder con `ok=true`. Después, el agente contrasta los metadatos de ambas
+respuestas, conserva la procedencia de cada elemento y descarta cualquier
 mitigación o referencia que no corresponda con una base catalogada. Si Mistral
-falla, el caso mantiene la respuesta completa del
+falla o su salida es inválida, el caso mantiene la respuesta completa del
 catálogo. Este *fallback* existe únicamente en mitigación: nunca sustituye la
 llamada obligatoria del estandarizador ante un *cache miss*.
 
@@ -204,10 +209,20 @@ Configuración opcional:
 $env:INGEST_LLM_MODEL="mistral-small-2603"
 $env:INGEST_LLM_TIMEOUT_SECONDS="60"
 $env:MITIGATOR_LLM_MODEL="mistral-small-2603"
+$env:MITIGATOR_LLM_TIMEOUT_SECONDS="60"
+$env:MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS="105"
 $env:MCP_CLIENT_MODE="stdio"
 $env:MCP_STDIO_TIMEOUT_SECONDS="120"
 $env:TFM_ATTACK_TYPE_MODEL="C:/ruta/modelo-16-tipos.joblib"
 ```
+
+El timeout de cada intento HTTP se fija en 60 segundos. Los reintentos y sus
+esperas comparten además un presupuesto total interno de 105 segundos mediante
+`MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS`, inferior a los 120 segundos de
+`MCP_STDIO_TIMEOUT_SECONDS`. Los tres reintentos siguen disponibles cuando los
+fallos son rápidos; si consumen demasiado tiempo, el presupuesto total los
+cancela y `threat_intel` devuelve un error controlado que activa el fallback al
+catálogo antes de que venza el transporte.
 
 `TFM_ATTACK_TYPE_MODEL` solo es necesario para sustituir el artefacto incluido
 por otro que implemente exactamente la taxonomía desplegada de 16 tipos. La

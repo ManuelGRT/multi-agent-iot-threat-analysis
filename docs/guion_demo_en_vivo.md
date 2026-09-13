@@ -17,6 +17,8 @@ python -m pip install ".[test]"
 
 $env:MISTRAL_API_KEY="..."
 $env:INGEST_LLM_TIMEOUT_SECONDS="60"
+$env:MITIGATOR_LLM_TIMEOUT_SECONDS="60"
+$env:MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS="105"
 $env:TFM_STATE_DIR=".runtime-state"
 $env:MCP_CLIENT_MODE="inprocess"
 ```
@@ -44,7 +46,8 @@ usa explícitamente `inprocess`; el despliegue productivo utiliza MCP real por
 
 - `inference`: estandarización Mistral viva y modelos XGBoost;
 - `case_memory`: caché de estandarización, casos y trazas SQLite;
-- `threat_intel`: catálogo ATT&CK/CAPEC y mitigaciones.
+- `threat_intel`: catálogo ATT&CK/CAPEC, mitigaciones y contextualización con
+  Mistral.
 
 No hay adaptadores, agentes alternativos ni un endpoint para introducir
 `canonical_event`.
@@ -60,8 +63,14 @@ despliegue productivo por `stdio`, puede mostrarse la misma aplicación con:
 
 ```powershell
 $env:MCP_CLIENT_MODE="stdio"
+$env:MCP_STDIO_TIMEOUT_SECONDS="120"
 docker compose up --build
 ```
+
+En `stdio`, los intentos HTTP tienen 60 segundos y toda la contextualización,
+incluidos sus reintentos, dispone de un presupuesto interno de 105 segundos.
+El transporte conserva 120 segundos, por lo que `threat_intel` puede devolver
+el error controlado y activar el fallback antes de que venza MCP.
 
 La imagen ya incluye el frontend, el catálogo y los dos modelos activos. El
 volumen de estado conserva, en una sola carpeta, los dos SQLite gestionados
@@ -88,8 +97,9 @@ Qué señalar:
 - El clasificador muestra el tipo elegido entre las 16 clases, su confianza y
   la distribución top-3 de tipos. No deriva una familia amplia. Una confianza
   inferior a `0.65` también deriva el caso.
-- El mitigador consulta directamente por `attack_type` la entrada específica
-  del catálogo, muestra primero la contextualización de Mistral y mantiene
+- El mitigador llama por MCP a `threat_intel.suggest_mitigations` y después a
+  `threat_intel.contextualize_mitigations`; es el servidor el que consulta el
+  catálogo y llama a Mistral. El visor muestra primero esa contextualización y mantiene
   visibles sus recomendaciones y referencias. Las aportaciones de Mistral sin
   una base catalogada válida se descartan y no llegan al caso.
 - El juez comprueba que el tipo predicho sea el mismo utilizado por el
@@ -104,8 +114,8 @@ Usar una recomendación mostrada en pantalla para explicar:
 
 - **Catálogo:** aporta el identificador ATT&CK/CAPEC, la medida verificable y
   su URL.
-- **Mistral:** redacta el contexto específico del evento y puede reformular la
-  acción sin convertirse en fuente de autoridad.
+- **Mistral:** el servidor `threat_intel` le solicita el contexto específico
+  del evento; puede reformular la acción sin convertirse en fuente de autoridad.
 
 Si Mistral falla en esta etapa, se conserva el catálogo y el juez todavía puede
 cerrar el caso. Este *fallback* pertenece solo al mitigador. Si falla Mistral

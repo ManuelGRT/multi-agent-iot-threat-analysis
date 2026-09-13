@@ -1,17 +1,17 @@
 # src/agents/final/final_mitigator.py
 """Agente mitigador: catalogo verificable y contextualizacion LLM anclada.
 
-Flujo en dos pasos:
+Flujo en dos pasos, ambos mediante el servidor MCP ``threat_intel``:
 1. Determinista: ``threat_intel.suggest_mitigations(attack_type)``
    devuelve la base auditable especifica para una de las 16 clases operativas
    (mitigaciones por fase + referencias MITRE ATT&CK/CAPEC). El tipo es
    obligatorio y nunca se sustituye por una familia amplia. Este paso siempre
    se ejecuta para los eventos maliciosos; en los benignos no hay mitigacion.
-2. LLM (opcional, ``llm=LLMMitigationAgent``): contextualiza las mitigaciones
-   del catalogo al evento concreto (puertos, protocolo, telemetria). Regla
-   dura: no puede inventar tecnicas, referencias ni mitigaciones fuera del
-   catalogo; toda aportacion sin respaldo se descarta. Si el LLM falla,
-   fallback total al modo catalogo (la demo nunca se rompe).
+2. LLM (opcional): ``threat_intel.contextualize_mitigations`` encapsula la
+   llamada a Mistral y contextualiza las mitigaciones al evento concreto
+   (puertos, protocolo, telemetria). El agente valida y ancla la respuesta:
+   no puede incorporar tecnicas, referencias ni mitigaciones fuera del
+   catalogo. Si el LLM falla, aplica fallback total al modo catalogo.
 
 ``source`` de la salida: ``catalog`` (solo paso 1) o ``hybrid`` (1+2).
 """
@@ -21,7 +21,6 @@ from typing import Any
 
 from src.agents.final.base import FinalAgent
 from src.agents.final.llm_mitigator import (
-    LLMMitigationAgent,
     anchor_llm_payload,
     build_base_items,
     catalog_reference_ids,
@@ -69,9 +68,9 @@ def catalog_references(references: dict[str, Any]) -> list[dict[str, Any]]:
 class FinalMitigator(FinalAgent):
     name = "final_mitigator"
 
-    def __init__(self, client=None, llm: LLMMitigationAgent | None = None):
+    def __init__(self, client=None, contextualize_with_llm: bool = False):
         super().__init__(client)
-        self.llm = llm
+        self.contextualize_with_llm = bool(contextualize_with_llm)
 
     def run(self, state: OrchestratorState) -> dict[str, Any]:
         canonical = state.get("canonical_event") or {}
@@ -318,24 +317,66 @@ class FinalMitigator(FinalAgent):
         trace_entries = [entry]
 
         # ------------------------------------------------------------------
-        # Paso 2 (opcional): contextualizacion LLM anclada al catalogo
+        # Paso 2 (opcional): contextualizacion LLM por threat_intel y anclaje
         # ------------------------------------------------------------------
         final_payload = catalog_payload
         model_name: str | None = None
-        if self.llm is not None:
+        if self.contextualize_with_llm:
             llm_entry = self.start_entry(
-                tool="llm_contextualize",
+                tool="contextualize_mitigations",
                 event_id=event_id,
                 attack_type=normalized_attack_type,
+                server="threat_intel",
             )
             try:
-                raw = self.llm.contextualize(
+                llm_result = self.call_tool(
+                    "threat_intel",
+                    "contextualize_mitigations",
+                    attack_type=normalized_attack_type,
                     canonical_event=canonical,
                     detection=detection,
                     classification=classification,
-                    catalog_result=result,
-                    base_items=base_items,
                 )
+                if llm_result.get("ok") is not True:
+                    raise RuntimeError(
+                        str(
+                            llm_result.get("error")
+                            or "contextualize_mitigations sin resultado"
+                        )
+                    )
+                expected_metadata = {
+                    "attack_type": normalized_attack_type,
+                    "catalog_scope": catalog_scope,
+                    "catalog_version": catalog_version,
+                    "taxonomy_version": catalog_taxonomy_version,
+                    "compatible_taxonomy_versions": (
+                        catalog_compatible_taxonomy_versions
+                    ),
+                    "provider": "mistral",
+                    "base_count": len(base_items),
+                }
+                mismatches = [
+                    key
+                    for key, expected in expected_metadata.items()
+                    if llm_result.get(key) != expected
+                ]
+                if mismatches:
+                    raise ValueError(
+                        "contextualizacion incompatible con la consulta de "
+                        "catalogo: " + ", ".join(mismatches)
+                    )
+                raw_model_name = llm_result.get("model_name")
+                if not isinstance(raw_model_name, str) or not raw_model_name.startswith(
+                    "llm_mitigator::mistral::"
+                ):
+                    raise ValueError(
+                        "contextualizacion sin identidad valida del modelo Mistral"
+                    )
+                raw = llm_result.get("contextualization")
+                if not isinstance(raw, dict):
+                    raise TypeError(
+                        "contextualize_mitigations no devolvio un objeto JSON"
+                    )
                 anchored = anchor_llm_payload(
                     raw,
                     base_items=base_items,
@@ -361,7 +402,7 @@ class FinalMitigator(FinalAgent):
                 ):
                     anchored[key] = catalog_payload[key]
                 final_payload = anchored
-                model_name = self.llm.model_name
+                model_name = raw_model_name
                 llm_entry.finish(
                     status="ok",
                     confidence=anchored["confidence"],
@@ -372,7 +413,7 @@ class FinalMitigator(FinalAgent):
                         f"modelo={model_name}"
                     ),
                 )
-            except Exception as exc:  # fallback total: la demo nunca se rompe
+            except Exception as exc:  # fallback total: el caso conserva catalogo
                 llm_entry.finish(
                     status="fallback",
                     summary="LLM no disponible; se mantiene el modo catalogo",

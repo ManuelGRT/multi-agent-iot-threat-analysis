@@ -18,7 +18,9 @@ class OrchestratorState(TypedDict, total=False):
     explanation_output: dict[str, Any]
     judge_output: dict[str, Any]
 
-    route: Literal["ingest", "detect", "classify", "explain", "judge", "end"]
+    route: Literal[
+        "standardize", "detect", "classify", "explain", "judge", "end"
+    ]
     needs_human_review: bool
     human_decision: dict[str, Any]
     errors: list[str]

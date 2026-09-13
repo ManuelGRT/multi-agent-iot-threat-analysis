@@ -73,6 +73,14 @@ class StubClient:
         if key in self.overrides:
             value = self.overrides[key]
             return value(**arguments) if callable(value) else copy.deepcopy(value)
+        # Los stubs de agentes no deben tocar el estado SQLite real. Las
+        # pruebas especificas de cache sobreescriben estas respuestas.
+        if key == ("case_memory", "lookup_standardization_cache"):
+            return {"ok": True, "hit": False, "cache_available": True}
+        if key == ("case_memory", "store_standardization_cache"):
+            return {"ok": True, "stored": True, "already_present": False}
+        if key == ("case_memory", "evict_standardization_cache"):
+            return {"ok": True, "deleted": True}
         return self.real.call(server, tool, **arguments)
 
 
@@ -308,10 +316,29 @@ def test_standardizer_uses_llm_mcp_result_and_routes_detect():
         "parsed_by_llm",
         "source:mistral_live",
     ]
-    _, _, arguments = stub.call_arguments[-1]
+    _, _, arguments = next(
+        call
+        for call in stub.call_arguments
+        if call[:2] == ("inference", "standardize_event")
+    )
     assert "allow_llm" not in arguments
     assert "cache_key" not in arguments
+    assert stub.calls[:3] == [
+        ("case_memory", "lookup_standardization_cache"),
+        ("inference", "standardize_event"),
+        ("case_memory", "store_standardization_cache"),
+    ]
     assert update["trace"][-1]["agent"] == "final_standardizer"
+    assert update["trace"][-1]["tool"] == "standardize_event"
+    assert update["trace"][-1]["detail"]["tool_sequence"] == [
+        "case_memory.lookup_standardization_cache",
+        "inference.standardize_event",
+        "case_memory.store_standardization_cache",
+    ]
+    assert update["trace"][-1]["detail"]["cache"] == {
+        "lookup": "miss",
+        "store": "inserted",
+    }
     assert update["trace"][-1]["status"] == "ok"
     assert update["trace"][-1]["finished_at"] is not None
 
@@ -376,7 +403,11 @@ def test_standardizer_accepts_valid_mistral_cache_hit():
     }
     result = standardize_ok(cached_event, from_cache=True)
     result["cache_content_hash"] = compute_content_hash(row={"proto": "tcp"})
-    stub = StubClient({("inference", "standardize_event"): result})
+    result["hit"] = True
+    result["cache_available"] = True
+    stub = StubClient(
+        {("case_memory", "lookup_standardization_cache"): result}
+    )
 
     update = FinalStandardizer(client=stub).run(
         {
@@ -394,8 +425,104 @@ def test_standardizer_accepts_valid_mistral_cache_hit():
     assert update["ingest_output"]["from_cache"] is True
     assert update["ingest_output"]["cache_content_hash"] == result["cache_content_hash"]
     assert update["ingest_output"]["cache_pipeline_hash"] == "b" * 64
+    assert ("inference", "standardize_event") not in stub.calls
+    assert update["trace"][-1]["tool"] == "lookup_standardization_cache"
+    assert update["trace"][-1]["detail"]["cache"] == {
+        "lookup": "hit",
+        "store": "not_required",
+    }
     _, _, arguments = stub.call_arguments[-1]
     assert arguments["split"] == "test"
+
+
+def test_standardizer_persists_and_reuses_cache_only_through_case_memory(
+    tmp_path,
+    monkeypatch,
+):
+    import src.mcp.case_memory_server as case_memory_server
+    from src.mcp.common import resolve_path
+
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
+    case_memory_server._CACHE_INSTANCES.clear()
+
+    class IntegrationClient:
+        def __init__(self):
+            self.real = MCPToolClient(mode="inprocess")
+            self.inference_calls = 0
+            self.calls: list[tuple[str, str]] = []
+
+        def call(self, server: str, tool: str, **arguments):
+            self.calls.append((server, tool))
+            if (server, tool) == ("inference", "standardize_event"):
+                self.inference_calls += 1
+                return standardize_ok(
+                    dataset=arguments["dataset"],
+                    source_file=arguments["source_file"],
+                    row_id=arguments["row_id"],
+                    split=arguments["split"],
+                    selected_columns=["proto"],
+                )
+            return self.real.call(server, tool, **arguments)
+
+    integration = IntegrationClient()
+    first = FinalStandardizer(client=integration).run(
+        {
+            "raw_input": {
+                "dataset": "iot23",
+                "row": {"proto": "tcp"},
+                "source_file": "first.csv",
+                "row_id": 1,
+                "split": "train",
+            }
+        }
+    )
+    second = FinalStandardizer(client=integration).run(
+        {
+            "raw_input": {
+                "dataset": "edge_iiotset",
+                "row": {"proto": "tcp"},
+                "source_file": "duplicate.csv",
+                "row_id": 99,
+                "split": "test",
+            }
+        }
+    )
+
+    assert first["ingest_output"]["from_cache"] is False
+    assert second["ingest_output"]["from_cache"] is True
+    assert integration.inference_calls == 1
+    assert second["canonical_event"]["event_id"] == (
+        "llm::edge_iiotset::duplicate.csv::99"
+    )
+    assert resolve_path("standardization_cache_db").is_file()
+    assert resolve_path("standardization_cache_db").parent == (
+        resolve_path("case_memory_db").parent
+    )
+
+
+@pytest.mark.parametrize(
+    "failing_tool",
+    ["lookup_standardization_cache", "store_standardization_cache"],
+)
+def test_standardizer_cache_failure_does_not_discard_valid_mistral_result(
+    failing_tool,
+):
+    overrides = {
+        ("inference", "standardize_event"): standardize_ok(),
+        ("case_memory", failing_tool): {
+            "ok": False,
+            "error": "SQLite no disponible",
+        },
+    }
+    stub = StubClient(overrides)
+
+    update = FinalStandardizer(client=stub).run(
+        {"raw_input": {"dataset": "iot23", "row": {"proto": "tcp"}}}
+    )
+
+    assert update["route"] == "detect"
+    assert update["ingest_output"]["from_cache"] is False
+    assert ("inference", "standardize_event") in stub.calls
 
 
 def test_standardizer_llm_failure_abstains_to_judge():

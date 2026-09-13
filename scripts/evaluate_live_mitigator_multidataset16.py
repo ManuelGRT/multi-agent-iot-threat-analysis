@@ -32,6 +32,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from src.eval.validation_campaign import (  # noqa: E402
+    FINAL_VALIDATION_DATASET_ROWS,
+    final_validation_artifact_paths,
+)
+
 
 # Keep the production model name as the CLI default.  A campaign that uses a
 # different dated model must opt in with ``--model``; the manifest will always
@@ -252,13 +257,17 @@ class RecordingLLM:
 
 
 def load_standardized(directory: Path) -> tuple[dict[str, dict[str, Any]], list[Path]]:
-    files = sorted(directory.glob("*_standardized.jsonl"))
-    if not files:
-        raise FileNotFoundError(f"No hay JSONL estandarizados en {directory}")
+    files = list(final_validation_artifact_paths(directory, "_standardized.jsonl"))
     by_manifest: dict[str, dict[str, Any]] = {}
     for path in files:
+        expected_dataset = path.name.removesuffix("_standardized.jsonl")
         for row in iter_jsonl(path):
             manifest_id = str(row.get("manifest_id") or "")
+            if manifest_id and not manifest_id.startswith(f"{expected_dataset}::"):
+                raise ValueError(
+                    f"{path.name} contiene un manifest_id de otra fuente: "
+                    f"{manifest_id}"
+                )
             if (
                 manifest_id
                 and row.get("ok") is True
@@ -269,6 +278,15 @@ def load_standardized(directory: Path) -> tuple[dict[str, dict[str, Any]], list[
                 # Una campaña reanudada puede contener varios intentos. El último
                 # éxito materializado es la salida consolidada de la campaña.
                 by_manifest[manifest_id] = row
+    rows_by_dataset = Counter(
+        manifest_id.split("::", 1)[0] for manifest_id in by_manifest
+    )
+    if dict(rows_by_dataset) != dict(FINAL_VALIDATION_DATASET_ROWS):
+        raise ValueError(
+            "Composición distinta de la campaña final estandarizada: "
+            f"esperado={dict(FINAL_VALIDATION_DATASET_ROWS)}, "
+            f"obtenido={dict(rows_by_dataset)}"
+        )
     return by_manifest, files
 
 

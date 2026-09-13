@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-MCP_LAYER_VERSION = "0.2.0"
+MCP_LAYER_VERSION = "0.3.0"
 
 
 def repo_root() -> Path:
@@ -39,6 +39,54 @@ def package_data_dir() -> Path:
 def state_dir() -> Path:
     """Directorio escribible para el estado operativo del servicio."""
     return Path(os.getenv("TFM_STATE_DIR") or artifacts_dir())
+
+
+def configured_ingest_model() -> str:
+    """Nombre unico del modelo Mistral usado por inferencia y cache."""
+
+    return (
+        os.getenv("INGEST_LLM_MODEL")
+        or os.getenv("MISTRAL_AGENT_MODEL")
+        or "mistral-small-2603"
+    )
+
+
+def _persistent_database_paths() -> tuple[Path, Path]:
+    """Resuelve cache y casos garantizando que compartan directorio.
+
+    Los overrides de fichero antiguos se aceptan por compatibilidad, pero uno
+    solo arrastra al otro a su misma carpeta y dos valores en carpetas
+    distintas se rechazan. La configuracion recomendada sigue siendo la unica
+    variable de directorio ``TFM_STATE_DIR``.
+    """
+
+    cache_override = os.getenv("TFM_STANDARDIZATION_CACHE_DB")
+    cases_override = os.getenv("TFM_CASE_MEMORY_DB")
+    cache_path = Path(cache_override).expanduser() if cache_override else None
+    cases_path = Path(cases_override).expanduser() if cases_override else None
+
+    configured = [path for path in (cache_path, cases_path) if path is not None]
+    if configured:
+        parent = configured[0].parent
+        expected_parent = parent.resolve(strict=False)
+        if any(
+            path.parent.resolve(strict=False) != expected_parent
+            for path in configured[1:]
+        ):
+            raise ValueError(
+                "TFM_STANDARDIZATION_CACHE_DB y TFM_CASE_MEMORY_DB deben "
+                "compartir directorio"
+            )
+    else:
+        parent = state_dir()
+
+    resolved_cache = cache_path or parent / "mistral_standardization_v2.sqlite3"
+    resolved_cases = cases_path or parent / "case_memory.db"
+    if resolved_cache.resolve(strict=False) == resolved_cases.resolve(strict=False):
+        raise ValueError(
+            "La cache y la memoria de casos deben ser ficheros SQLite distintos"
+        )
+    return resolved_cache, resolved_cases
 
 
 def resolve_confined_path(
@@ -71,13 +119,11 @@ def resolve_confined_path(
     return resolved
 
 
-# Artefactos operativos vigentes. Se pueden sobrescribir con variables de
-# entorno para tests o despliegues alternativos compatibles.
+# Artefactos operativos vigentes. Todo el estado mutable comparte una unica
+# raiz (normalmente ``TFM_STATE_DIR``). Mantener una sola carpeta impide que la
+# cache y la memoria de casos terminen en volumenes distintos.
 DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
-    "standardization_cache_db": lambda: Path(
-        os.getenv("TFM_STANDARDIZATION_CACHE_DB")
-        or state_dir() / "cache" / "mistral_standardization_v2.sqlite3"
-    ),
+    "standardization_cache_db": lambda: _persistent_database_paths()[0],
     # Modelos de solo lectura incluidos en el paquete instalable.
     "detection_model": lambda: Path(
         os.getenv("TFM_DETECTION_MODEL")
@@ -91,9 +137,7 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         / "models"
         / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
     ),
-    "case_memory_db": lambda: Path(
-        os.getenv("TFM_CASE_MEMORY_DB") or state_dir() / "case_memory.db"
-    ),
+    "case_memory_db": lambda: _persistent_database_paths()[1],
 }
 
 

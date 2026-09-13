@@ -4,9 +4,10 @@
 Tres servidores MCP construidos con FastMCP (SDK oficial) exponen el runtime
 online como herramientas conectables y auditables:
 
-- ``inference_server``:   estandarizacion Mistral obligatoria (sin fallback),
+- ``inference_server``:   estandarizacion Mistral viva (sin fallback),
                           deteccion y clasificacion con modelos .joblib.
-- ``case_memory_server``: memoria de casos con trazas (SQLite).
+- ``case_memory_server``: cache de estandarizacion, memoria de casos y trazas
+                          persistentes (dos ficheros SQLite en una sola raiz).
 - ``threat_intel_server``: tipo de ataque -> ATT&CK/CAPEC y mitigaciones.
 
 La preparacion de datasets, la sanitizacion y la evaluacion permanecen fuera

@@ -19,7 +19,10 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
 
 def _manifest(root: Path, dataset: str, ids: list[str]) -> Path:
     path = root / "manifests" / f"{dataset}_manifest.jsonl"
-    _write_jsonl(path, [{"manifest_id": item} for item in ids])
+    _write_jsonl(
+        path,
+        [{"manifest_id": item, "dataset": dataset} for item in ids],
+    )
     return path
 
 
@@ -66,6 +69,7 @@ def _config(root: Path, **overrides) -> campaign.CampaignConfig:
         "manifest_dir": root / "manifests",
         "results_dir": root / "standardized",
         "state_dir": root / "state",
+        "datasets": None,
         "python_executable": "python-test",
         "workers": 3,
         "max_rounds": 6,
@@ -142,6 +146,53 @@ def test_manifest_inventory_rejects_duplicate_ids_across_datasets(tmp_path):
 
     with pytest.raises(campaign.CampaignError, match="duplicado"):
         campaign.load_manifest_inventory(tmp_path / "manifests")
+
+
+def test_manifest_inventory_can_freeze_the_campaign_dataset_scope(tmp_path):
+    _manifest(tmp_path, "edge_iiotset", ["edge_iiotset::1"])
+    _manifest(tmp_path, "ton_iot", ["ton_iot::1"])
+    _manifest(tmp_path, "obsolete_dataset", ["stale-1"])
+
+    inventory = campaign.load_manifest_inventory(
+        tmp_path / "manifests",
+        ("edge_iiotset", "ton_iot"),
+    )
+
+    assert set(inventory.dataset_ids) == {"edge_iiotset", "ton_iot"}
+    assert inventory.total == 2
+
+
+def test_manifest_inventory_requires_every_frozen_dataset(tmp_path):
+    _manifest(tmp_path, "edge_iiotset", ["edge-1"])
+
+    with pytest.raises(campaign.CampaignError, match="ton_iot_manifest.jsonl"):
+        campaign.load_manifest_inventory(
+            tmp_path / "manifests",
+            ("edge_iiotset", "ton_iot"),
+        )
+
+
+@pytest.mark.parametrize(
+    "record,expected_error",
+    [
+        (
+            {"manifest_id": "ton_iot::1", "dataset": "other"},
+            "dataset interno incorrecto",
+        ),
+        (
+            {"manifest_id": "other::1", "dataset": "ton_iot"},
+            "manifest_id no pertenece",
+        ),
+    ],
+)
+def test_frozen_inventory_validates_internal_dataset_identity(
+    tmp_path, record, expected_error
+):
+    path = tmp_path / "manifests" / "ton_iot_manifest.jsonl"
+    _write_jsonl(path, [record])
+
+    with pytest.raises(campaign.CampaignError, match=expected_error):
+        campaign.load_manifest_inventory(path.parent, ("ton_iot",))
 
 
 def test_standardization_command_and_environment_are_explicit_and_secret_safe(tmp_path):

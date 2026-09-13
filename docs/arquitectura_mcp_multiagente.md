@@ -10,7 +10,7 @@ la API no ejecuta sanitización, adaptadores ni flujos alternativos.
 POST /cases/analyze (`row` o `text` limpios)
                 │
                 ▼
-      caché por hash exacto
+      caché por hash exacto (`case_memory`)
         │ hit          │ miss
         │              ▼
         │       Mistral: selección + extracción
@@ -50,8 +50,8 @@ cerrarlo mediante `with MCPToolClient(...)` o `close()`.
 
 | Servidor | Módulo | Responsabilidad |
 |---|---|---|
-| `inference` | `src/mcp/inference_server.py` | Estandarización Mistral, validación canónica, detección y clasificación con los modelos empaquetados |
-| `case_memory` | `src/mcp/case_memory_server.py` | Persistencia y consulta de casos y trazas en SQLite |
+| `inference` | `src/mcp/inference_server.py` | Estandarización Mistral viva, validación canónica, detección y clasificación con los modelos empaquetados; no abre almacenamiento persistente |
+| `case_memory` | `src/mcp/case_memory_server.py` | Lectura y escritura de la caché de estandarización, los casos y sus trazas en SQLite |
 | `threat_intel` | `src/mcp/threat_intel_server.py` | Catálogo versionado ATT&CK/CAPEC y mitigaciones verificables |
 
 Los servidores históricos de datasets y evaluación no forman parte del
@@ -81,21 +81,25 @@ errores. El auditor no es un nodo del grafo y emite un informe independiente.
 La entrada pública es siempre cruda y debe estar libre de targets. La API
 acepta exclusivamente `row` o `text`; no acepta `canonical_event`.
 
-El estandarizador calcula un hash estable del contenido y consulta una caché
-SQLite:
+El agente estandarizador coordina las herramientas de los dos servidores. En
+primer lugar solicita a `case_memory.lookup_standardization_cache` que calcule
+el hash estable del contenido y consulte la caché SQLite:
 
 1. En un *hit* reutiliza únicamente una estandarización Mistral validada para
    ese contenido y reconstruye la identidad y procedencia del registro actual.
-2. En un *cache miss*, una entrada tabular requiere selección semántica de
-   columnas y extracción canónica mediante Mistral. No existe selección
-   heurística ni ruta alternativa determinista.
+2. En un *cache miss*, invoca `inference.standardize_event`: una entrada tabular
+   requiere selección semántica de columnas y extracción canónica mediante
+   Mistral. No existe selección heurística ni ruta alternativa determinista.
+   Un éxito validado se persiste mediante
+   `case_memory.store_standardization_cache`.
 3. Si Mistral no responde, agota el tiempo o devuelve una salida inválida, el
    agente se abstiene y el juez solicita revisión humana.
 
-El mecanismo *single-flight* evita llamadas duplicadas para la misma clave
-dentro de un proceso. SQLite conserva el primer éxito entre procesos. La caché
-solo almacena respuestas correctas; los fallos no se convierten en resultados
-reutilizables.
+El mecanismo *single-flight* del agente evita llamadas duplicadas para la misma
+clave dentro de un proceso sin abrir SQLite directamente. `case_memory`
+recalcula las claves, valida cada escritura y conserva el primer éxito entre
+procesos. Un fallo de caché no invalida un resultado Mistral correcto; los
+fallos del modelo nunca se almacenan.
 
 La sanitización anti-leakage pertenece exclusivamente a la preparación offline
 de datasets de entrenamiento, validación y evaluación. No se ejecuta dentro de
@@ -162,18 +166,21 @@ campo `canonical_event`, por lo que no permite saltarse Mistral.
 ## 8. Estado y recursos empaquetados
 
 El código, el frontend, el catálogo y los modelos son recursos de solo lectura
-del paquete. La caché y la memoria de casos se escriben en una raíz de estado
-separada:
-
-- `TFM_STATE_DIR`: raíz escribible del runtime;
-- `TFM_STANDARDIZATION_CACHE_DB`: override opcional de la caché Mistral;
-- `TFM_CASE_MEMORY_DB`: override opcional de la memoria de casos.
+del paquete. Todo el estado mutable se escribe en la única raíz indicada por
+`TFM_STATE_DIR`.
 
 Sin configuración adicional, `TFM_STATE_DIR` corresponde a `artifacts/` en la
-raíz de ejecución. La caché queda en
-`cache/mistral_standardization_v2.sqlite3` y los casos en `case_memory.db`. En
+raíz de ejecución. `case_memory` crea allí dos bases independientes:
+`mistral_standardization_v2.sqlite3` para la caché y `case_memory.db` para los
+casos y trazas. Los ficheros comparten carpeta, no esquema. En
 Docker la raíz se fija a `/var/lib/tfm_multiagent`, respaldada por el volumen
 `runtime_state`. Ninguna de estas rutas escribe dentro del paquete instalado.
+Los overrides históricos `TFM_STANDARDIZATION_CACHE_DB` y
+`TFM_CASE_MEMORY_DB` se conservan por compatibilidad, pero el runtime rechaza
+que apunten a directorios diferentes.
+En el primer acceso con las rutas predeterminadas, una caché existente en el
+antiguo subdirectorio `cache/` se copia mediante el mecanismo de respaldo de
+SQLite y el original se conserva sin nuevas escrituras.
 
 ## 9. Configuración y ejecución
 
@@ -199,8 +206,6 @@ $env:INGEST_LLM_TIMEOUT_SECONDS="60"
 $env:MITIGATOR_LLM_MODEL="mistral-small-2603"
 $env:MCP_CLIENT_MODE="stdio"
 $env:MCP_STDIO_TIMEOUT_SECONDS="120"
-$env:TFM_STANDARDIZATION_CACHE_DB=".runtime-state/cache/mistral_standardization_v2.sqlite3"
-$env:TFM_CASE_MEMORY_DB=".runtime-state/case_memory.db"
 $env:TFM_ATTACK_TYPE_MODEL="C:/ruta/modelo-16-tipos.joblib"
 ```
 

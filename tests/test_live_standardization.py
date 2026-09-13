@@ -113,7 +113,6 @@ def test_standardize_one_accepts_only_strict_llm_result(monkeypatch):
         "source_file": "sample.csv",
         "row_id": 1,
         "split": "stream",
-        "cache_mode": "bypass",
     }
 
 

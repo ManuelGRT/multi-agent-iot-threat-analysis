@@ -142,7 +142,7 @@ def test_audit_endpoint_checks_a_persisted_case_without_mutating_it(
 ):
     from tests.test_auditor import clean_attack_case
 
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
     case = clean_attack_case()
     payload = case.model_dump(mode="json")
     memory = MCPToolClient(mode="inprocess")
@@ -185,7 +185,7 @@ def test_audit_endpoint_checks_a_persisted_case_without_mutating_it(
 
 
 def test_audit_endpoint_returns_404_for_unknown_case(tmp_path, monkeypatch):
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
 
     response = TestClient(app).get("/cases/case-does-not-exist/audit")
 
@@ -194,7 +194,7 @@ def test_audit_endpoint_returns_404_for_unknown_case(tmp_path, monkeypatch):
 
 
 def test_audit_endpoint_rejects_invalid_persisted_contract(tmp_path, monkeypatch):
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
     memory = MCPToolClient(mode="inprocess")
     assert memory.call(
         "case_memory",

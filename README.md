@@ -21,7 +21,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 
 | Agente | Qué hace | Qué decide |
 |---|---|---|
-| **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Una caché SQLite por hash exacto reutiliza únicamente éxitos previos de Mistral para contenido duplicado y reconstruye la identidad y procedencia del caso actual. En un *cache miss*, Mistral selecciona las columnas y genera el evento canónico | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
+| **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Consulta mediante el servidor MCP `case_memory` una caché SQLite por hash exacto, que reutiliza únicamente éxitos previos de Mistral y reconstruye la identidad del caso actual. En un *cache miss*, solicita a `inference` que Mistral seleccione las columnas y genere el evento canónico, y devuelve el éxito a `case_memory` para almacenarlo | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase balanceado: identifica directamente uno de los 16 tipos de ataque | Tipo, confianza y top-3 de tipos; si la confianza es < 0,65, el caso va a revisión |
 | **Mitigador** | Consulta por `attack_type` la entrada específica del **catálogo verificable** (ATT&CK + CAPEC) e intenta siempre contextualizarla con Mistral en el endpoint final | Si el LLM falla conserva el catálogo; cualquier mitigación o referencia adicional se descarta |
@@ -36,7 +36,8 @@ Ideas clave del diseño:
   final no limpia ni inspecciona targets dentro del `row`: presupone una entrada
   preparada. La salida canónica generada por Mistral sí se valida antes de
   alcanzar los modelos. La API pública no acepta eventos preestandarizados.
-- **Mistral es obligatorio en cada *cache miss*.** La caché SQLite se indexa
+- **Mistral es obligatorio en cada *cache miss*.** El estandarizador accede a
+  la caché exclusivamente a través del servidor `case_memory`. Esta se indexa
   por el hash exacto del contenido limpio y solo reutiliza respuestas Mistral
   exitosas para duplicados. En un *hit* se reconstruyen la identidad y la
   procedencia actuales y se reutiliza la selección que Mistral hizo para ese
@@ -69,16 +70,16 @@ Ideas clave del diseño:
 
 ## Resultados principales
 
-La campaña estandarizó correctamente 35.637 registros de 5 datasets públicos.
-Los splits se congelaron antes de experimentar y cada tarea aplica después su
-propia deduplicación y selección; en el detector quedaron 33.635 filas seguras
-y 23.604 tras el balance por clase y origen:
+La campaña estandarizó correctamente 34.635 registros de 4 datasets públicos.
+Los splits se construyeron sin solapamientos y se congelaron antes de
+experimentar. Para el detector resultaron elegibles 33.635 filas, de las que se
+seleccionaron 23.604 tras el balance por clase y origen:
 
 | Qué se mide | Resultado |
 |---|---|
 | Detector global balanceado por clase y origen (corpus n=23.604; test n=3.572) | F1 de ataque 0,9600; con abstención: **0,9723 sobre lo decidido**, derivando el 3,02 % a revisión |
 | Clasificador de 16 tipos (test balanceado, n=1.200) | Accuracy 0,8908; macro-F1 0,8917; top-3 0,9800; con umbral 0,65: F1 0,9237 sobre 1.088 decisiones |
-| Catálogo de amenazas v3 | Cobertura estructural 16/16: una entrada específica y al menos cinco mitigaciones verificables por tipo |
+| Catálogo de amenazas v4 | Cobertura estructural 16/16: una entrada específica y al menos cinco mitigaciones verificables por tipo |
 | Auditor | 16/16 defectos inyectados detectados; 0 falsos rechazos |
 
 **Límite declarado:** las evaluaciones balanceadas por origen emplean registros
@@ -188,14 +189,19 @@ rechaza por contrato con `422`.
 
 ### Estado persistente
 
-El runtime usa por defecto `artifacts/` como raíz escribible para su estado.
-Puede fijarse otra con `TFM_STATE_DIR`; la caché de estandarización y la memoria
-de casos pueden sobrescribirse de forma independiente mediante
-`TFM_STANDARDIZATION_CACHE_DB` y `TFM_CASE_MEMORY_DB`. Los modelos y el catálogo
-son recursos de solo lectura empaquetados y no se escriben durante la operación.
-Dentro de la raíz, las rutas por defecto son
-`cache/mistral_standardization_v2.sqlite3` y `case_memory.db` para mantener la
-compatibilidad con el estado operativo existente.
+El runtime usa por defecto `artifacts/` como único directorio escribible para
+su estado, configurable mediante `TFM_STATE_DIR`. En él, el servidor
+`case_memory` gestiona dos ficheros SQLite independientes:
+`mistral_standardization_v2.sqlite3` para la caché y `case_memory.db` para los
+casos y sus trazas. Se mantienen separados porque tienen esquemas distintos,
+pero siempre se ubican en la misma carpeta. Los modelos y el catálogo son
+recursos de solo lectura empaquetados y no se escriben durante la operación.
+Los overrides de fichero antiguos `TFM_STANDARDIZATION_CACHE_DB` y
+`TFM_CASE_MEMORY_DB` se aceptan solo por compatibilidad: si se declaran, deben
+resolver ambos SQLite en esa misma carpeta.
+Cuando se usan las rutas predeterminadas, `case_memory` copia una caché válida
+de la ubicación histórica `artifacts/cache/` al nuevo directorio común en su
+primer acceso y conserva el fichero original como respaldo.
 
 ## Auditoría del sistema
 
@@ -217,7 +223,7 @@ solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
 |---|---|
 | `src/contracts/` | Esquemas Pydantic: evento canónico, salidas de agentes, `CaseResult` y traza |
 | `src/agents/final/` | Cinco agentes operacionales y el auditor posterior independiente |
-| `src/mcp/` | Tres servidores MCP: inferencia, memoria de casos y catálogo de amenazas; incluye modelos y catálogo empaquetados |
+| `src/mcp/` | Tres servidores MCP: inferencia, persistencia de caché/casos/trazas y catálogo de amenazas; incluye modelos y catálogo empaquetados |
 | `src/orchestration/` | Grafo LangGraph del flujo final y su estado |
 | `src/eval/` | Sanitización, entrenamiento y evaluación exclusivamente offline |
 | `src/api/` | API FastAPI + visor web (`static/index.html`) |
@@ -228,7 +234,8 @@ solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
 El repositorio de despliegue no contiene adaptadores, agentes alternativos ni
 grafos legacy. La sanitización se conserva como herramienta offline para
 preparar entrenamiento y evaluación; nunca forma parte de `/cases/analyze`.
-En operación, la caché SQLite solo almacena éxitos Mistral y reconstruye la
+En operación, toda lectura o escritura de la caché, los casos y sus trazas pasa
+por `case_memory`. La caché solo almacena éxitos Mistral y reconstruye la
 identidad y procedencia del registro duplicado actual.
 
 ## Reglas del proyecto

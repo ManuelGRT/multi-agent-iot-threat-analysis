@@ -26,7 +26,7 @@ son:
 
 ## Cobertura disponible y determinación de la cuota
 
-La fuente de partida contiene 35.637 resultados de estandarización ya
+La fuente de partida contiene 34.635 resultados de estandarización ya
 materializados. Se identificaron 13.478 ataques utilizables por la taxonomía:
 11.673 con mapeo exacto o agregado desde una etiqueta nativa y 1.805 con un
 mapeo forzado documentado. No se eliminó ninguna fila adicional por

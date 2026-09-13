@@ -19,7 +19,7 @@ Uso tipico (en la maquina de ejecucion):
     # humo: 5 filas de un dataset
     .venv\\Scripts\\python.exe scripts\\run_live_standardization.py --dataset iot23 --limit 5
 
-    # campana completa (reanudable; ~35k filas)
+    # campana completa (reanudable; 34.635 filas)
     .venv\\Scripts\\python.exe scripts\\run_live_standardization.py --workers 8
 """
 from __future__ import annotations
@@ -28,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import sys
 import threading
 import time
 from collections import Counter
@@ -36,6 +37,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from src.eval.validation_campaign import FINAL_VALIDATION_DATASETS  # noqa: E402
+
 MANIFEST_DIR = REPO / "artifacts" / "validation_2026" / "manifests"
 OUT_DIR = REPO / "artifacts" / "validation_2026" / "standardized"
 
@@ -137,7 +143,6 @@ def standardize_one(entry: dict) -> dict:
         source_file=entry["source_file"],
         row_id=entry["row_id"],
         split=entry.get("split") or "stream",
-        cache_mode="bypass",
     )
     try:
         validated = validate_standardization_success(
@@ -241,7 +246,7 @@ def run_dataset(
 ) -> dict:
     manifest_path = MANIFEST_DIR / f"{name}_manifest.jsonl"
     if not manifest_path.exists():
-        raise SystemExit(f"No existe {manifest_path}; ejecuta antes build_validation_manifests.py")
+        raise SystemExit(f"No existe {manifest_path}; ejecuta antes build_validation_datasets.py")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = OUT_DIR / f"{name}_standardized.jsonl"
@@ -312,8 +317,12 @@ def run_dataset(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", action="append",
-                        help="repetible; por defecto todos los manifiestos presentes")
+    parser.add_argument(
+        "--dataset",
+        action="append",
+        choices=FINAL_VALIDATION_DATASETS,
+        help="repetible; por defecto las cuatro fuentes de la campaña",
+    )
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--limit", type=int, default=None,
                         help="procesar solo N filas (prueba de humo)")
@@ -337,10 +346,7 @@ def main() -> int:
         raise SystemExit("Define INGEST_LLM_MODEL (p. ej. mistral-small-2603); "
                          "sin el, el default gemma3:12b provoca 400 en Mistral")
 
-    datasets = args.dataset or sorted(
-        p.name.replace("_manifest.jsonl", "")
-        for p in MANIFEST_DIR.glob("*_manifest.jsonl")
-    )
+    datasets = args.dataset or list(FINAL_VALIDATION_DATASETS)
     awake = request_system_awake()
     if os.name == "nt" and not awake:
         print("AVISO: Windows no acepto la solicitud para impedir la suspension.", flush=True)

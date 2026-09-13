@@ -91,7 +91,6 @@ def test_demo_examples_cover_benign_and_attack_per_dataset_without_subtypes():
         "bot_iot": "BoT-IoT",
         "edge_iiotset": "Edge-IIoTset",
         "ton_iot": "TON-IoT",
-        "urban_iot": "Urban-IoT",
     }
     outcome_labels = {
         "benign": "Benigno",
@@ -131,7 +130,6 @@ def test_demo_examples_cover_benign_and_attack_per_dataset_without_subtypes():
         "bot_iot": {"network_flow"},
         "edge_iiotset": {"network_packet"},
         "ton_iot": {"network_flow"},
-        "urban_iot": {"iot_telemetry", "network_flow"},
     }
 
     labels = "\n".join(examples)

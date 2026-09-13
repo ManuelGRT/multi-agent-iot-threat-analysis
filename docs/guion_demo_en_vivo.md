@@ -42,8 +42,8 @@ Señalar que el runtime contiene tres servidores MCP. La demostración rápida
 usa explícitamente `inprocess`; el despliegue productivo utiliza MCP real por
 `stdio` de forma predeterminada:
 
-- `inference`: estandarización y modelos XGBoost;
-- `case_memory`: casos y trazas SQLite;
+- `inference`: estandarización Mistral viva y modelos XGBoost;
+- `case_memory`: caché de estandarización, casos y trazas SQLite;
 - `threat_intel`: catálogo ATT&CK/CAPEC y mitigaciones.
 
 No hay adaptadores, agentes alternativos ni un endpoint para introducir
@@ -64,8 +64,9 @@ docker compose up --build
 ```
 
 La imagen ya incluye el frontend, el catálogo y los dos modelos activos. El
-volumen de estado conserva caché y casos; `MISTRAL_API_KEY` se inyecta por
-entorno o mediante un `.env` local no versionado.
+volumen de estado conserva, en una sola carpeta, los dos SQLite gestionados
+por `case_memory`: caché de estandarización y casos/trazas. `MISTRAL_API_KEY` se
+inyecta por entorno o mediante un `.env` local no versionado.
 
 ## 3. Analizar un registro crudo
 

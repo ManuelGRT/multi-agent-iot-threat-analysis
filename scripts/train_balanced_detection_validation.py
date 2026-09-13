@@ -24,7 +24,9 @@ if str(REPO) not in sys.path:
 from src.eval.production_models import train_global_detector  # noqa: E402
 from src.eval.validation_campaign import (  # noqa: E402
     PreflightRequirements,
+    final_validation_artifact_paths,
     load_validation_campaign,
+    validate_final_campaign_composition,
 )
 
 
@@ -265,7 +267,6 @@ def deployment_metadata(
         "scope_notes": [
             "23604 is the complete balanced corpus; fit uses only the 16496 train rows.",
             "Balance is 1:1 inside each split and origin, not equal weight across origins.",
-            "Urban-IoT is excluded because it does not declare a binary target.",
             "TON-IoT telemetry is the weakest evaluated origin and Windows has a small test support.",
             "The joblib SHA identifies the deployed wrapper; reproducibility across contract revisions is verified with selection, feature-schema and raw-booster hashes.",
         ],
@@ -365,11 +366,14 @@ def render_markdown(report: Mapping[str, Any]) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    manifest_paths = tuple(sorted(args.manifest_dir.resolve().glob("*_manifest.jsonl")))
-    result_paths = tuple(sorted(args.results_dir.resolve().glob("*_standardized.jsonl")))
-    if not manifest_paths or not result_paths:
-        print("ERROR: no se encontraron manifiestos y resultados", file=sys.stderr)
-        return 1
+    manifest_paths = final_validation_artifact_paths(
+        args.manifest_dir.resolve(),
+        "_manifest.jsonl",
+    )
+    result_paths = final_validation_artifact_paths(
+        args.results_dir.resolve(),
+        "_standardized.jsonl",
+    )
 
     snapshot_before = input_snapshot(manifest_paths, result_paths)
     campaign = load_validation_campaign(
@@ -383,6 +387,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             dedup_scope="dataset",
         ),
     )
+    validate_final_campaign_composition(campaign)
     snapshot_after = input_snapshot(manifest_paths, result_paths)
     if snapshot_before != snapshot_after:
         print("ERROR: las entradas cambiaron durante la carga", file=sys.stderr)

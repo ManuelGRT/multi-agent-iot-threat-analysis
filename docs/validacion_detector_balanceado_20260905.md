@@ -7,13 +7,12 @@ al LLM. El clasificador de tipos de ataque no participo en este entrenamiento.
 
 ## Protocolo
 
-1. Se conservaron los `train`/`val`/`test` congelados en los manifiestos.
-2. Se eliminaron primero las huellas de features duplicadas o inseguras entre
-   particiones.
-3. Se agrupo por `split x origen x etiqueta binaria`.
-4. En cada grupo se selecciono, sin reemplazo y con semilla 42, el minimo entre
+1. Se utilizaron los `train`/`val`/`test` del corpus depurado, congelados en los
+   manifiestos y libres de solapamientos entre particiones.
+2. Se agrupo por `split x origen x etiqueta binaria`.
+3. En cada grupo se selecciono, sin reemplazo y con semilla 42, el minimo entre
    observaciones benignas y ataques.
-5. TON-IoT se trato como cuatro origenes: red, telemetria, Linux y Windows.
+4. TON-IoT se trato como cuatro origenes: red, telemetria, Linux y Windows.
 
 `source_file` solo se utilizo para identificar el suborigen TON durante el
 muestreo y el informe. No forma parte de las features predictivas.
@@ -23,9 +22,8 @@ descartaria la mayor parte de las observaciones disponibles.
 
 ## Soporte efectivo
 
-De 33.637 observaciones binarias elegibles quedaron 33.635 despues de la
-deduplicacion global y 23.604 despues del balance: 11.802 benignas y 11.802
-ataques.
+El corpus depurado contenia 33.635 observaciones binarias elegibles. Despues
+del balance se seleccionaron 23.604: 11.802 benignas y 11.802 ataques.
 
 | Origen | Train por clase | Validacion por clase | Test por clase | Total por clase |
 |---|---:|---:|---:|---:|
@@ -81,7 +79,7 @@ dificultad especifica de la telemetria.
 ## Reproducibilidad
 
 - Politica: `binary_split_origin_1to1_v1_2026-09-05`.
-- Snapshot portable de entradas: `e2117f938b9f8551f567b6f5ca1dcb9710913c760c597f70101ce15f46823666`.
+- Snapshot portable de entradas: `dc21cf54a3120759464223434b3c2e676dede9ed9fe0387f7527be70b59f9733`.
 - Seleccion de `manifest_id`: `b97f53b2cea2efbf7174e7a3b49295f130d2f812f9b9f81fcbc99fe31e1246b9`.
 - Esquema de 5.264 features: `de41afdd00f73945f34c071b99752d75339b88b7af1cb813439b383cca7c9c1b`.
 - Booster XGBoost serializado: `26fa71ff717bc36a9305556095a989a660a5d2f596097b1abe424e385d886463`.

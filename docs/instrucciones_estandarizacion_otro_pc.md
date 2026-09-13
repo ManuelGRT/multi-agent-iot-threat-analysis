@@ -1,32 +1,34 @@
 # Instrucciones: campaña de estandarización en vivo (otro ordenador)
 
 **Qué es:** ejecución reproducible de la fase de estandarización en vivo de la
-campaña de validación. Estandariza con Mistral EN VIVO las 35.637 filas de los
+campaña de validación. Estandariza con Mistral EN VIVO las 34.635 filas de los
 manifiestos de
-`artifacts/validation_2026/manifests/` (5 datasets). Reanudable: se puede cortar
+`artifacts/validation_2026/manifests/` (4 datasets). Reanudable: se puede cortar
 y relanzar sin perder trabajo.
 
 | Dataset | Filas | Nota |
 |---|---:|---|
 | edge_iiotset | 12.800 | binario 5.900+5.900 exacto; MITM al máximo único real (400) |
-| ton_iot | 11.800 | muestra general balanceada (10 clases, ~655/clase) |
+| ton_iot | 11.798 | muestra general balanceada por clases nativas |
 | iot23 | 7.081 | ataques = todo el universo único disponible (1.181) |
 | bot_iot | 2.956 | Normal solo 477 en origen (declarado) |
-| urban_iot | 1.000 | sin etiquetas: solo validación de estandarización |
 
 Cada fila tabular requiere dos llamadas (selección de columnas y extracción).
 La duración y el coste dependen de la cuota y tarifa vigentes del proveedor.
-Este runner fuerza `cache_mode=bypass`: la caché operativa del sistema no
-interviene y cada resultado aceptado corresponde a una llamada en vivo.
+Este runner invoca directamente la herramienta viva de inferencia, sin pasar
+por la coordinación de caché del agente final y del servidor `case_memory`.
+Por tanto, cada resultado aceptado corresponde a una llamada en vivo.
 
 ## 1. Qué copiar a la máquina
 
 - El repositorio completo (o `git clone` del repo local + copiar lo no versionado):
-  - `artifacts/validation_2026/manifests/` (los 5 `*_manifest.jsonl` + `summary.json`)
+  - `artifacts/validation_2026/manifests/` (los 4 `*_manifest.jsonl` + `summary.json`)
     — **imprescindible**: no está en git y contiene las filas a estandarizar.
-    Alternativa: si la máquina tiene la carpeta `data/` completa, se pueden
-    regenerar idénticos con `python scripts/build_validation_manifests.py`
-    (semilla 42 determinista).
+    Alternativa: si la máquina tiene la carpeta `data/` completa, puede
+    regenerarse la misma selección lógica con
+    `python scripts/build_validation_datasets.py` (semilla 42). Para conservar
+    también los SHA-256 byte a byte, deben copiarse los JSONL en modo binario,
+    sin convertir separadores de ruta ni finales de línea.
 - NO hace falta la carpeta `data/` (las filas van dentro de los manifiestos).
 - NO hace falta la caché Mistral histórica.
 
@@ -80,8 +82,8 @@ abstenciones, revisa las variables de entorno y el campo `error`.
 ## 5. Qué devolver
 
 La carpeta `artifacts/validation_2026/standardized/` completa:
-- `<dataset>_standardized.jsonl` (5 ficheros)
-- `<dataset>_run_summary.json` (5 ficheros)
+- `<dataset>_standardized.jsonl` (4 ficheros)
+- `<dataset>_run_summary.json` (4 ficheros)
 
 La campaña de estandarización termina al verificar la cobertura LLM completa.
 El entrenamiento y la evaluación de los modelos vigentes se ejecutan después,
@@ -91,6 +93,5 @@ en el equipo principal, mediante sus scripts específicos.
 
 - 100 % de los resultados aceptados con `parsed_by_llm: true`; no se admiten
   resultados de adaptador. Las abstenciones se reintentan con `--retry-failures`.
-- `avg_mapping_confidence` ≥ 0,8 en los datasets conocidos; urban_iot puede ser
-  menor (fuente desconocida — ese dato ES el resultado).
+- `avg_mapping_confidence` ≥ 0,8 en los cuatro datasets.
 - 0 errores de tipo «target en features» (el runner aborta si detecta etiquetas).

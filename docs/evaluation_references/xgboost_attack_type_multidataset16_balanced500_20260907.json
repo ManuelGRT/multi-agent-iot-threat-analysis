@@ -84,6 +84,7 @@
     }
   ],
   "generated_at": "2026-09-06T22:32:17+00:00",
+  "input_inventory_reconciled_at": "2026-09-12T18:09:42Z",
   "hashes": {
     "artifact": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
     "eligible_records": "f4b6aa576b7c7b48b34023232e0abce9368c50f52fde9f3e40dff6a19c38e344",
@@ -113,14 +114,9 @@
         "sha256": "caef7fa8ed9a8ce9c7f28720abf88c3aad6a801aa58f1a2c5234c579906298f1"
       },
       {
-        "bytes": 18052075,
+        "bytes": 18051032,
         "filename": "ton_iot_manifest.jsonl",
-        "sha256": "348616fd60ab0025e2df6aa3a4f546528cab4b04b0e217c86a668a65a7d67bd8"
-      },
-      {
-        "bytes": 447456,
-        "filename": "urban_iot_manifest.jsonl",
-        "sha256": "3a818734d4194dbec50b263a95abd06c66760b2d9eb6bcb7a7ba0c506c62ee13"
+        "sha256": "23c89dd0d004a70d507c48853dff1bc5411de1ebffbf03523a23cfb00864c471"
       }
     ],
     "standardized_results": [
@@ -140,20 +136,15 @@
         "sha256": "837ffaa5ab0985d197ca5a0dd1b1e6135f38c2f41e8ddb134190ad427f95cc02"
       },
       {
-        "bytes": 35784707,
+        "bytes": 35780676,
         "filename": "ton_iot_standardized.jsonl",
-        "sha256": "e49d98803309b75d185efe95d92945ac994bd52d3a66f9598ff7d7d5f43793f8"
-      },
-      {
-        "bytes": 2025366,
-        "filename": "urban_iot_standardized.jsonl",
-        "sha256": "f343914fee3119bcc2266d1048e474d5e710616a7575085e2288536f632b7a29"
+        "sha256": "5d5237630ac6059d7132992ed6194ee9165f97ad974eacc11329e87450ae07d0"
       }
     ]
   },
   "llm_policy": "Reutilizacion exclusiva de resultados Mistral ya materializados; el entrenamiento no llama al LLM.",
   "mapping": {
-    "input_rows": 35637,
+    "input_rows": 34635,
     "mapped_by_dataset": {
       "bot_iot": {
         "DDoS_HTTP": 2,
@@ -255,7 +246,7 @@
       "forced": 1805,
       "non_attack": 1977,
       "out_of_taxonomy": 82,
-      "task_not_declared": 19800
+      "task_not_declared": 18798
     }
   },
   "metrics": {

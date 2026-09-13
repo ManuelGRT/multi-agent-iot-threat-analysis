@@ -59,7 +59,9 @@ from src.eval.production_models import (  # noqa: E402
 )
 from src.eval.validation_campaign import (  # noqa: E402
     PreflightRequirements,
+    final_validation_artifact_paths,
     load_validation_campaign,
+    validate_final_campaign_composition,
 )
 
 
@@ -833,8 +835,14 @@ def _markdown_summary(report: dict[str, Any]) -> str:
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    manifest_paths = _paths(args.manifest_dir, "*_manifest.jsonl")
-    result_paths = _paths(args.results_dir, "*_standardized.jsonl")
+    manifest_paths = final_validation_artifact_paths(
+        args.manifest_dir.expanduser().resolve(),
+        "_manifest.jsonl",
+    )
+    result_paths = final_validation_artifact_paths(
+        args.results_dir.expanduser().resolve(),
+        "_standardized.jsonl",
+    )
     out_dir = args.out_dir.expanduser().resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -854,6 +862,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             dedup_scope="global",
         ),
     )
+    validate_final_campaign_composition(campaign)
     _print(f"Campaña validada: {len(campaign.joined_records)} filas")
 
     _print("Recuperando targets auxiliares y protocolo crudo auditable")

@@ -3,7 +3,7 @@
   "created_at": "2026-09-05T15:49:16+00:00",
   "input_inventory_reconciled_at": "2026-09-12T18:09:42Z",
   "artifact": {
-    "filename": "xgboost_detection_balanced_by_origin_20260905.joblib",
+    "filename": "xgboost_detection_final.joblib",
     "bytes": 300242,
     "sha256": "f2d7d3dbe9c90fbd7f3d1f134d91e77f855dde134119eced812646e285524393",
     "task": "binary_detection",

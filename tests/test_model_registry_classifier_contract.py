@@ -53,7 +53,7 @@ def test_attack_type_model_returns_type_and_top_scores_only(monkeypatch):
     assert result["taxonomy_version"] == MULTIDATASET_TAXONOMY_VERSION
     assert result["decision_threshold"] == pytest.approx(0.65)
     assert result["model_name"] == (
-        "xgboost_attack_subtype_multidataset16_balanced500_20260906"
+        "xgboost_classification_final"
     )
     assert not {"attack_family", "family_confidence", "family_scores"} & result.keys()
 

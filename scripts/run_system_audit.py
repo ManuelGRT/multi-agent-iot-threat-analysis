@@ -66,7 +66,7 @@ DETECTOR_RELEASE_METRICS = {
     "selective_coverage": 0.9697648376259799,
 }
 CLASSIFIER_RELEASE_HASHES = {
-    "artifact": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+    "artifact": "8871fbced43b28156f608b73f5eb6afaac5e2e1afbdc918fdb87abb4b1bbb48b",
     "selection": "d39cf28b3ec96e1558fbc77327d5674a43644a5f880233bd59640e8370168f60",
     "eligible_records": "f4b6aa576b7c7b48b34023232e0abce9368c50f52fde9f3e40dff6a19c38e344",
     "train": "c53a855cbb787b8f34499fd3e61b6dbae3ccf4b2cf0c0c0a30dbc76b9dbe69fc",

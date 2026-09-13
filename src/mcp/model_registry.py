@@ -97,7 +97,7 @@ def classify(event_data: dict[str, Any], top_k: int = 3) -> dict[str, Any]:
         "decision_threshold": decision_threshold,
         "taxonomy_version": taxonomy_version,
         "model_name": _model_name(
-            model, "xgboost_attack_subtype_multidataset16_balanced500_20260906"
+            model, "xgboost_classification_final"
         ),
     }
 

@@ -11,13 +11,13 @@ from src.mcp.common import package_data_dir, resolve_path
 
 
 REPO = Path(__file__).resolve().parents[1]
-DETECTION_MODEL = "xgboost_detection_balanced_by_origin_20260905.joblib"
+DETECTION_MODEL = "xgboost_detection_final.joblib"
 DETECTION_MODEL_SHA256 = (
     "f2d7d3dbe9c90fbd7f3d1f134d91e77f855dde134119eced812646e285524393"
 )
-CLASSIFIER_MODEL = "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
+CLASSIFIER_MODEL = "xgboost_classification_final.joblib"
 CLASSIFIER_MODEL_SHA256 = (
-    "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5"
+    "8871fbced43b28156f608b73f5eb6afaac5e2e1afbdc918fdb87abb4b1bbb48b"
 )
 
 

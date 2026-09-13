@@ -153,7 +153,7 @@ def test_from_orchestrator_state_bridges_existing_contract():
             "is_malicious": True,
             "probability": 0.95,
             "evidence": ["dst_port=23"],
-            "model_name": "xgboost_detection_balanced_by_origin_20260905",
+            "model_name": "xgboost_detection_final",
             "next_route": "classify",
             "abstain": False,
         },
@@ -231,7 +231,7 @@ def test_from_orchestrator_state_preserves_classifier_operational_contract():
             "attack_type": "DDoS_TCP",
             "confidence": 0.88,
             "decision_threshold": 0.81,
-            "model_name": "xgboost_attack_subtype_multidataset16_balanced500_20260906",
+            "model_name": "xgboost_classification_final",
             "model_task": "attack_type",
             "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
             "top_scores": {
@@ -246,7 +246,7 @@ def test_from_orchestrator_state_preserves_classifier_operational_contract():
     assert classification.model_task == "attack_type"
     assert classification.taxonomy_version == MULTIDATASET_TAXONOMY_VERSION
     assert classification.decision_threshold == 0.81
-    assert classification.model_name.endswith("_20260906")
+    assert classification.model_name == "xgboost_classification_final"
     assert len(classification.top_scores) == 3
     assert not hasattr(classification, "attack_family")
 

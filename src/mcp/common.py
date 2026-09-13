@@ -129,13 +129,13 @@ DEFAULT_PATHS: dict[str, Callable[[], Path]] = {
         os.getenv("TFM_DETECTION_MODEL")
         or package_data_dir()
         / "models"
-        / "xgboost_detection_balanced_by_origin_20260905.joblib"
+        / "xgboost_detection_final.joblib"
     ),
     "attack_type_model": lambda: Path(
         os.getenv("TFM_ATTACK_TYPE_MODEL")
         or package_data_dir()
         / "models"
-        / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib"
+        / "xgboost_classification_final.joblib"
     ),
     "case_memory_db": lambda: _persistent_database_paths()[1],
 }

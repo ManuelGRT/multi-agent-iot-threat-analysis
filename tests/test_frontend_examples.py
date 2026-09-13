@@ -230,7 +230,8 @@ def test_frontend_simplifies_standardization_cache_information():
 def test_frontend_uses_stable_final_detector_label():
     html = TestClient(app).get("/").text
 
-    assert 'return "xgboost_detection_final"' in html
+    assert "function detectorModelLabel(value)" in html
+    assert "return model ||" in html
     assert "detectorModelLabel(det.model_name)" in html
 
 

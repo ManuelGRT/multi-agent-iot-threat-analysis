@@ -230,7 +230,7 @@ def test_auditor_rejects_threshold_that_differs_from_operational_contract():
             attack_type="DDoS_TCP",
             confidence=0.80,
             decision_threshold=0.81,
-            model_name="xgboost_attack_subtype_multidataset16_balanced500_20260906",
+            model_name="xgboost_classification_final",
             model_task="attack_type",
             taxonomy_version=MULTIDATASET_TAXONOMY_VERSION,
             top_scores={"DDoS_TCP": 0.80, "DDoS_UDP": 0.12, "XSS": 0.08},

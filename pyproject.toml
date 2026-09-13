@@ -54,8 +54,8 @@ exclude = ["src.eval*"]
 "src.api" = ["static/index.html"]
 "src.mcp" = [
     "data/threat_intel_catalog.json",
-    "data/models/xgboost_detection_balanced_by_origin_20260905.joblib",
-    "data/models/xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
+    "data/models/xgboost_detection_final.joblib",
+    "data/models/xgboost_classification_final.joblib",
 ]
 
 [tool.pytest.ini_options]

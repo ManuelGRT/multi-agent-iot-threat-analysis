@@ -1,9 +1,9 @@
 {
   "artifact": {
-    "bytes": 2018126,
+    "bytes": 2018118,
     "deployed": true,
-    "filename": "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
-    "sha256": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+    "filename": "xgboost_classification_final.joblib",
+    "sha256": "8871fbced43b28156f608b73f5eb6afaac5e2e1afbdc918fdb87abb4b1bbb48b",
     "source_candidate_activated": false
   },
   "balancing": {
@@ -86,7 +86,7 @@
   "generated_at": "2026-09-06T22:32:17+00:00",
   "input_inventory_reconciled_at": "2026-09-12T18:09:42Z",
   "hashes": {
-    "artifact": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+    "artifact": "8871fbced43b28156f608b73f5eb6afaac5e2e1afbdc918fdb87abb4b1bbb48b",
     "eligible_records": "f4b6aa576b7c7b48b34023232e0abce9368c50f52fde9f3e40dff6a19c38e344",
     "feature_names": "7562752da27242801d14455990f38e7b1e32771a35f96196fb499b52c0a289cd",
     "selection": "d39cf28b3ec96e1558fbc77327d5674a43644a5f880233bd59640e8370168f60",
@@ -1625,7 +1625,7 @@
     "feature_count": 2742,
     "operational_contract": {
       "confidence_threshold": 0.65,
-      "model_name": "xgboost_attack_subtype_multidataset16_balanced500_20260906",
+      "model_name": "xgboost_classification_final",
       "public_task": "attack_type",
       "task": "attack_subtype",
       "taxonomy_version": "multidataset_attack_type_v1_2026-09-06"

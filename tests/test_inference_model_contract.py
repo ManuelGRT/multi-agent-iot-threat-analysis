@@ -15,9 +15,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = REPO_ROOT / "src" / "mcp" / "data" / "models"
 ACTIVE_MODELS = {
     "detection": MODEL_DIR
-    / "xgboost_detection_balanced_by_origin_20260905.joblib",
+    / "xgboost_detection_final.joblib",
     "classifier": MODEL_DIR
-    / "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
+    / "xgboost_classification_final.joblib",
 }
 PROBE_ROWS = [
     {},

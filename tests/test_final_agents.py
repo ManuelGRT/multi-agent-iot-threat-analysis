@@ -147,7 +147,7 @@ def detect_ok(probability: float):
         "ok": True,
         "is_malicious": probability >= 0.5,
         "probability": probability,
-        "model_name": "xgboost_detection_balanced_by_origin_20260905",
+        "model_name": "xgboost_detection_final",
     }
 
 
@@ -164,7 +164,7 @@ def classify_ok(attack_type="DDoS_TCP", confidence=0.95):
         },
         "model_task": "attack_type",
         "taxonomy_version": MULTIDATASET_TAXONOMY_VERSION,
-        "model_name": "xgboost_attack_subtype_multidataset16_balanced500_20260906",
+        "model_name": "xgboost_classification_final",
     }
 
 

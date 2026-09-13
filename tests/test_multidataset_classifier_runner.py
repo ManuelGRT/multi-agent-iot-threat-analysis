@@ -247,10 +247,10 @@ def test_versioned_portable_reference_matches_deployed_classifier_contract():
 
     assert reference["schema_version"] == "classifier-evaluation-reference-v1"
     assert reference["artifact"] == {
-        "bytes": 2_018_126,
+        "bytes": 2_018_118,
         "deployed": True,
-        "filename": "xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib",
-        "sha256": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+        "filename": "xgboost_classification_final.joblib",
+        "sha256": "8871fbced43b28156f608b73f5eb6afaac5e2e1afbdc918fdb87abb4b1bbb48b",
         "source_candidate_activated": False,
     }
     assert reference["taxonomy"]["class_count"] == 16

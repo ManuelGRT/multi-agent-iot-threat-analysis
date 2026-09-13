@@ -698,9 +698,6 @@ function safeReferenceUrl(value) {
 
 function detectorModelLabel(value) {
   const model = String(value || "").trim();
-  if (model === "xgboost_detection_balanced_by_origin_20260905") {
-    return "xgboost_detection_final";
-  }
   return model || "—";
 }
 

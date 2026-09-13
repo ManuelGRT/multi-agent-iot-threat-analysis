@@ -85,8 +85,6 @@ def normalise_dataset(value: object) -> str:
         "iot23": "iot23",
         "toniot": "ton_iot",
         "ton_iot": "ton_iot",
-        "urban_iot": "urban_iot",
-        "urbaniot": "urban_iot",
     }.get(key, key)
 
 

@@ -14,10 +14,11 @@ Protocolo (espejo del TFM de referencia, decidido 2026-08-03):
   y columnas target (evita casi-duplicados de rafaga entre train y test).
 - TON-IoT se trata como UN dataset (muestra general balanceada por `type`
   sobre todos sus ficheros; el fichero de origen queda como metadato).
-- URBAN_IOT no tiene etiquetas: muestra para validar solo la estandarizacion.
+- Dos observaciones TON-IoT equivalentes tras la estandarizacion se excluyen
+  conservando intacto el split previamente asignado al resto del corpus.
 
 Uso:
-    .venv\\Scripts\\python.exe scripts\\build_validation_manifests.py
+    .venv\\Scripts\\python.exe scripts\\build_validation_datasets.py
     (opciones: --dataset edge_iiotset --seed 42 --out-dir artifacts/validation_2026)
 """
 from __future__ import annotations
@@ -28,20 +29,47 @@ import glob
 import hashlib
 import json
 import random
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.eval.data_sanitization import sanitize_llm_input
+REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from src.eval.data_sanitization import sanitize_llm_input  # noqa: E402
+from src.eval.validation_campaign import (  # noqa: E402
+    FINAL_VALIDATION_CORPUS_ROWS,
+    FINAL_VALIDATION_DATASET_ROWS,
+    FINAL_VALIDATION_DATASETS,
+)
 
 csv.field_size_limit(10_000_000)
 
-REPO = Path(__file__).resolve().parents[1]
 DATA = REPO / "data"
 
 BINARY_QUOTA_PER_SIDE = 5900
 MULTICLASS_QUOTA = 500
 OVERSAMPLE = 1.5  # margen para perdidas por dedup
+
+# Estas dos filas benignas de TON-IoT Fridge producen la misma representacion
+# predictiva despues de la estandarizacion. Se retiran despues de asignar los
+# splits para no modificar la pertenencia congelada de ninguna otra fila.
+CURATED_EXCLUDED_SOURCE_ROWS = {
+    ("ton_iot", "Train_Test_IoT_Fridge.csv", 24_117): {
+        "content_hash": "d06787265d2f0b7bc938f3e956e4f2ee",
+        "class": "normal",
+        "is_attack": False,
+        "split": "test",
+    },
+    ("ton_iot", "Train_Test_IoT_Fridge.csv", 26_045): {
+        "content_hash": "64280cb3f7d5cc77408266421c12a833",
+        "class": "normal",
+        "is_attack": False,
+        "split": "train",
+    },
+}
 
 # Columnas que NUNCA se envian al LLM (targets) y que tampoco entran al hash
 TARGET_COLS = {
@@ -165,22 +193,59 @@ def bot_iot_spec():
     return {"name": "bot_iot", "files": files, "labeler": labeler, "normal_class": "Normal"}
 
 
-def urban_spec():
-    path = DATA / "URBAN_IOT" / "original_data.csv"
-    def labeler(row):
-        return "unlabeled", None  # sin etiquetas: solo validacion de estandarizacion
-    return {"name": "urban_iot", "files": [path], "labeler": labeler,
-            "normal_class": None, "standardization_only": True,
-            "multiclass_quota": 1000}
-
-
 SPECS = {
     "edge_iiotset": edge_spec,
     "ton_iot": ton_spec,
     "iot23": iot23_spec,
     "bot_iot": bot_iot_spec,
-    "urban_iot": urban_spec,
 }
+if set(SPECS) != set(FINAL_VALIDATION_DATASETS):
+    raise RuntimeError("Las fuentes del constructor no coinciden con la campaña final")
+
+
+def _source_basename(value: object) -> str:
+    return str(value).replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def exclude_curated_rows(
+    dataset: str,
+    selected: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Retira las dos observaciones verificadas sin reasignar ningún split."""
+    expected = {
+        key: metadata
+        for key, metadata in CURATED_EXCLUDED_SOURCE_ROWS.items()
+        if key[0] == dataset
+    }
+    excluded = [
+        item
+        for item in selected
+        if (dataset, _source_basename(item["source_file"]), item["row_id"])
+        in expected
+    ]
+    observed_keys = {
+        (dataset, _source_basename(item["source_file"]), item["row_id"])
+        for item in excluded
+    }
+    if observed_keys != set(expected):
+        raise RuntimeError(
+            f"{dataset}: exclusiones curadas distintas de las esperadas"
+        )
+    for item in excluded:
+        key = (dataset, _source_basename(item["source_file"]), item["row_id"])
+        actual = {
+            "content_hash": item["content_hash"],
+            "class": item["class"],
+            "is_attack": item["is_attack"],
+            "split": item["split"],
+        }
+        if actual != expected[key]:
+            raise RuntimeError(
+                f"{dataset}: la fila curada {key[1:]} no coincide con su contrato"
+            )
+    excluded_object_ids = {id(item) for item in excluded}
+    retained = [item for item in selected if id(item) not in excluded_object_ids]
+    return retained, excluded
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +253,8 @@ SPECS = {
 # ---------------------------------------------------------------------------
 
 def build_manifest(spec: dict, seed: int, out_dir: Path) -> dict:
+    if seed != 42:
+        raise ValueError("La campaña final está fijada a la semilla 42")
     name = spec["name"]
     normal_class = spec.get("normal_class")
     std_only = spec.get("standardization_only", False)
@@ -301,6 +368,17 @@ def build_manifest(spec: dict, seed: int, out_dir: Path) -> dict:
         for i, item in enumerate(items):
             item["split"] = "train" if i < n_train else ("val" if i < n_train + n_val else "test")
 
+    selected, curated_excluded = exclude_curated_rows(name, selected)
+    if curated_excluded:
+        by_class = defaultdict(list)
+        for item in selected:
+            by_class[item["class"]].append(item)
+    if len(selected) != FINAL_VALIDATION_DATASET_ROWS[name]:
+        raise RuntimeError(
+            f"{name}: se esperaban {FINAL_VALIDATION_DATASET_ROWS[name]} filas "
+            f"y se obtuvieron {len(selected)}"
+        )
+
     # 5) Serializar: fila cruda SIN columnas target (targets aparte)
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = out_dir / f"{name}_manifest.jsonl"
@@ -331,6 +409,11 @@ def build_manifest(spec: dict, seed: int, out_dir: Path) -> dict:
         },
         "duplicates_skipped_while_sampling": sum(r.seen - r.distinct for r in reservoirs.values()),
         "cross_class_dedup_discarded": sum(len(r.items) for r in reservoirs.values()) - sum(len(v) for v in pool.values()),
+        "curated_excluded_rows": len(curated_excluded),
+        "curated_excluded_manifest_ids": [
+            f"{name}::{item['source_file']}::{item['row_id']}"
+            for item in curated_excluded
+        ],
         "manifest": str(manifest_path.relative_to(REPO)),
     }
     return summary
@@ -340,12 +423,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=sorted(SPECS), action="append",
                         help="repetible; por defecto todos")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--seed", type=int, choices=(42,), default=42)
     parser.add_argument("--out-dir", default="artifacts/validation_2026/manifests")
     args = parser.parse_args()
 
     out_dir = REPO / args.out_dir
     targets = args.dataset or sorted(SPECS)
+    if len(targets) != len(set(targets)):
+        parser.error("No se puede repetir un dataset")
     summaries = []
     for name in targets:
         print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}] muestreando {name}...")
@@ -359,6 +444,17 @@ def main() -> int:
                    "seed": args.seed, "datasets": summaries}, fh, indent=2, ensure_ascii=False)
     print(f"Resumen global: {global_path}")
     total = sum(s["rows"] for s in summaries)
+    if set(targets) == set(SPECS):
+        rows_by_dataset = {summary["dataset"]: summary["rows"] for summary in summaries}
+        if (
+            rows_by_dataset != FINAL_VALIDATION_DATASET_ROWS
+            or total != FINAL_VALIDATION_CORPUS_ROWS
+        ):
+            raise RuntimeError(
+                "La composición del corpus no coincide con la campaña final: "
+                f"esperado={dict(FINAL_VALIDATION_DATASET_ROWS)}, "
+                f"obtenido={rows_by_dataset}"
+            )
     print(f"TOTAL filas a estandarizar: {total}")
     return 0
 

@@ -1,9 +1,10 @@
 """Agente final de estandarizacion sobre la tool MCP ``standardize_event``.
 
-Para una entrada cruda, la tool reutiliza una estandarizacion Mistral valida si
-existe un duplicado exacto en cache; en caso contrario exige Mistral en vivo.
-Nunca usa adaptadores. Si no hay hit y la llamada o la validacion fallan, el
-agente se abstiene y deriva el registro al juez para revision humana.
+Para una entrada cruda, el agente consulta primero la cache expuesta por el
+servidor MCP ``case_memory``. Si no existe un duplicado exacto, exige Mistral
+en vivo mediante ``inference`` y devuelve el exito al servidor de memoria para
+persistirlo. Nunca usa adaptadores. Si no hay hit y la llamada o la validacion
+fallan, se abstiene y deriva el registro al juez para revision humana.
 
 La sanitizacion no pertenece al sistema multiagente. Las entradas operativas
 se consideran ya preparadas; el runtime valida contratos y rechaza resultados
@@ -11,6 +12,9 @@ invalidos, pero no elimina campos silenciosamente.
 """
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.agents.final.base import FinalAgent
@@ -20,6 +24,41 @@ from src.mcp.standardization_contract import validate_standardization_success
 from src.orchestration.state import OrchestratorState
 
 REVIEW_MAPPING_CONFIDENCE = 0.5
+
+
+@dataclass(slots=True)
+class _CacheFlight:
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    references: int = 0
+
+
+_CACHE_FLIGHTS_GUARD = threading.Lock()
+_CACHE_FLIGHTS: dict[tuple[str, str], _CacheFlight] = {}
+
+
+@contextmanager
+def _singleflight(content_hash: str, pipeline_hash: str):
+    """Serializa un miss duplicado sin acceder directamente al almacenamiento."""
+
+    key = (content_hash, pipeline_hash)
+    with _CACHE_FLIGHTS_GUARD:
+        flight = _CACHE_FLIGHTS.get(key)
+        if flight is None:
+            flight = _CacheFlight()
+            _CACHE_FLIGHTS[key] = flight
+        flight.references += 1
+    acquired = False
+    try:
+        flight.lock.acquire()
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            flight.lock.release()
+        with _CACHE_FLIGHTS_GUARD:
+            flight.references -= 1
+            if flight.references == 0 and _CACHE_FLIGHTS.get(key) is flight:
+                _CACHE_FLIGHTS.pop(key, None)
 
 
 class FinalStandardizer(FinalAgent):
@@ -93,24 +132,226 @@ class FinalStandardizer(FinalAgent):
             },
         )
 
+    @staticmethod
+    def _raw_arguments(raw_input: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "dataset": raw_input.get("dataset", "generic"),
+            "row": raw_input.get("row"),
+            "text": raw_input.get("text"),
+            "source_file": raw_input.get("source_file", "api"),
+            "row_id": raw_input.get("row_id", 0),
+            "split": raw_input.get("split", "stream"),
+        }
+
+    def _lookup_cache(
+        self,
+        raw_input: dict[str, Any],
+        arguments: dict[str, Any],
+        tool_sequence: list[str],
+    ) -> dict[str, Any]:
+        tool_sequence.append("case_memory.lookup_standardization_cache")
+        lookup = self.call_tool(
+            "case_memory",
+            "lookup_standardization_cache",
+            **arguments,
+        )
+        if lookup.get("ok") is not True or lookup.get("hit") is not True:
+            return lookup
+        try:
+            validate_standardization_success(raw_input, lookup)
+        except (KeyError, TypeError, ValueError):
+            content_hash = lookup.get("cache_content_hash")
+            pipeline_hash = lookup.get("cache_pipeline_hash")
+            if isinstance(content_hash, str) and isinstance(pipeline_hash, str):
+                tool_sequence.append("case_memory.evict_standardization_cache")
+                self.call_tool(
+                    "case_memory",
+                    "evict_standardization_cache",
+                    content_hash=content_hash,
+                    pipeline_hash=pipeline_hash,
+                )
+            return {**lookup, "hit": False, "invalidated": True}
+        return lookup
+
+    def _live_and_store(
+        self,
+        raw_input: dict[str, Any],
+        arguments: dict[str, Any],
+        lookup: dict[str, Any],
+        tool_sequence: list[str],
+    ) -> dict[str, Any]:
+        lookup_status = (
+            "invalidated"
+            if lookup.get("invalidated") is True
+            else "miss" if lookup.get("ok") is True else "error"
+        )
+        tool_sequence.append("inference.standardize_event")
+        live = self.call_tool("inference", "standardize_event", **arguments)
+        if live.get("ok") is not True:
+            return {
+                **live,
+                "_cache_trace": {
+                    "lookup": lookup_status,
+                    "store": "not_attempted",
+                },
+            }
+        try:
+            validated = validate_standardization_success(raw_input, live)
+        except (KeyError, TypeError, ValueError):
+            # El llamador genera la abstencion controlada con el mismo detalle.
+            return {
+                **live,
+                "_cache_trace": {
+                    "lookup": lookup_status,
+                    "store": "not_attempted",
+                },
+            }
+
+        tool_sequence.append("case_memory.store_standardization_cache")
+        stored = self.call_tool(
+            "case_memory",
+            "store_standardization_cache",
+            **arguments,
+            canonical_event=validated["canonical_event"],
+            selected_columns=validated["selected_columns"],
+            model=validated["model"],
+        )
+        winner = stored.get("winner")
+        if (
+            stored.get("ok") is True
+            and stored.get("already_present") is True
+            and isinstance(winner, dict)
+        ):
+            candidate = {"ok": True, **winner}
+            try:
+                validate_standardization_success(raw_input, candidate)
+            except (KeyError, TypeError, ValueError):
+                pass
+            else:
+                candidate["_cache_trace"] = {
+                    "lookup": lookup_status,
+                    "store": "already_exists",
+                }
+                return candidate
+
+        # La cache es fail-open: un fallo de escritura nunca invalida un exito
+        # Mistral. Se conservan los hashes calculados por case-memory cuando
+        # estan disponibles para que la traza identifique la operacion.
+        enriched = dict(live)
+        enriched["_cache_trace"] = {
+            "lookup": lookup_status,
+            "store": (
+                str(
+                    stored.get("status")
+                    or (
+                        "inserted"
+                        if stored.get("stored") is True
+                        else "not_stored"
+                    )
+                )
+                if stored.get("ok") is True
+                else "error"
+            ),
+        }
+        for key in ("cache_content_hash", "cache_pipeline_hash"):
+            value = stored.get(key) or lookup.get(key)
+            if isinstance(value, str):
+                enriched[key] = value
+        return enriched
+
+    def _standardize(
+        self,
+        raw_input: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[str]]:
+        arguments = self._raw_arguments(raw_input)
+        tool_sequence: list[str] = []
+        if raw_input.get("canonical_event") is not None:
+            tool_sequence.append("inference.standardize_event")
+            result = self.call_tool(
+                "inference",
+                "standardize_event",
+                **arguments,
+                canonical_event=raw_input.get("canonical_event"),
+            )
+            return {
+                **result,
+                "_cache_trace": {"lookup": "skipped", "store": "skipped"},
+            }, tool_sequence
+
+        lookup = self._lookup_cache(raw_input, arguments, tool_sequence)
+        if lookup.get("ok") is True and lookup.get("hit") is True:
+            return {
+                **lookup,
+                "_cache_trace": {"lookup": "hit", "store": "not_required"},
+            }, tool_sequence
+
+        content_hash = lookup.get("cache_content_hash")
+        pipeline_hash = lookup.get("cache_pipeline_hash")
+        has_flight_key = (
+            isinstance(content_hash, str)
+            and len(content_hash) == 64
+            and isinstance(pipeline_hash, str)
+            and len(pipeline_hash) == 64
+        )
+        if not has_flight_key:
+            return (
+                self._live_and_store(
+                    raw_input,
+                    arguments,
+                    lookup,
+                    tool_sequence,
+                ),
+                tool_sequence,
+            )
+
+        with _singleflight(content_hash, pipeline_hash):
+            # Otro hilo del proceso puede haber completado el mismo contenido
+            # mientras este esperaba el bloqueo.
+            second_lookup = self._lookup_cache(
+                raw_input,
+                arguments,
+                tool_sequence,
+            )
+            if (
+                second_lookup.get("ok") is True
+                and second_lookup.get("hit") is True
+            ):
+                return {
+                    **second_lookup,
+                    "_cache_trace": {
+                        "lookup": "hit",
+                        "store": "not_required",
+                    },
+                }, tool_sequence
+            return (
+                self._live_and_store(
+                    raw_input,
+                    arguments,
+                    second_lookup,
+                    tool_sequence,
+                ),
+                tool_sequence,
+            )
+
     def run(self, state: OrchestratorState) -> dict[str, Any]:
         raw_input = state.get("raw_input") or {}
         entry = self.start_entry(
             tool="standardize_event",
             dataset=raw_input.get("dataset"),
             row_id=raw_input.get("row_id"),
+            cache_server="case_memory",
         )
 
-        result = self.call_tool(
-            "inference",
-            "standardize_event",
-            dataset=raw_input.get("dataset", "generic"),
-            row=raw_input.get("row"),
-            text=raw_input.get("text"),
-            canonical_event=raw_input.get("canonical_event"),
-            source_file=raw_input.get("source_file", "api"),
-            row_id=raw_input.get("row_id", 0),
-            split=raw_input.get("split", "stream"),
+        result, tool_sequence = self._standardize(raw_input)
+        entry.detail["tool_sequence"] = tool_sequence
+        entry.detail["cache"] = result.pop(
+            "_cache_trace",
+            {"lookup": "unknown", "store": "unknown"},
+        )
+        entry.tool = (
+            "lookup_standardization_cache"
+            if result.get("from_cache") is True
+            else "standardize_event"
         )
 
         if result.get("ok") is not True:

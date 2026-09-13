@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,6 +89,58 @@ def _write_jsonl(path, records, *, final_newline: bool = True):
         text += "\n"
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def test_final_validation_artifact_paths_requires_exact_final_sources(tmp_path):
+    for dataset in campaign.FINAL_VALIDATION_DATASETS:
+        (tmp_path / f"{dataset}_manifest.jsonl").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "obsolete_dataset_manifest.jsonl").write_text("{}\n", encoding="utf-8")
+
+    paths = campaign.final_validation_artifact_paths(tmp_path, "_manifest.jsonl")
+
+    assert tuple(path.stem for path in paths) == tuple(
+        f"{dataset}_manifest" for dataset in campaign.FINAL_VALIDATION_DATASETS
+    )
+
+
+def test_final_validation_artifact_paths_rejects_incomplete_inventory(tmp_path):
+    with pytest.raises(FileNotFoundError, match="bot_iot_manifest.jsonl"):
+        campaign.final_validation_artifact_paths(tmp_path, "_manifest.jsonl")
+
+
+def test_validate_final_campaign_composition_checks_counts_and_file_ownership(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(campaign, "FINAL_VALIDATION_DATASET_ROWS", {"sample": 2})
+    monkeypatch.setattr(campaign, "FINAL_VALIDATION_CORPUS_ROWS", 2)
+    manifest_path = tmp_path / "sample_manifest.jsonl"
+    result_path = tmp_path / "sample_standardized.jsonl"
+    manifests = tuple(
+        SimpleNamespace(
+            dataset="sample",
+            manifest_id=f"sample::{index}",
+            source_path=manifest_path,
+        )
+        for index in range(2)
+    )
+    joined = tuple(
+        SimpleNamespace(
+            dataset="sample",
+            manifest_id=f"sample::{index}",
+            result_source_path=result_path,
+        )
+        for index in range(2)
+    )
+    prepared = SimpleNamespace(
+        manifests=SimpleNamespace(records=manifests),
+        joined_records=joined,
+    )
+
+    assert campaign.validate_final_campaign_composition(prepared) == {"sample": 2}
+
+    joined[0].result_source_path = tmp_path / "other_standardized.jsonl"
+    with pytest.raises(campaign.PreflightError, match="otra fuente"):
+        campaign.validate_final_campaign_composition(prepared)
 
 
 def test_manifests_enforce_global_id_and_content_hash_uniqueness(tmp_path):

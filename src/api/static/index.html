@@ -234,26 +234,6 @@
       "row": {"src_ip":"192.168.1.32","src_port":"53921","dst_ip":"192.168.1.103","dst_port":"1236","proto":"tcp","service":"-","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"44","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"-","dns_qclass":"0","dns_qtype":"0","dns_rcode":"0","dns_AA":"-","dns_RD":"-","dns_RA":"-","dns_rejected":"-","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
     }
   },
-  "[Urban-IoT] Benigno": {
-    "expected_profile": "iot_telemetry",
-    "expected_outcome": "benign",
-    "payload": {
-      "dataset": "urban_iot",
-      "source_file": "demo_urban_iot.csv",
-      "row_id": 23022,
-      "row": {"NODE":"4850","LAT":"8.631275995855345","LNG":"1.989256301705459","TIME":"2021-01-02 07:28:11","ACTIVE":"1"}
-    }
-  },
-  "[Urban-IoT] Ataque": {
-    "expected_profile": "network_flow",
-    "expected_outcome": "attack",
-    "payload": {
-      "dataset": "urban_iot",
-      "source_file": "demo_urban_iot_synthetic.json",
-      "row_id": "synthetic_attack_1",
-      "row": {"NODE":"25555","LAT":"33.86438017340356","LNG":"41.1185851482803","TIME":"2021-01-10 12:21:15","ACTIVE":"0","src_ip":"192.168.100.103","src_port":"38098","dst_ip":"66.85.157.90","dst_port":"443","proto":"tcp","duration":"44325.615625","orig_bytes":"19431","resp_bytes":"19431","conn_state":"S1","missed_bytes":"4500","orig_pkts":"8872","resp_pkts":"9307"}
-    }
-  },
   "JSON libre": {
     "expected_profile": "unknown",
     "expected_outcome": "custom",

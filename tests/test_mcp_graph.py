@@ -69,7 +69,7 @@ STDIO_E2E_EVENT = {
 @pytest.fixture(autouse=True)
 def isolate_case_memory(tmp_path, monkeypatch):
     """Evita que los tests del endpoint obligatorio ensucien la memoria real."""
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
 
 
 def _models_loadable() -> bool:
@@ -309,7 +309,7 @@ def test_default_agents_use_stdio_and_demo_can_select_inprocess(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_run_case_persists_to_case_memory(tmp_path, monkeypatch):
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
     agents = stub_bundle(
         {
             ("inference", "standardize_event"): standardize_ok(),
@@ -432,7 +432,7 @@ def test_run_case_does_not_close_an_injected_client():
 
 
 def test_run_case_collision_does_not_overwrite_existing_case(tmp_path, monkeypatch):
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "cases.db"))
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
     memory = MCPToolClient(mode="inprocess")
     case_id = "case-colision123456"
     original = {"sentinel": "registro-original"}
@@ -495,10 +495,7 @@ def test_run_case_stops_on_persistence_error(failing_tool):
 @pytest.mark.skipif(not _models_loadable(), reason="modelos productivos no disponibles")
 def test_real_stdio_client_runs_full_graph_and_persists(tmp_path, monkeypatch):
     """Aceptacion: el grafo completo atraviesa los tres servidores MCP reales."""
-    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(tmp_path / "stdio-cases.db"))
-    monkeypatch.setenv(
-        "TFM_STANDARDIZATION_CACHE_DB", str(tmp_path / "stdio-cache.db")
-    )
+    monkeypatch.setenv("TFM_STATE_DIR", str(tmp_path))
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     with MCPToolClient(mode="stdio", timeout_seconds=30) as client:
         case = run_case(

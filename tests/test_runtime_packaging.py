@@ -5,6 +5,8 @@ import hashlib
 import tomllib
 from pathlib import Path
 
+import pytest
+
 from src.mcp.common import package_data_dir, resolve_path
 
 
@@ -59,9 +61,44 @@ def test_operational_state_uses_configurable_writable_directory(tmp_path, monkey
     monkeypatch.delenv("TFM_CASE_MEMORY_DB", raising=False)
 
     assert resolve_path("standardization_cache_db") == (
-        tmp_path / "cache" / "mistral_standardization_v2.sqlite3"
+        tmp_path / "mistral_standardization_v2.sqlite3"
     )
     assert resolve_path("case_memory_db") == tmp_path / "case_memory.db"
+    assert resolve_path("standardization_cache_db").parent == (
+        resolve_path("case_memory_db").parent
+    )
+
+
+def test_legacy_file_override_keeps_both_databases_colocated(tmp_path, monkeypatch):
+    cache = tmp_path / "state" / "custom-cache.sqlite3"
+    monkeypatch.setenv("TFM_STANDARDIZATION_CACHE_DB", str(cache))
+    monkeypatch.delenv("TFM_CASE_MEMORY_DB", raising=False)
+
+    assert resolve_path("standardization_cache_db") == cache
+    assert resolve_path("case_memory_db") == cache.parent / "case_memory.db"
+
+
+def test_file_overrides_in_different_directories_are_rejected(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "TFM_STANDARDIZATION_CACHE_DB",
+        str(tmp_path / "cache" / "cache.sqlite3"),
+    )
+    monkeypatch.setenv(
+        "TFM_CASE_MEMORY_DB",
+        str(tmp_path / "cases" / "case_memory.db"),
+    )
+
+    with pytest.raises(ValueError, match="deben compartir directorio"):
+        resolve_path("case_memory_db")
+
+
+def test_cache_and_case_memory_cannot_share_the_same_sqlite(tmp_path, monkeypatch):
+    shared = tmp_path / "shared.sqlite3"
+    monkeypatch.setenv("TFM_STANDARDIZATION_CACHE_DB", str(shared))
+    monkeypatch.setenv("TFM_CASE_MEMORY_DB", str(shared))
+
+    with pytest.raises(ValueError, match="ficheros SQLite distintos"):
+        resolve_path("case_memory_db")
 
 
 def test_wheel_declares_only_online_packages_and_resources():

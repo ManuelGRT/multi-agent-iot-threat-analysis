@@ -56,7 +56,7 @@ AUDITOR_REFERENCE = REFERENCE_ROOT / "auditor_mutation_report_v4_20260908.json"
 
 DETECTOR_RELEASE_HASHES = {
     "artifact": "f2d7d3dbe9c90fbd7f3d1f134d91e77f855dde134119eced812646e285524393",
-    "input_snapshot": "e2117f938b9f8551f567b6f5ca1dcb9710913c760c597f70101ce15f46823666",
+    "input_snapshot": "dc21cf54a3120759464223434b3c2e676dede9ed9fe0387f7527be70b59f9733",
     "selection": "b97f53b2cea2efbf7174e7a3b49295f130d2f812f9b9f81fcbc99fe31e1246b9",
     "feature_names": "de41afdd00f73945f34c071b99752d75339b88b7af1cb813439b383cca7c9c1b",
     "booster": "26fa71ff717bc36a9305556095a989a660a5d2f596097b1abe424e385d886463",
@@ -83,6 +83,50 @@ CLASSIFIER_RELEASE_METRICS = {
     "selective_coverage": 0.9066666666666666,
     "selective_macro_f1": 0.9236604757855131,
 }
+
+VALIDATION_CORPUS_ROWS = 34_635
+DETECTOR_ELIGIBLE_ROWS = 33_635
+CLASSIFIER_TASK_NOT_DECLARED_ROWS = 18_798
+VALIDATION_INPUT_RELEASE = {
+    "manifests": {
+        "bot_iot_manifest.jsonl": {
+            "bytes": 3_844_426,
+            "sha256": "ec924573aad6af6a9c5e335f74f21e1064002430309aa2e4aa0c018aaa2fac14",
+        },
+        "edge_iiotset_manifest.jsonl": {
+            "bytes": 27_440_681,
+            "sha256": "e447e8f5ab77cd49e91da7442a04cf8eb37e5d105958ede7ad7eadbc557738b4",
+        },
+        "iot23_manifest.jsonl": {
+            "bytes": 5_631_515,
+            "sha256": "caef7fa8ed9a8ce9c7f28720abf88c3aad6a801aa58f1a2c5234c579906298f1",
+        },
+        "ton_iot_manifest.jsonl": {
+            "bytes": 18_051_032,
+            "sha256": "23c89dd0d004a70d507c48853dff1bc5411de1ebffbf03523a23cfb00864c471",
+        },
+    },
+    "standardized": {
+        "bot_iot_standardized.jsonl": {
+            "bytes": 11_410_079,
+            "sha256": "c9d036945c33a43825e4586510c470df811174ce76547a6cd69bedd926cbf037",
+        },
+        "edge_iiotset_standardized.jsonl": {
+            "bytes": 63_582_604,
+            "sha256": "f307c81e48352a78ccb1862f61ed3a5894a6a84384940066e123993aed31dbf3",
+        },
+        "iot23_standardized.jsonl": {
+            "bytes": 18_515_595,
+            "sha256": "837ffaa5ab0985d197ca5a0dd1b1e6135f38c2f41e8ddb134190ad427f95cc02",
+        },
+        "ton_iot_standardized.jsonl": {
+            "bytes": 35_780_676,
+            "sha256": "5d5237630ac6059d7132992ed6194ee9165f97ad974eacc11329e87450ae07d0",
+        },
+    },
+}
+VALIDATION_MANIFEST_FILES = set(VALIDATION_INPUT_RELEASE["manifests"])
+VALIDATION_RESULT_FILES = set(VALIDATION_INPUT_RELEASE["standardized"])
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -125,6 +169,25 @@ def _load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def _portable_file_inventory(value: Any) -> dict[str, dict[str, Any]]:
+    """Normaliza la lista portable de ficheros de una ficha de evaluacion."""
+
+    if not isinstance(value, list):
+        return {}
+    inventory: dict[str, dict[str, Any]] = {}
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        filename = item.get("filename")
+        if not isinstance(filename, str) or not filename:
+            continue
+        inventory[filename] = {
+            "bytes": item.get("bytes"),
+            "sha256": item.get("sha256"),
+        }
+    return inventory
+
+
 def _outcome(component: str, issues: list[str], **details: Any) -> dict[str, Any]:
     return {
         "component": component,
@@ -154,6 +217,10 @@ def audit_detector() -> dict[str, Any]:
     metrics = reference.get("metrics") or {}
     metadata = reference.get("model") or {}
     inputs = reference.get("inputs") or {}
+    input_files = inputs.get("files") or {}
+    manifest_files = input_files.get("manifests") or {}
+    standardized_files = input_files.get("standardized") or {}
+    deduplication = reference.get("deduplication") or {}
     model_path = resolve_path("detection_model")
 
     def require(condition: bool, issue: str) -> None:
@@ -182,8 +249,51 @@ def audit_detector() -> dict[str, Any]:
     require(artifact.get("task") == "binary_detection", "task_reference")
     require(artifact.get("classes") == [False, True], "classes_reference")
     require(
+        inputs.get("successful_standardizations") == VALIDATION_CORPUS_ROWS,
+        "validation_corpus_rows",
+    )
+    require(
+        inputs.get("binary_eligible_rows") == DETECTOR_ELIGIBLE_ROWS,
+        "binary_eligible_rows",
+    )
+    require(
+        isinstance(manifest_files, dict)
+        and set(manifest_files) == VALIDATION_MANIFEST_FILES,
+        "manifest_inventory",
+    )
+    require(
+        isinstance(standardized_files, dict)
+        and set(standardized_files) == VALIDATION_RESULT_FILES,
+        "standardized_inventory",
+    )
+    expected_manifest_hashes = {
+        filename: metadata["sha256"]
+        for filename, metadata in VALIDATION_INPUT_RELEASE["manifests"].items()
+    }
+    expected_standardized_hashes = {
+        filename: metadata["sha256"]
+        for filename, metadata in VALIDATION_INPUT_RELEASE["standardized"].items()
+    }
+    require(
+        manifest_files == expected_manifest_hashes,
+        "manifest_release",
+    )
+    require(
+        standardized_files == expected_standardized_hashes,
+        "standardized_release",
+    )
+    require(
         inputs.get("snapshot_sha256") == DETECTOR_RELEASE_HASHES["input_snapshot"],
         "input_snapshot_release_sha256",
+    )
+    require(
+        deduplication.get("input_rows") == DETECTOR_ELIGIBLE_ROWS
+        and deduplication.get("output_rows") == DETECTOR_ELIGIBLE_ROWS,
+        "deduplication_rows",
+    )
+    require(
+        deduplication.get("cross_split_rows_removed") == 0,
+        "deduplication_removed_rows",
     )
 
     model = None
@@ -255,11 +365,12 @@ def audit_detector() -> dict[str, Any]:
         "selection_release_sha256",
     )
     require(
-        (reference.get("deduplication") or {}).get(
-            "final_cross_split_overlap_count"
-        )
-        == 0,
+        deduplication.get("final_cross_split_overlap_count") == 0,
         "cross_split_overlap",
+    )
+    require(
+        balancing.get("removed_rows") == DETECTOR_ELIGIBLE_ROWS - rows,
+        "balancing_removed_rows",
     )
 
     test = metrics.get("test") or {}
@@ -299,6 +410,8 @@ def audit_detector() -> dict[str, Any]:
         issues,
         artifact=model_path.name,
         sha256=_sha256_file(model_path) if model_path.is_file() else None,
+        validation_rows=inputs.get("successful_standardizations"),
+        eligible_rows=inputs.get("binary_eligible_rows"),
         corpus_rows=rows,
         splits={key: value.get("rows") for key, value in splits.items()},
         test_attack_f1=test.get("attack_f1"),
@@ -321,6 +434,15 @@ def audit_classifier() -> dict[str, Any]:
     splits = reference.get("splits") or {}
     supports = splits.get("supports") or {}
     hashes = reference.get("hashes") or {}
+    inputs = reference.get("inputs") or {}
+    manifest_entries = inputs.get("manifests")
+    standardized_entries = inputs.get("standardized_results")
+    manifest_inventory = _portable_file_inventory(manifest_entries)
+    standardized_inventory = _portable_file_inventory(
+        standardized_entries
+    )
+    mapping = reference.get("mapping") or {}
+    mapping_status = mapping.get("status_counts") or {}
     model_metadata = reference.get("model") or {}
     contract = model_metadata.get("operational_contract") or {}
     metrics = reference.get("metrics") or {}
@@ -336,6 +458,60 @@ def audit_classifier() -> dict[str, Any]:
     require(
         reference.get("schema_version") == "classifier-evaluation-reference-v1",
         "schema",
+    )
+    require(
+        mapping.get("input_rows") == VALIDATION_CORPUS_ROWS,
+        "mapping_input_rows",
+    )
+    require(
+        mapping_status.get("task_not_declared")
+        == CLASSIFIER_TASK_NOT_DECLARED_ROWS,
+        "mapping_task_not_declared",
+    )
+    require(
+        isinstance(mapping_status, dict)
+        and all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in mapping_status.values()
+        )
+        and sum(mapping_status.values()) == VALIDATION_CORPUS_ROWS,
+        "mapping_status_total",
+    )
+    require(
+        set(manifest_inventory) == VALIDATION_MANIFEST_FILES,
+        "manifest_inventory",
+    )
+    require(
+        set(standardized_inventory) == VALIDATION_RESULT_FILES,
+        "standardized_inventory",
+    )
+    require(
+        isinstance(manifest_entries, list)
+        and len(manifest_entries) == len(manifest_inventory),
+        "manifest_inventory_entries",
+    )
+    require(
+        isinstance(standardized_entries, list)
+        and len(standardized_entries) == len(standardized_inventory),
+        "standardized_inventory_entries",
+    )
+    require(
+        manifest_inventory == VALIDATION_INPUT_RELEASE["manifests"],
+        "manifest_release",
+    )
+    require(
+        standardized_inventory == VALIDATION_INPUT_RELEASE["standardized"],
+        "standardized_release",
+    )
+    require(
+        _sha256_json(
+            {
+                "manifests": manifest_inventory,
+                "results": standardized_inventory,
+            }
+        )
+        == DETECTOR_RELEASE_HASHES["input_snapshot"],
+        "input_snapshot_release_sha256",
     )
     require(model_path.is_file(), "model_missing")
     if model_path.is_file():
@@ -551,6 +727,7 @@ def audit_classifier() -> dict[str, Any]:
         issues,
         artifact=model_path.name,
         sha256=_sha256_file(model_path) if model_path.is_file() else None,
+        validation_rows=mapping.get("input_rows"),
         corpus_rows=selected_rows,
         per_class=per_class,
         splits=split_rows,

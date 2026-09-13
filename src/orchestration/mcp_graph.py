@@ -31,7 +31,6 @@ from src.agents.final import (
     FinalMitigator,
     FinalStandardizer,
 )
-from src.agents.final.llm_mitigator import LLMMitigationAgent
 from src.contracts.case import CaseResult, TraceEntry, new_case_id
 from src.mcp.client import MCPToolClient
 from src.orchestration.state import OrchestratorState
@@ -53,57 +52,26 @@ def _env_flag(name: str) -> bool:
     return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _optional_float_env(name: str) -> float | None:
-    value = os.getenv(name)
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
-def default_mitigator_llm() -> LLMMitigationAgent:
-    """Construye la contextualización Mistral del mitigador.
-
-    El proveedor del runtime online es deliberadamente fijo. Si Mistral no
-    está disponible, ``FinalMitigator`` conserva la respuesta del catálogo.
-    """
-    model = (
-        os.getenv("MITIGATOR_LLM_MODEL")
-        or os.getenv("MISTRAL_AGENT_MODEL")
-        or os.getenv("INGEST_LLM_MODEL")
-        or "mistral-small-2603"
-    )
-    return LLMMitigationAgent(
-        model=model,
-        timeout_seconds=_optional_float_env("MITIGATOR_LLM_TIMEOUT_SECONDS"),
-        provider="mistral",
-    )
-
-
 def default_final_agents(
     client: MCPToolClient | None = None,
     gray_low: float = 0.4,
     gray_high: float = 0.6,
     use_llm_mitigator: bool | None = None,
-    mitigator_llm: LLMMitigationAgent | None = None,
 ) -> MultiAgentComponents:
     client = client or MCPToolClient()
-    llm = mitigator_llm
-    if llm is None:
-        enabled = (
-            use_llm_mitigator
-            if use_llm_mitigator is not None
-            else _env_flag("LLM_MITIGATOR_ENABLED")
-        )
-        if enabled:
-            llm = default_mitigator_llm()
+    enabled = (
+        use_llm_mitigator
+        if use_llm_mitigator is not None
+        else _env_flag("LLM_MITIGATOR_ENABLED")
+    )
     return MultiAgentComponents(
         standardizer=FinalStandardizer(client=client),
         detector=FinalDetector(client=client, gray_low=gray_low, gray_high=gray_high),
         classifier=FinalClassifier(client=client),
-        mitigator=FinalMitigator(client=client, llm=llm),
+        mitigator=FinalMitigator(
+            client=client,
+            contextualize_with_llm=enabled,
+        ),
         judge=FinalJudge(client=client),
         client=client,
     )

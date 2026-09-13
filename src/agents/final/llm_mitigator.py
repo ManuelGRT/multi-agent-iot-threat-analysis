@@ -1,11 +1,12 @@
 # src/agents/final/llm_mitigator.py
-"""Contextualizacion LLM del mitigador, anclada al catalogo threat intel.
+"""Logica de contextualizacion del mitigador, usada por ``threat_intel``.
 
 El catalogo es la fuente de verdad: el LLM solo CONTEXTUALIZA las mitigaciones
 numeradas del catalogo al evento concreto (puertos, protocolo, telemetria).
 Cualquier aportacion sin respaldo se descarta antes de construir el caso. Si el
-LLM falla o no esta configurado, el modo catalogo puro sigue
-funcionando (la demo nunca se rompe).
+LLM falla o no esta configurado, el modo catalogo puro sigue funcionando. El
+cliente remoto se construye dentro del servidor MCP; ``FinalMitigator`` solo
+consume su tool y aplica el anclaje defensivo.
 """
 from __future__ import annotations
 
@@ -54,25 +55,104 @@ REGLAS DURAS (incumplirlas invalida tu salida):
 MITIGATION_SCHEMA = {
     "type": "object",
     "properties": {
-        "risk_summary": {"type": "string"},
+        "risk_summary": {"type": "string", "minLength": 1},
         "mitigations": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
                     "base_id": {"type": "integer", "minimum": 1},
-                    "text": {"type": "string"},
+                    "text": {"type": "string", "minLength": 1},
                 },
                 "required": ["base_id", "text"],
                 "additionalProperties": False,
             },
         },
-        "confidence": {"type": "number"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "requires_human_review": {"type": "boolean"},
     },
     "required": ["risk_summary", "mitigations", "confidence", "requires_human_review"],
     "additionalProperties": False,
 }
+
+_MITIGATION_PAYLOAD_FIELDS = frozenset(MITIGATION_SCHEMA["required"])
+_MITIGATION_ITEM_FIELDS = frozenset(
+    MITIGATION_SCHEMA["properties"]["mitigations"]["items"]["required"]
+)
+
+
+def _require_exact_fields(
+    value: dict[Any, Any], expected: frozenset[str], location: str
+) -> None:
+    actual = set(value)
+    if actual == expected:
+        return
+    missing = sorted(expected - actual)
+    unexpected = sorted((str(field) for field in actual - expected))
+    raise ValueError(
+        f"{location} no cumple el contrato de campos: "
+        f"faltan={missing}, sobran={unexpected}"
+    )
+
+
+def validate_mitigation_payload(payload: Any) -> dict[str, Any]:
+    """Valida y copia la respuesta JSON producida por el LLM mitigador.
+
+    Esta comprobacion deliberadamente no realiza coerciones: un valor con el
+    tipo equivocado invalida toda la contextualizacion y permite que la capa
+    llamante use el catalogo como ruta de reserva.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError("La contextualizacion debe ser un objeto JSON")
+    _require_exact_fields(payload, _MITIGATION_PAYLOAD_FIELDS, "contextualizacion")
+
+    risk_summary = payload["risk_summary"]
+    if not isinstance(risk_summary, str):
+        raise TypeError("risk_summary debe ser una cadena")
+    if not risk_summary.strip():
+        raise ValueError("risk_summary no puede estar vacio")
+
+    raw_mitigations = payload["mitigations"]
+    if not isinstance(raw_mitigations, list):
+        raise TypeError("mitigations debe ser una lista")
+    mitigations: list[dict[str, Any]] = []
+    for index, item in enumerate(raw_mitigations):
+        location = f"mitigations[{index}]"
+        if not isinstance(item, dict):
+            raise TypeError(f"{location} debe ser un objeto")
+        _require_exact_fields(item, _MITIGATION_ITEM_FIELDS, location)
+
+        base_id = item["base_id"]
+        if not isinstance(base_id, int) or isinstance(base_id, bool):
+            raise TypeError(f"{location}.base_id debe ser un entero")
+        if base_id < 1:
+            raise ValueError(f"{location}.base_id debe ser mayor o igual que 1")
+
+        text = item["text"]
+        if not isinstance(text, str):
+            raise TypeError(f"{location}.text debe ser una cadena")
+        if not text.strip():
+            raise ValueError(f"{location}.text no puede estar vacio")
+        mitigations.append({"base_id": base_id, "text": text})
+
+    confidence = payload["confidence"]
+    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
+        raise TypeError("confidence debe ser un numero")
+    if not math.isfinite(confidence):
+        raise ValueError("confidence debe ser finito")
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence debe estar entre 0 y 1")
+
+    requires_human_review = payload["requires_human_review"]
+    if not isinstance(requires_human_review, bool):
+        raise TypeError("requires_human_review debe ser booleano")
+
+    return {
+        "risk_summary": risk_summary,
+        "mitigations": mitigations,
+        "confidence": confidence,
+        "requires_human_review": requires_human_review,
+    }
 
 # El juez solo utiliza las cinco primeras recomendaciones contextualizadas para
 # decidir si el contenido generado por el LLM necesita revision humana. Las
@@ -167,7 +247,7 @@ def _opt_str(value: Any) -> str | None:
 
 
 class LLMMitigationAgent:
-    """Backend LLM multi-proveedor (Mistral/Ollama/OpenRouter/...) del mitigador."""
+    """Cliente LLM interno de la tool MCP de contextualizacion."""
 
     def __init__(
         self,
@@ -257,8 +337,46 @@ class LLMMitigationAgent:
             json_schema=MITIGATION_SCHEMA,
         )
 
-    def contextualize(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        return run_coro_blocking(self.contextualize_async(*args, **kwargs))
+    def contextualize(
+        self,
+        *args: Any,
+        total_timeout_seconds: float | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Ejecuta la contextualizacion con un presupuesto total opcional.
+
+        El timeout del backend se aplica a cada intento HTTP. Este segundo
+        limite abarca tambien reintentos y esperas para que ``threat_intel``
+        pueda responder antes de que venza el transporte MCP.
+        """
+
+        if total_timeout_seconds is None:
+            return run_coro_blocking(self.contextualize_async(*args, **kwargs))
+        if (
+            isinstance(total_timeout_seconds, bool)
+            or not isinstance(total_timeout_seconds, (int, float))
+            or not math.isfinite(float(total_timeout_seconds))
+            or float(total_timeout_seconds) <= 0.0
+        ):
+            raise ValueError(
+                "total_timeout_seconds debe ser un numero positivo y finito"
+            )
+        total_timeout = float(total_timeout_seconds)
+
+        async def bounded_contextualization() -> dict[str, Any]:
+            deadline = asyncio.timeout(total_timeout)
+            try:
+                async with deadline:
+                    return await self.contextualize_async(*args, **kwargs)
+            except TimeoutError as exc:
+                if not deadline.expired():
+                    raise
+                raise TimeoutError(
+                    "La contextualizacion Mistral supero el presupuesto total "
+                    f"de {total_timeout:g} segundos"
+                ) from exc
+
+        return run_coro_blocking(bounded_contextualization())
 
 
 def anchor_llm_payload(

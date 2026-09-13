@@ -3,14 +3,17 @@
 La campaña reutiliza eventos Mistral ya estandarizados del test congelado para
 aislar el tramo que se quiere evaluar. Cada caso recorre los componentes reales
 del runtime: passthrough de estandarización, detector, clasificador de 16 tipos,
-catálogo MCP, contextualización Mistral, juez, memoria de casos y auditor.
+catálogo MCP, contextualización Mistral mediante la tool de ``threat_intel``,
+juez, memoria de casos y auditor.
 
 La credencial se lee exclusivamente de ``MISTRAL_API_KEY`` y nunca se escribe
-en los artefactos. Las respuestas JSON anteriores al anclaje sí se conservan
+en los artefactos. Las respuestas JSON devueltas por la tool antes del anclaje
+sí se conservan
 para que la evaluación sea reproducible y no dependa solo del CaseResult final.
 """
 from __future__ import annotations
 
+import atexit
 import argparse
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -21,6 +24,7 @@ import math
 import os
 from pathlib import Path
 import platform
+import re
 import statistics
 import subprocess
 import sys
@@ -31,6 +35,11 @@ from typing import Any, Iterable
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from src.eval.validation_campaign import (  # noqa: E402
+    FINAL_VALIDATION_DATASET_ROWS,
+    final_validation_artifact_paths,
+)
 
 
 # Keep the production model name as the CLI default.  A campaign that uses a
@@ -181,7 +190,7 @@ def configure_http_log(path: Path) -> logging.Handler:
     return handler
 
 
-def validate_raw_payload(payload: dict[str, Any], schema: dict[str, Any]) -> None:
+def validate_raw_payload(payload: Any, schema: dict[str, Any]) -> None:
     try:
         import jsonschema
     except ImportError as exc:  # pragma: no cover - la campaña instala evaluación
@@ -189,42 +198,84 @@ def validate_raw_payload(payload: dict[str, Any], schema: dict[str, Any]) -> Non
             "jsonschema es necesario para certificar las respuestas crudas"
         ) from exc
     jsonschema.validate(instance=payload, schema=schema)
+    # El contrato productivo aplica restricciones adicionales sin coerciones
+    # (por ejemplo, rechaza NaN y cadenas compuestas solo por espacios).
+    from src.agents.final.llm_mitigator import validate_mitigation_payload
+
+    validate_mitigation_payload(payload)
 
 
-class RecordingLLM:
-    """Envoltorio transparente que conserva la respuesta anterior al anclaje."""
+class RecordingThreatIntelClient:
+    """Registra la respuesta LLM devuelta por la tool antes del anclaje."""
 
     def __init__(self, inner: Any, schema: dict[str, Any]) -> None:
         self.inner = inner
         self.schema = schema
-        self.model_name = inner.model_name
         self.records: list[dict[str, Any]] = []
+        self.catalog_results: dict[str, dict[str, Any]] = {}
 
-    def contextualize(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        canonical = kwargs.get("canonical_event") or {}
-        classification = kwargs.get("classification") or {}
-        base_items = kwargs.get("base_items") or []
+    def call(self, server: str, tool: str, **arguments: Any) -> dict[str, Any]:
+        if (server, tool) == ("threat_intel", "suggest_mitigations"):
+            response = self.inner.call(server, tool, **arguments)
+            if isinstance(response, dict) and response.get("ok") is True:
+                self.catalog_results[str(response.get("attack_type"))] = response
+            return response
+        if (server, tool) != ("threat_intel", "contextualize_mitigations"):
+            return self.inner.call(server, tool, **arguments)
+
+        canonical = arguments.get("canonical_event") or {}
+        classification = arguments.get("classification") or {}
+        attack_type = str(arguments.get("attack_type") or "")
+        catalog_result = self.catalog_results.get(attack_type) or {}
+        base_count = sum(
+            len(items)
+            for items in (catalog_result.get("mitigations_by_phase") or {}).values()
+        )
         started_at = utc_now()
         started = time.perf_counter()
         record: dict[str, Any] = {
             "started_at": started_at,
             "event_id": canonical.get("event_id"),
             "attack_type": classification.get("attack_type"),
-            "base_count": len(base_items),
-            "base_ids": [item.get("id") for item in base_items],
+            "base_count": base_count,
+            "base_ids": list(range(1, base_count + 1)),
             "status": "error",
         }
         try:
-            payload = self.inner.contextualize(*args, **kwargs)
+            response = self.inner.call(server, tool, **arguments)
+            if not isinstance(response, dict):
+                raise TypeError("La tool MCP no devolvio un objeto JSON")
+            base_count = int(response.get("base_count") or base_count)
+            record["base_count"] = base_count
+            record["base_ids"] = list(range(1, base_count + 1))
+            record["model_name"] = response.get("model_name")
+            record["provider"] = response.get("provider")
+            record["tool_latency_ms"] = response.get("latency_ms")
+            payload_present = "contextualization" in response
+            payload = response.get("contextualization")
+            schema_valid = False
+            schema_error: str | None = None
+            if payload_present:
+                try:
+                    validate_raw_payload(payload, self.schema)
+                    schema_valid = True
+                except Exception as exc:
+                    schema_error = f"{type(exc).__name__}: {exc}"
+            if response.get("ok") is not True:
+                record.update(
+                    {
+                        "schema_valid": schema_valid,
+                        "schema_error": schema_error,
+                        "error_type": "MCPToolError",
+                        "error": str(response.get("error") or "error sin detalle"),
+                        "http_status": None,
+                    }
+                )
+                if payload_present:
+                    record["payload"] = payload
+                return response
             if not isinstance(payload, dict):
                 raise TypeError("Mistral no devolvió un objeto JSON")
-            schema_valid = True
-            schema_error = None
-            try:
-                validate_raw_payload(payload, self.schema)
-            except Exception as exc:  # el runtime productivo ancla defensivamente
-                schema_valid = False
-                schema_error = f"{type(exc).__name__}: {exc}"
             record.update(
                 {
                     "status": "ok",
@@ -233,7 +284,7 @@ class RecordingLLM:
                     "payload": payload,
                 }
             )
-            return payload
+            return response
         except Exception as exc:
             response = getattr(exc, "response", None)
             record.update(
@@ -250,15 +301,22 @@ class RecordingLLM:
             record["latency_s"] = round(time.perf_counter() - started, 6)
             self.records.append(record)
 
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
 
 def load_standardized(directory: Path) -> tuple[dict[str, dict[str, Any]], list[Path]]:
-    files = sorted(directory.glob("*_standardized.jsonl"))
-    if not files:
-        raise FileNotFoundError(f"No hay JSONL estandarizados en {directory}")
+    files = list(final_validation_artifact_paths(directory, "_standardized.jsonl"))
     by_manifest: dict[str, dict[str, Any]] = {}
     for path in files:
+        expected_dataset = path.name.removesuffix("_standardized.jsonl")
         for row in iter_jsonl(path):
             manifest_id = str(row.get("manifest_id") or "")
+            if manifest_id and not manifest_id.startswith(f"{expected_dataset}::"):
+                raise ValueError(
+                    f"{path.name} contiene un manifest_id de otra fuente: "
+                    f"{manifest_id}"
+                )
             if (
                 manifest_id
                 and row.get("ok") is True
@@ -269,6 +327,15 @@ def load_standardized(directory: Path) -> tuple[dict[str, dict[str, Any]], list[
                 # Una campaña reanudada puede contener varios intentos. El último
                 # éxito materializado es la salida consolidada de la campaña.
                 by_manifest[manifest_id] = row
+    rows_by_dataset = Counter(
+        manifest_id.split("::", 1)[0] for manifest_id in by_manifest
+    )
+    if dict(rows_by_dataset) != dict(FINAL_VALIDATION_DATASET_ROWS):
+        raise ValueError(
+            "Composición distinta de la campaña final estandarizada: "
+            f"esperado={dict(FINAL_VALIDATION_DATASET_ROWS)}, "
+            f"obtenido={dict(rows_by_dataset)}"
+        )
     return by_manifest, files
 
 
@@ -390,9 +457,21 @@ def case_metrics(
         str(evidence).startswith("risk_summary_llm_descartado:")
         for evidence in case.explanation.evidence
     )
-    llm_trace = trace_entry(case, agent="final_mitigator", tool="llm_contextualize")
+    llm_trace = trace_entry(
+        case,
+        agent="final_mitigator",
+        tool="contextualize_mitigations",
+    )
     base_count = int((raw_record or {}).get("base_count") or 0)
     payload = (raw_record or {}).get("payload") or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    raw_mitigations = payload.get("mitigations")
+    raw_mitigation_count = (
+        len(raw_mitigations) if isinstance(raw_mitigations, list) else 0
+    )
+    raw_review = payload.get("requires_human_review")
+    raw_requires_human_review = raw_review if isinstance(raw_review, bool) else False
     return {
         "case_id": case.case_id,
         "manifest_id": selected["manifest_id"],
@@ -409,10 +488,8 @@ def case_metrics(
         "llm_model": case.explanation.model_name,
         "llm_latency_s": (raw_record or {}).get("latency_s"),
         "raw_schema_valid": bool((raw_record or {}).get("schema_valid", False)),
-        "raw_mitigation_count": len(payload.get("mitigations") or []),
-        "raw_requires_human_review": bool(
-            payload.get("requires_human_review", False)
-        ),
+        "raw_mitigation_count": raw_mitigation_count,
+        "raw_requires_human_review": raw_requires_human_review,
         "base_count": base_count,
         "anchored_context_count": sources["llm"],
         "catalog_literal_count": sources["catalog"],
@@ -586,9 +663,11 @@ def main() -> int:
     os.environ["TFM_REPO_ROOT"] = str(repo)
     os.environ["TFM_ATTACK_TYPE_MODEL"] = str(attack_type_model)
     os.environ["TFM_STATE_DIR"] = str(state_dir)
+    os.environ["MCP_CLIENT_MODE"] = args.mcp_client_mode
     os.environ["MISTRAL_BASE_URL"] = OFFICIAL_MISTRAL_BASE_URL
     os.environ["MITIGATOR_LLM_MODEL"] = args.model
-    os.environ.setdefault("MITIGATOR_LLM_TIMEOUT_SECONDS", "120")
+    os.environ.setdefault("MITIGATOR_LLM_TIMEOUT_SECONDS", "60")
+    os.environ.setdefault("MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS", "105")
     os.environ.setdefault("MISTRAL_CONNECTION_RETRIES", "3")
     os.environ.setdefault("MISTRAL_RATE_LIMIT_RETRIES", "3")
     os.environ.setdefault("MISTRAL_RETRY_STATUS_CODES", "429,500,502,503,504")
@@ -596,7 +675,6 @@ def main() -> int:
 
     from src.agents.final.auditor import CaseAuditor
     from src.agents.final.llm_mitigator import (
-        LLMMitigationAgent,
         MITIGATION_SCHEMA,
         MITIGATOR_SYSTEM,
     )
@@ -637,17 +715,32 @@ def main() -> int:
     )
 
     http_log_path = output_dir / "httpx_sanitized.log"
-    http_handler = configure_http_log(http_log_path)
-
-    inner_llm = LLMMitigationAgent(model=args.model, provider="mistral")
-    if inner_llm.agent.base_url != OFFICIAL_MISTRAL_BASE_URL:
+    if os.environ["MISTRAL_BASE_URL"].rstrip("/") != OFFICIAL_MISTRAL_BASE_URL:
         raise RuntimeError("La URL efectiva no es la API oficial de Mistral")
-    recording_llm = RecordingLLM(inner_llm, MITIGATION_SCHEMA)
-    client = MCPToolClient(mode=args.mcp_client_mode)
+    client = RecordingThreatIntelClient(
+        MCPToolClient(mode=args.mcp_client_mode),
+        MITIGATION_SCHEMA,
+    )
+    http_handler = configure_http_log(http_log_path)
+    cleanup_done = False
+
+    def close_runtime_resources() -> None:
+        nonlocal cleanup_done
+        if cleanup_done:
+            return
+        try:
+            client.close()
+            cleanup_done = True
+        finally:
+            logging.getLogger("httpx").removeHandler(http_handler)
+            http_handler.close()
+
+    # El runner es un CLI: si una excepcion inesperada termina ``main``, el
+    # hook evita dejar procesos stdio o descriptores del log abiertos.
+    atexit.register(close_runtime_resources)
     agents = default_final_agents(
         client=client,
         use_llm_mitigator=True,
-        mitigator_llm=recording_llm,
     )
     auditor = CaseAuditor()
 
@@ -688,13 +781,29 @@ def main() -> int:
             "mistral": {
                 "provider": "mistral",
                 "model": args.model,
-                "base_url": inner_llm.agent.base_url,
+                "base_url": os.environ["MISTRAL_BASE_URL"].rstrip("/"),
                 "temperature": 0,
-                "max_tokens": inner_llm.agent.max_tokens,
-                "timeout_seconds": inner_llm.agent.timeout_seconds,
-                "connection_retries": inner_llm.agent.connection_retries,
-                "rate_limit_retries": inner_llm.agent.rate_limit_retries,
-                "retry_status_codes": sorted(inner_llm.agent.retry_status_codes),
+                "max_tokens": int(os.environ["MISTRAL_MAX_TOKENS"]),
+                "timeout_seconds": float(
+                    os.environ["MITIGATOR_LLM_TIMEOUT_SECONDS"]
+                ),
+                "total_timeout_seconds": float(
+                    os.environ["MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS"]
+                ),
+                "connection_retries": int(
+                    os.environ["MISTRAL_CONNECTION_RETRIES"]
+                ),
+                "rate_limit_retries": int(
+                    os.environ["MISTRAL_RATE_LIMIT_RETRIES"]
+                ),
+                "retry_status_codes": sorted(
+                    int(value)
+                    for value in re.split(
+                        r"[,;\s]+",
+                        os.environ["MISTRAL_RETRY_STATUS_CODES"].strip(),
+                    )
+                    if value
+                ),
                 "credential_present": True,
             },
             "classifier": {
@@ -722,7 +831,7 @@ def main() -> int:
                 "final_detector",
                 "final_classifier_attack_type_16",
                 "final_mitigator_catalog",
-                "final_mitigator_mistral_live",
+                "threat_intel_contextualize_mitigations_mistral_live",
                 "final_judge",
                 "case_memory_persistence",
                 "final_auditor",
@@ -753,7 +862,7 @@ def main() -> int:
                 f"({selected_case['schema_profile']})",
                 flush=True,
             )
-            raw_before = len(recording_llm.records)
+            raw_before = len(client.records)
             raw_input = {
                 "dataset": str(selected_case.get("dataset_origin") or "validation_2026"),
                 "canonical_event": selected_case["canonical_event"],
@@ -805,8 +914,8 @@ def main() -> int:
                     "audit_hard_failures": 1,
                     "llm_latency_s": None,
                 }
-                if len(recording_llm.records) > raw_before:
-                    raw_record = recording_llm.records[-1]
+                if len(client.records) > raw_before:
+                    raw_record = client.records[-1]
                     append_jsonl(raw_stream, {"case_id": case_id, **raw_record})
                     failure["llm_latency_s"] = raw_record.get("latency_s")
                 append_jsonl(rows_stream, failure)
@@ -814,8 +923,8 @@ def main() -> int:
                 continue
 
             raw_record = (
-                recording_llm.records[-1]
-                if len(recording_llm.records) > raw_before
+                client.records[-1]
+                if len(client.records) > raw_before
                 else None
             )
             if raw_record is not None:
@@ -826,8 +935,8 @@ def main() -> int:
             append_jsonl(rows_stream, row)
             results.append(row)
 
-    logging.getLogger("httpx").removeHandler(http_handler)
-    http_handler.close()
+    close_runtime_resources()
+    atexit.unregister(close_runtime_resources)
 
     summary = aggregate(results, eligible_counts)
     summary["completed_at"] = utc_now()

@@ -2,9 +2,9 @@
 """Servidor MCP de inferencia: estandarizacion, deteccion y clasificacion.
 
 Expone los modelos preparados del TFM:
-- Estandarizacion final: reutiliza por contenido exacto un exito Mistral
-  validado; en cache miss, Mistral en vivo es obligatorio. Nunca usa
-  adaptadores. Un fallo produce una abstencion para revision humana.
+- Estandarizacion final: ejecuta Mistral en vivo y nunca usa adaptadores. La
+  cache persistente pertenece al servidor ``case_memory`` y la coordina el
+  agente estandarizador antes de invocar esta tool.
 - Deteccion: ``xgboost_detection_balanced_by_origin_20260905.joblib``.
 - Clasificacion:
   ``xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib``.
@@ -12,12 +12,8 @@ Expone los modelos preparados del TFM:
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import os
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
 try:  # SDK MCP oficial; opcional para el modo in-process
@@ -27,73 +23,14 @@ except ImportError:  # pragma: no cover - sin SDK solo se pierde el modo stdio
 
 from src.mcp import model_registry
 from src.contracts.canonical import CanonicalEvent
-from src.mcp.common import register_tools, resolve_path, tool_result
+from src.mcp.common import configured_ingest_model, register_tools, tool_result
 from src.mcp.standardization_cache import (
-    StandardizationCache,
     bind_event_identity,
     canonicalize_row,
-    compute_content_hash,
 )
 from src.mcp.standardization_contract import validate_target_free_canonical
 
 mcp_app = FastMCP("mcp-inference") if FastMCP is not None else None
-
-_CACHE_INSTANCES: dict[Path, StandardizationCache] = {}
-_CACHE_INSTANCES_LOCK = threading.Lock()
-_CACHE_MODES = frozenset({"read_write", "bypass"})
-
-
-def _configured_ingest_model() -> str:
-    return (
-        os.getenv("INGEST_LLM_MODEL")
-        or os.getenv("MISTRAL_AGENT_MODEL")
-        or "mistral-small-2603"
-    )
-
-
-def _standardization_cache() -> StandardizationCache:
-    path = resolve_path("standardization_cache_db").resolve(strict=False)
-    with _CACHE_INSTANCES_LOCK:
-        cache = _CACHE_INSTANCES.get(path)
-        if cache is None:
-            cache = StandardizationCache(path)
-            _CACHE_INSTANCES[path] = cache
-        return cache
-
-
-def _pipeline_hash(model: str) -> str:
-    """Versiona todo lo que puede cambiar una estandarizacion Mistral."""
-    from src.agents.llm_ingest_parser import (
-        CANONICAL_EVENT_SCHEMA,
-        COLUMN_SELECTION_SCHEMA,
-        LLM_TECHNICAL_EVENT_SCHEMA,
-        LLM_PARSER_VERSION,
-        LLM_COLUMN_SELECTION_SYSTEM,
-        LLM_INGEST_SYSTEM,
-    )
-
-    contract = {
-        "contract_version": "mistral-standardization-v3-core-envelope",
-        "provider": "mistral",
-        "model": model,
-        "parser_version": LLM_PARSER_VERSION,
-        "require_llm_column_selection": True,
-        "strict_output_validation": True,
-        "input_canonicalization": "recursive-json-sort-v1",
-        "max_selected_columns": 40,
-        "ingest_prompt": LLM_INGEST_SYSTEM,
-        "column_selection_prompt": LLM_COLUMN_SELECTION_SYSTEM,
-        "canonical_schema": CANONICAL_EVENT_SCHEMA,
-        "llm_technical_schema": LLM_TECHNICAL_EVENT_SCHEMA,
-        "column_selection_schema": COLUMN_SELECTION_SCHEMA,
-    }
-    encoded = json.dumps(
-        contract,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _validated_canonical_payload(
@@ -135,7 +72,7 @@ def _build_llm_parser():
     timeout_raw = os.getenv("INGEST_LLM_TIMEOUT_SECONDS")
     timeout = float(timeout_raw) if timeout_raw else None
     return LLMIngestParser(
-        model=_configured_ingest_model(),
+        model=configured_ingest_model(),
         provider="mistral",
         timeout_seconds=timeout,
         require_llm_column_selection=True,
@@ -179,7 +116,7 @@ def _abstention(
             "mistral" if failure_code == "llm_standardization_failed" else None
         ),
         "model": (
-            _configured_ingest_model()
+            configured_ingest_model()
             if failure_code == "llm_standardization_failed"
             else None
         ),
@@ -196,20 +133,15 @@ def standardize_event(
     source_file: str = "api",
     row_id: int | str = 0,
     split: str = "stream",
-    cache_mode: str = "read_write",
 ) -> dict[str, Any]:
     """Convierte una entrada cruda en CanonicalEvent.
 
-    Un duplicado exacto puede reutilizar un exito Mistral validado. En cache
-    miss se llama obligatoriamente a Mistral; nunca se usa un adaptador. La
+    Para entradas crudas se llama obligatoriamente a Mistral; nunca se usa un
+    adaptador ni se abre estado persistente. La consulta y escritura de cache
+    se realizan exclusivamente mediante el servidor MCP ``case_memory``. La
     entrada se consume tal como llega: su sanitizacion corresponde al proceso
     offline que prepara datasets de entrenamiento o evaluacion.
     """
-    if cache_mode not in _CACHE_MODES:
-        return _abstention(
-            ValueError(f"cache_mode no valido: {cache_mode!r}"),
-            failure_code="standardization_input_invalid",
-        )
     if split not in {"train", "val", "test", "stream"}:
         return _abstention(
             ValueError(f"split no valido: {split!r}"),
@@ -300,147 +232,49 @@ def standardize_event(
         # activa una seleccion heuristica.
         raw_input["use_column_selection"] = True
 
-    configured_model = _configured_ingest_model()
-    cache_pipeline_hash = _pipeline_hash(configured_model)
+    configured_model = configured_ingest_model()
     try:
-        cache_content_hash = compute_content_hash(
-            row=prompt_row if prompt_row is not None else None,
-            text=text if prompt_row is None else None,
-        )
-    except (TypeError, ValueError):
-        # Una entrada no serializable tampoco podra llegar correctamente al
-        # proveedor, pero el fallo de la cache nunca sustituye la ruta Mistral.
-        cache_content_hash = None
-
-    cache = (
-        _standardization_cache()
-        if cache_mode != "bypass" and cache_content_hash is not None
-        else None
-    )
-
-    def cached_response() -> dict[str, Any] | None:
-        if cache is None or cache_content_hash is None:
-            return None
-        cached = cache.get(cache_content_hash, cache_pipeline_hash)
-        if cached is None:
-            return None
-        try:
-            if cached.model != configured_model:
-                raise ValueError("modelo de cache incompatible")
-            if not _selected_columns_are_compatible(cached.selected_columns, row):
-                raise ValueError("columnas de cache incompatibles")
-            rebound = bind_event_identity(
-                cached.event_core,
-                dataset=dataset_name,
-                source_file=source_name,
-                row_id=row_id,
-                split=split,
-                parser_version=cached.parser_version,
+        parser = _build_llm_parser()
+        event = _parse_with_llm(parser, raw_input)
+        canonical = _validated_canonical_payload(event)
+        selection = parser.last_column_selection or {}
+        selected_columns = list(selection.get("selected_columns") or [])
+        if not _selected_columns_are_compatible(selected_columns, row):
+            raise ValueError(
+                "la seleccion LLM no coincide con las columnas recibidas"
             )
-            canonical = _validated_canonical_payload(rebound)
-        except (TypeError, ValueError):
-            cache.delete(cache_content_hash, cache_pipeline_hash)
-            return None
-        return {
-            "canonical_event": canonical,
-            "from_cache": True,
-            "source": "llm",
-            "provider": "mistral",
-            "model": cached.model,
-            "mapping_confidence": float(
-                canonical.get("mapping_confidence", 0.0) or 0.0
-            ),
-            "selected_columns": list(cached.selected_columns),
-            "notes": ["parsed_by_llm", "source:mistral_cache"],
-            "cache_content_hash": cache_content_hash,
-            "cache_pipeline_hash": cache_pipeline_hash,
-            "cache_created_at": cached.created_at,
-        }
-
-    def live_response() -> dict[str, Any]:
-        try:
-            parser = _build_llm_parser()
-            event = _parse_with_llm(parser, raw_input)
-            canonical = _validated_canonical_payload(event)
-            selection = parser.last_column_selection or {}
-            selected_columns = list(selection.get("selected_columns") or [])
-            if not _selected_columns_are_compatible(selected_columns, row):
-                raise ValueError(
-                    "la seleccion LLM no coincide con las columnas recibidas"
-                )
-            model = str(getattr(parser.agent, "model", configured_model))
-            if model != configured_model:
-                raise ValueError("el modelo ejecutado no coincide con el configurado")
-            parser_version = str(
-                (canonical.get("provenance") or {}).get("parser_version")
-                or "llm-0.2.0"
-            )
-            canonical = _validated_canonical_payload(
-                bind_event_identity(
-                    canonical,
-                    dataset=dataset_name,
-                    source_file=source_name,
-                    row_id=row_id,
-                    split=split,
-                    parser_version=parser_version,
-                )
-            )
-        except Exception as exc:
-            return _abstention(exc)
-
-        return {
-            "canonical_event": canonical,
-            "from_cache": False,
-            "source": "llm",
-            "provider": "mistral",
-            "model": model,
-            "mapping_confidence": float(
-                canonical.get("mapping_confidence", 0.0) or 0.0
-            ),
-            "selected_columns": selected_columns,
-            "notes": ["parsed_by_llm", "source:mistral_live"],
-            "cache_content_hash": cache_content_hash,
-            "cache_pipeline_hash": cache_pipeline_hash,
-        }
-
-    if cache is not None:
-        hit = cached_response()
-        if hit is not None:
-            return hit
-
-    if cache is None or cache_mode != "read_write" or cache_content_hash is None:
-        return live_response()
-
-    # Evita llamadas repetidas cuando varios duplicados llegan a la vez. Tras
-    # adquirir el lock se consulta de nuevo porque otro hilo pudo completarla.
-    with cache.singleflight(cache_content_hash, cache_pipeline_hash):
-        hit = cached_response()
-        if hit is not None:
-            return hit
-        live = live_response()
-        if live.get("canonical_event") is None:
-            return live
-        canonical = live["canonical_event"]
+        model = str(getattr(parser.agent, "model", configured_model))
+        if model != configured_model:
+            raise ValueError("el modelo ejecutado no coincide con el configurado")
         parser_version = str(
             (canonical.get("provenance") or {}).get("parser_version")
             or "llm-0.2.0"
         )
-        inserted = cache.put(
-            cache_content_hash,
-            cache_pipeline_hash,
-            canonical,
-            live["selected_columns"],
-            live["model"],
-            parser_version,
+        canonical = _validated_canonical_payload(
+            bind_event_identity(
+                canonical,
+                dataset=dataset_name,
+                source_file=source_name,
+                row_id=row_id,
+                split=split,
+                parser_version=parser_version,
+            )
         )
-        if not inserted:
-            # Otro proceso puede haber ganado el INSERT OR IGNORE. En ese caso
-            # se devuelve el primer exito persistido para mantener una politica
-            # first-success-wins estable.
-            winner = cached_response()
-            if winner is not None:
-                return winner
-        return live
+    except Exception as exc:
+        return _abstention(exc)
+
+    return {
+        "canonical_event": canonical,
+        "from_cache": False,
+        "source": "llm",
+        "provider": "mistral",
+        "model": model,
+        "mapping_confidence": float(
+            canonical.get("mapping_confidence", 0.0) or 0.0
+        ),
+        "selected_columns": selected_columns,
+        "notes": ["parsed_by_llm", "source:mistral_live"],
+    }
 
 
 @tool_result

@@ -120,6 +120,50 @@ def compute_content_hash(
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
+def compute_pipeline_hash(model: str) -> str:
+    """Fingerprint the complete Mistral standardization contract.
+
+    The helper is intentionally storage-independent.  The case-memory server
+    uses it to address cache entries without making the inference server own
+    or open persistent state.
+    """
+
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be a non-empty string")
+
+    from src.agents.llm_ingest_parser import (
+        CANONICAL_EVENT_SCHEMA,
+        COLUMN_SELECTION_SCHEMA,
+        LLM_COLUMN_SELECTION_SYSTEM,
+        LLM_INGEST_SYSTEM,
+        LLM_PARSER_VERSION,
+        LLM_TECHNICAL_EVENT_SCHEMA,
+    )
+
+    contract = {
+        "contract_version": "mistral-standardization-v3-core-envelope",
+        "provider": "mistral",
+        "model": model.strip(),
+        "parser_version": LLM_PARSER_VERSION,
+        "require_llm_column_selection": True,
+        "strict_output_validation": True,
+        "input_canonicalization": "recursive-json-sort-v1",
+        "max_selected_columns": 40,
+        "ingest_prompt": LLM_INGEST_SYSTEM,
+        "column_selection_prompt": LLM_COLUMN_SELECTION_SYSTEM,
+        "canonical_schema": CANONICAL_EVENT_SCHEMA,
+        "llm_technical_schema": LLM_TECHNICAL_EVENT_SCHEMA,
+        "column_selection_schema": COLUMN_SELECTION_SCHEMA,
+    }
+    encoded = json.dumps(
+        contract,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _validate_json_mapping_keys(
     value: Any,
     active_containers: set[int] | None = None,
@@ -563,5 +607,6 @@ __all__ = [
     "bind_event_identity",
     "canonicalize_row",
     "compute_content_hash",
+    "compute_pipeline_hash",
     "strip_event_identity",
 ]

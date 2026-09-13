@@ -38,11 +38,14 @@ def test_current_release_audit_is_fully_green():
         "validation": 3536,
         "test": 3572,
     }
+    assert payload["results"]["detector"]["validation_rows"] == 34_635
+    assert payload["results"]["detector"]["eligible_rows"] == 33_635
     assert payload["results"]["classifier"]["splits"] == {
         "train": 5600,
         "val": 1200,
         "test": 1200,
     }
+    assert payload["results"]["classifier"]["validation_rows"] == 34_635
     assert payload["results"]["classifier"]["training_taxonomy_sha256"] == (
         "d016e777a545c78361adb1c05352a70f36e0022c5f85e5aaf4f8e379655bd6ed"
     )
@@ -80,6 +83,21 @@ def test_detector_audit_rejects_another_balanced_selection(tmp_path, monkeypatch
 
     assert result["semaforo"] == audit_script.RED
     assert "selection_release_sha256" in result["issues"]
+
+
+def test_detector_audit_rejects_a_changed_input_file_hash(tmp_path, monkeypatch):
+    path = tmp_path / "detector.json"
+    reference = _copy_json(audit_script.DETECTOR_REFERENCE, path)
+    reference["inputs"]["files"]["manifests"][
+        "edge_iiotset_manifest.jsonl"
+    ] = "0" * 64
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "DETECTOR_REFERENCE", path)
+
+    result = audit_script.audit_detector()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "manifest_release" in result["issues"]
 
 
 def test_classifier_audit_rejects_a_non_operational_threshold(
@@ -124,6 +142,23 @@ def test_classifier_audit_rejects_another_test_split(tmp_path, monkeypatch):
 
     assert result["semaforo"] == audit_script.RED
     assert "release_hash:test" in result["issues"]
+
+
+def test_classifier_audit_rejects_duplicate_inventory_entries(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "classifier.json"
+    reference = _copy_json(audit_script.CLASSIFIER_REFERENCE, path)
+    reference["inputs"]["manifests"].append(
+        dict(reference["inputs"]["manifests"][0])
+    )
+    _write_json(path, reference)
+    monkeypatch.setattr(audit_script, "CLASSIFIER_REFERENCE", path)
+
+    result = audit_script.audit_classifier()
+
+    assert result["semaforo"] == audit_script.RED
+    assert "manifest_inventory_entries" in result["issues"]
 
 
 def test_classifier_reference_fixes_balanced_16_type_split():

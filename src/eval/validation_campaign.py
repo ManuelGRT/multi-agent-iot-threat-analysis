@@ -36,6 +36,35 @@ Task = Literal["binary", "multiclass", "standardization"]
 Split = Literal["train", "val", "test"]
 DedupScope = Literal["dataset", "global"]
 
+FINAL_VALIDATION_DATASET_ROWS: Mapping[str, int] = {
+    "bot_iot": 2_956,
+    "edge_iiotset": 12_800,
+    "iot23": 7_081,
+    "ton_iot": 11_798,
+}
+FINAL_VALIDATION_DATASETS: tuple[str, ...] = tuple(FINAL_VALIDATION_DATASET_ROWS)
+FINAL_VALIDATION_CORPUS_ROWS = sum(FINAL_VALIDATION_DATASET_ROWS.values())
+
+
+def final_validation_artifact_paths(
+    directory: Path,
+    suffix: str,
+) -> tuple[Path, ...]:
+    """Devuelve los cuatro artefactos finales e ignora ficheros obsoletos."""
+    paths = tuple(
+        directory / f"{dataset}{suffix}" for dataset in FINAL_VALIDATION_DATASETS
+    )
+    unavailable = [
+        path.name for path in paths if not path.is_file() or path.stat().st_size == 0
+    ]
+    if unavailable:
+        raise FileNotFoundError(
+            "Faltan artefactos de la campaña final o están vacíos: "
+            + ", ".join(unavailable)
+        )
+    return paths
+
+
 ALLOWED_TASKS: frozenset[str] = frozenset({"binary", "multiclass", "standardization"})
 ALLOWED_SPLITS: frozenset[str] = frozenset({"train", "val", "test"})
 _TASK_ORDER = {"binary": 0, "multiclass": 1, "standardization": 2}
@@ -364,6 +393,41 @@ class ValidationCampaign:
             "ready_rows": len(self.records),
             "records_are_authoritative_join": self.records == self.joined_records,
         }
+
+
+def validate_final_campaign_composition(
+    campaign: ValidationCampaign,
+) -> Mapping[str, int]:
+    """Certifica fuentes, ficheros y recuentos del corpus final de 34.635 filas."""
+    counts = Counter(record.dataset for record in campaign.manifests.records)
+    if dict(counts) != dict(FINAL_VALIDATION_DATASET_ROWS):
+        raise PreflightError(
+            "Composición distinta de la campaña final: "
+            f"esperado={dict(FINAL_VALIDATION_DATASET_ROWS)}, "
+            f"obtenido={dict(counts)}"
+        )
+
+    misplaced_manifests = [
+        record.manifest_id
+        for record in campaign.manifests.records
+        if record.source_path.name != f"{record.dataset}_manifest.jsonl"
+    ]
+    misplaced_results = [
+        record.manifest_id
+        for record in campaign.joined_records
+        if record.result_source_path.name != f"{record.dataset}_standardized.jsonl"
+    ]
+    if misplaced_manifests or misplaced_results:
+        raise PreflightError(
+            "Hay filas almacenadas bajo un fichero de otra fuente: "
+            f"manifiestos={misplaced_manifests[:3]}, "
+            f"resultados={misplaced_results[:3]}"
+        )
+    if len(campaign.joined_records) != FINAL_VALIDATION_CORPUS_ROWS:
+        raise PreflightError(
+            "La campaña final no contiene 34.635 estandarizaciones válidas"
+        )
+    return dict(counts)
 
 
 @dataclass(slots=True)

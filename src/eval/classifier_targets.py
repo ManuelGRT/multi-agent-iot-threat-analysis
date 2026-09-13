@@ -61,7 +61,7 @@ def recover_bot_iot_target_subclasses(
 
     Solo lee las filas Bot-IoT de ataque cuya clase nativa es ``DDoS`` o
     ``Reconnaissance``. El ``row_id`` sigue exactamente la semantica de
-    :func:`scripts.build_validation_manifests.iter_csv`: primera fila de datos
+    :func:`scripts.build_validation_datasets.iter_csv`: primera fila de datos
     igual a cero.
     """
 

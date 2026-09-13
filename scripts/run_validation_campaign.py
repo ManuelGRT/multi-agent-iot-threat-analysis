@@ -33,6 +33,14 @@ from typing import Callable, Mapping, Sequence
 
 
 REPO = Path(__file__).resolve().parents[1]
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+
+from src.eval.validation_campaign import (  # noqa: E402
+    FINAL_VALIDATION_DATASET_ROWS,
+    FINAL_VALIDATION_DATASETS,
+)
+
 DEFAULT_MANIFEST_DIR = REPO / "artifacts" / "validation_2026" / "manifests"
 DEFAULT_RESULTS_DIR = REPO / "artifacts" / "validation_2026" / "standardized"
 DEFAULT_STATE_DIR = REPO / "artifacts" / "validation_2026" / "campaign_supervisor"
@@ -163,6 +171,7 @@ class CampaignConfig:
     manifest_dir: Path = DEFAULT_MANIFEST_DIR
     results_dir: Path = DEFAULT_RESULTS_DIR
     state_dir: Path = DEFAULT_STATE_DIR
+    datasets: tuple[str, ...] | None = FINAL_VALIDATION_DATASETS
     python_executable: str = sys.executable
     provider: str = DEFAULT_PROVIDER
     model: str = DEFAULT_MODEL
@@ -200,9 +209,20 @@ def _json_object(raw_line: str, path: Path, line_number: int) -> dict:
     return value
 
 
-def load_manifest_inventory(manifest_dir: Path) -> ManifestInventory:
+def load_manifest_inventory(
+    manifest_dir: Path,
+    datasets: Sequence[str] | None = None,
+) -> ManifestInventory:
     """Carga y valida el universo de IDs sin retener las filas crudas."""
-    paths = sorted(manifest_dir.glob(f"*{_MANIFEST_SUFFIX}"))
+    if datasets is None:
+        paths = sorted(manifest_dir.glob(f"*{_MANIFEST_SUFFIX}"))
+    else:
+        paths = [manifest_dir / f"{dataset}{_MANIFEST_SUFFIX}" for dataset in datasets]
+        missing = [path.name for path in paths if not path.is_file()]
+        if missing:
+            raise CampaignError(
+                "Faltan manifiestos requeridos: " + ", ".join(missing)
+            )
     if not paths:
         raise CampaignError(f"No hay manifiestos en {manifest_dir}")
 
@@ -221,6 +241,16 @@ def load_manifest_inventory(manifest_dir: Path) -> ManifestInventory:
                     raise CampaignError(
                         f"manifest_id ausente o invalido en {path}:{line_number}"
                     )
+                if datasets is not None:
+                    if record.get("dataset") != dataset:
+                        raise CampaignError(
+                            f"dataset interno incorrecto en {path}:{line_number}"
+                        )
+                    if not manifest_id.startswith(f"{dataset}::"):
+                        raise CampaignError(
+                            f"manifest_id no pertenece a {dataset} en "
+                            f"{path}:{line_number}"
+                        )
                 if manifest_id in ids or manifest_id in all_ids:
                     raise CampaignError(f"manifest_id duplicado: {manifest_id}")
                 ids.add(manifest_id)
@@ -670,7 +700,19 @@ def run_campaign(
     """Ejecuta la maquina de estados; las dependencias lentas son inyectables."""
     _validate_config(config)
 
-    inventory = load_manifest_inventory(config.manifest_dir)
+    inventory = load_manifest_inventory(config.manifest_dir, config.datasets)
+    if config.datasets is not None and set(config.datasets) == set(
+        FINAL_VALIDATION_DATASETS
+    ):
+        observed_rows = {
+            dataset: len(ids) for dataset, ids in inventory.dataset_ids.items()
+        }
+        if observed_rows != dict(FINAL_VALIDATION_DATASET_ROWS):
+            raise CampaignError(
+                "Composición distinta de la campaña final: "
+                f"esperado={dict(FINAL_VALIDATION_DATASET_ROWS)}, "
+                f"obtenido={observed_rows}"
+            )
     status = scan_campaign_status(
         inventory,
         config.results_dir,
@@ -922,6 +964,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_dir=args.manifest_dir,
         results_dir=args.results_dir,
         state_dir=args.state_dir,
+        datasets=FINAL_VALIDATION_DATASETS,
         python_executable=args.python_executable,
         provider=args.provider,
         model=args.model,

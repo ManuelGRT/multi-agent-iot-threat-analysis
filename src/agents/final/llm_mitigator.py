@@ -46,6 +46,11 @@ REGLAS DURAS (incumplirlas invalida tu salida):
   catalogo proporcionado. Las referencias las gestiona el sistema, no tu.
 - NO cambies ni reinterpretes el tipo de ataque predicho y no selecciones otra
   etiqueta a partir del top-3: la clasificacion ya esta cerrada aguas arriba.
+- Distingue siempre detection.probability (probabilidad de que el evento sea
+  malicioso) de classification.confidence (confianza en el tipo concreto). Si
+  classification.confidence es inferior a decision_threshold, presenta el tipo
+  como una hipotesis incierta que requiere revision humana. No uses expresiones
+  como "probabilidad alta", "alta confianza" o equivalentes para ese tipo.
 - NO propongas mitigaciones adicionales: todas deben proceder de una base del
   catalogo respaldada por las referencias ATT&CK/CAPEC entregadas.
 - No uses nombres de datasets, ficheros u origenes como reglas de decision.
@@ -251,7 +256,7 @@ class LLMMitigationAgent:
 
     def __init__(
         self,
-        model: str = "mistral-small-latest",
+        model: str = "mistral-small-2603",
         base_url: str = "http://127.0.0.1:11434",
         timeout_seconds: float | None = None,
         provider: str | None = None,
@@ -307,6 +312,7 @@ class LLMMitigationAgent:
             "classification": {
                 "attack_type": classification.get("attack_type"),
                 "confidence": classification.get("confidence"),
+                "decision_threshold": classification.get("decision_threshold", 0.65),
                 "model_task": classification.get("model_task"),
                 "taxonomy_version": classification.get("taxonomy_version"),
                 "top_scores": classification.get("top_scores"),

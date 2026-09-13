@@ -678,7 +678,7 @@ def test_llm_prompts_preserve_input_exactly_after_offline_preparation_boundary()
 
 def test_llm_ingest_parser_accepts_direct_api_providers():
     assert LLMIngestParser(model="llama-3.3-70b-versatile", provider="groq").agent.__class__.__name__ == "GroqChatAgent"
-    assert LLMIngestParser(model="mistral-small-latest", provider="mistral").agent.__class__.__name__ == "MistralChatAgent"
+    assert LLMIngestParser(model="mistral-small-2603", provider="mistral").agent.__class__.__name__ == "MistralChatAgent"
     assert LLMIngestParser(model="gemini-2.5-flash", provider="gemini").agent.__class__.__name__ == "GoogleAIStudioChatAgent"
 
 

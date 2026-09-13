@@ -68,6 +68,7 @@
   .mitigacion-texto { margin-top: 4px; }
   .mitigacion-base { margin-top: 3px; color: var(--gris); font-size: 11px; }
   .mitigacion-alerta { margin-top: 3px; color: var(--err); font-size: 11px; }
+  #t-mit .cuerpo { max-height: 560px; overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
   .refchip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; background: var(--azul-claro); color: var(--azul); border-radius: 6px; font-size: 11.5px; text-decoration: none; }
   .refchip:hover { background: #d5d5ee; }
 
@@ -695,14 +696,38 @@ function safeReferenceUrl(value) {
   }
 }
 
+function detectorModelLabel(value) {
+  const model = String(value || "").trim();
+  if (model === "xgboost_detection_balanced_by_origin_20260905") {
+    return "xgboost_detection_final";
+  }
+  return model || "—";
+}
+
+function mistralModelLabel(value) {
+  const model = String(value || "").trim();
+  return /mistral/i.test(model) ? "Mistral" : (model || "—");
+}
+
+function traceSummaryLabel(value) {
+  return String(value ?? "").replace(
+    /modelo=\S*mistral\S*/gi,
+    "modelo=Mistral",
+  );
+}
+
+function llmDisplayText(value) {
+  return String(value ?? "").replace(/\*+/g, "");
+}
+
 function pintarTarjetas(caso) {
   $("#tarjetas").classList.remove("oculto");
   const std = caso.standardization || {}, det = caso.detection || {},
         cls = caso.classification || {}, exp = caso.explanation || {}, juez = caso.judge || {};
 
   $("#t-std .cuerpo").innerHTML = `
-    <div class="kv"><span class="k">Modelo</span><span>${escapeHtml(std.model ?? "—")}</span></div>
-    <div class="kv"><span class="k">Proveedor</span><span>${escapeHtml(std.provider ?? "—")}</span></div>
+    <div class="kv"><span class="k">Modelo</span><span>${escapeHtml(mistralModelLabel(std.model))}</span></div>
+    <div class="kv"><span class="k">Proveedor</span><span>${escapeHtml(mistralModelLabel(std.provider))}</span></div>
     <div class="kv"><span class="k">Acceso a caché</span><span>${std.from_cache ? "Sí (Estandarizado Previamente)" : "No (Llamada en Vivo)"}</span></div>
     <div class="kv"><span class="k">Modalidad</span><span>${escapeHtml(std.modality ?? "—")}</span></div>
     <div class="kv"><span class="k">Confianza de mapeo</span><span>${pct(std.mapping_confidence)}</span></div>
@@ -720,7 +745,7 @@ function pintarTarjetas(caso) {
     <div class="kv" style="margin-top:4px"><span class="k">Zona gris [0,4–0,6]</span>
       <span>${det.abstain ? '<span class="badge warn">ABSTENCIÓN</span>' : "no aplicada"}</span></div>
     ${det.abstain ? '<p style="color:var(--gris);font-size:11.5px">El booleano interno del umbral no se considera un veredicto durante la abstención.</p>' : ""}
-    <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${escapeHtml(det.model_name ?? "—")}</span></div>`;
+    <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${escapeHtml(detectorModelLabel(det.model_name))}</span></div>`;
 
   if (cls.attack_type) {
     const decisionThreshold = Number.isFinite(Number(cls.decision_threshold))
@@ -759,7 +784,7 @@ function pintarTarjetas(caso) {
     const catalogBase = context ? String(item.base || item.text || "").trim() : "";
     return `<div class="mitigacion">
       ${badgeSource(visibleSource, llmName)}
-      <div class="mitigacion-texto">${escapeHtml(visibleText)}</div>
+      <div class="mitigacion-texto">${escapeHtml(llmDisplayText(visibleText))}</div>
       ${catalogBase ? `<div class="mitigacion-base">Base catalogada: ${escapeHtml(catalogBase)}</div>` : ""}
       ${item.source === "llm_suggested" ? `<div class="mitigacion-alerta">${firstFiveCatalogAnchored
         ? "Recomendación adicional no respaldada por el catálogo"
@@ -779,7 +804,7 @@ function pintarTarjetas(caso) {
     <div class="kv"><span class="k">Fuente global</span><span>${badgeSource(exp.source, llmName)}</span></div>
     <div class="kv"><span class="k">Recomendaciones</span><span>${mitigationItems.length}</span></div>
     ${firstFiveCatalogAnchored ? '<div class="kv"><span class="k">Control del juez</span><span>5 primeras respaldadas por catálogo</span></div>' : ""}
-    ${visibleSummary ? `<p style="font-size:12.3px">${badgeSource(summarySource, llmName)} ${escapeHtml(visibleSummary)}</p>` : ""}
+    ${visibleSummary ? `<p style="font-size:12.3px">${badgeSource(summarySource, llmName)} ${escapeHtml(llmDisplayText(visibleSummary))}</p>` : ""}
     ${items}${refs ? `<p style="margin:8px 0 0">${refs}</p>` : ""}`
     : '<p style="color:var(--gris)">No ejecutado.</p>';
 
@@ -806,7 +831,7 @@ function pintarTraza(caso) {
     return `<tr><td>${escapeHtml(t.agent)}</td><td>${escapeHtml(t.tool ?? "—")}</td>
       <td><span class="badge ${statusClass}">${escapeHtml(t.status ?? "—")}</span></td>
       <td>${t.confidence != null ? pct(t.confidence) : "—"}</td>
-      <td style="font-size:11.5px">${escapeHtml(t.summary ?? "")}${errorBadge}</td></tr>`;
+      <td style="font-size:11.5px">${escapeHtml(traceSummaryLabel(t.summary))}${errorBadge}</td></tr>`;
   }).join("");
   $("#json-out").textContent = JSON.stringify(caso, null, 2);
 }

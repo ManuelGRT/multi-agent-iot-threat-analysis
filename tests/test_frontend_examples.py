@@ -227,6 +227,23 @@ def test_frontend_simplifies_standardization_cache_information():
     assert "cacheHash" not in html
 
 
+def test_frontend_uses_stable_final_detector_label():
+    html = TestClient(app).get("/").text
+
+    assert 'return "xgboost_detection_final"' in html
+    assert "detectorModelLabel(det.model_name)" in html
+
+
+def test_frontend_uses_neutral_mistral_label_but_preserves_raw_case_result():
+    html = TestClient(app).get("/").text
+
+    assert 'return /mistral/i.test(model) ? "Mistral"' in html
+    assert "mistralModelLabel(std.model)" in html
+    assert "mistralModelLabel(std.provider)" in html
+    assert "traceSummaryLabel(t.summary)" in html
+    assert '$("#json-out").textContent = JSON.stringify(caso, null, 2);' in html
+
+
 def test_frontend_shows_auditor_as_an_independent_post_case_stage():
     html = TestClient(app).get("/").text
 
@@ -260,8 +277,12 @@ def test_frontend_prioritizes_mistral_context_and_shows_every_mitigation():
     assert 'llm: `${llmName} + catálogo`' in html
     assert ".slice(0, 6)" not in html
     assert "mitigationItems.length" in html
-    assert "escapeHtml(visibleText)" in html
-    assert "escapeHtml(visibleSummary)" in html
+    assert "escapeHtml(llmDisplayText(visibleText))" in html
+    assert "escapeHtml(llmDisplayText(visibleSummary))" in html
+    assert 'replace(/\\*+/g, "")' in html
+    assert "#t-mit .cuerpo" in html
+    assert "max-height: 560px" in html
+    assert "overflow-y: auto" in html
 
 
 def test_frontend_shows_only_the_classifier_top_three():
@@ -300,11 +321,11 @@ def test_frontend_escapes_case_result_values_before_using_inner_html():
     html = TestClient(app).get("/").text
 
     escaped_values = (
-        'escapeHtml(std.model ?? "—")',
-        'escapeHtml(std.provider ?? "—")',
+        "escapeHtml(mistralModelLabel(std.model))",
+        "escapeHtml(mistralModelLabel(std.provider))",
         'escapeHtml(std.modality ?? "—")',
         'escapeHtml(std.failure_code ?? "standardization_failed")',
-        'escapeHtml(det.model_name ?? "—")',
+        "escapeHtml(detectorModelLabel(det.model_name))",
         "escapeHtml(f)",
         "escapeHtml(cls.attack_type)",
         'escapeHtml(juez.action ?? "—")',
@@ -313,7 +334,7 @@ def test_frontend_escapes_case_result_values_before_using_inner_html():
         "escapeHtml(t.agent)",
         'escapeHtml(t.tool ?? "—")',
         'escapeHtml(t.status ?? "—")',
-        'escapeHtml(t.summary ?? "")',
+        "escapeHtml(traceSummaryLabel(t.summary))",
         "escapeHtml(errorText)",
         "escapeHtml(errorText.slice(0, 90))",
         "escapeHtml(txt)",

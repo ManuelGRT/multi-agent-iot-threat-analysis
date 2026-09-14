@@ -24,7 +24,7 @@ entrada cruda → Estandarizador → Detector → Clasificador → Mitigador →
 | **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Consulta mediante el servidor MCP `case_memory` una caché SQLite por hash exacto, que reutiliza únicamente éxitos previos de Mistral y reconstruye la identidad del caso actual. En un *cache miss*, solicita a `inference` que Mistral seleccione las columnas y genere el evento canónico, y devuelve el éxito a `case_memory` para almacenarlo | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
 | **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
 | **Clasificador** | Modelo XGBoost multiclase balanceado: identifica directamente uno de los 16 tipos de ataque | Tipo, confianza y top-3 de tipos; si la confianza es < 0,65, el caso va a revisión |
-| **Mitigador** | Invoca `threat_intel.suggest_mitigations` para consultar por `attack_type` el **catálogo verificable** (ATT&CK + CAPEC) y `threat_intel.contextualize_mitigations` para solicitar la contextualización con Mistral | Si el LLM falla conserva el catálogo; cualquier mitigación o referencia adicional se descarta |
+| **Mitigador** | Invoca `threat_intel.suggest_mitigations` para consultar por `attack_type` el **catálogo verificable** (ATT&CK + CAPEC) y `threat_intel.contextualize_mitigations` para solicitar la contextualización con Mistral | Si el LLM falla conserva el catálogo; las recomendaciones adicionales se mantienen como `llm_suggested` no verificadas y las referencias adicionales se descartan |
 | **Juez** | Aplica reglas deterministas sobre el caso completo y comprueba que clasificación y mitigación conserven el mismo tipo | Aprobar o derivar a revisión humana |
 | **Auditor** | Revisa a posteriori el caso cerrado, incluida la coherencia del tipo entre clasificador, catálogo, mitigador, juez y persistencia | Aprobar, revisar o rechazar |
 
@@ -62,13 +62,18 @@ Ideas clave del diseño:
   transporte.
 - **El LLM del mitigador se consume mediante MCP y está anclado**: el agente
   no accede directamente a Mistral; solicita la contextualización al servidor
-  `threat_intel`. El modelo puede redactar la explicación y
-  contextualizar exclusivamente las bases numeradas del catálogo. No puede añadir
-  mitigaciones ni referencias: cualquier elemento sin una base válida se descarta.
-  Para la decisión operacional se comprueba si las cinco primeras bases quedaron
-  contextualizadas y vinculadas con entradas distintas del catálogo.
-  Los descartes quedan registrados como evidencia; un identificador inventado
-  dentro del resumen hace que este se elimine y mantiene la revisión humana.
+  `threat_intel`. El modelo redacta la explicación, contextualiza las bases
+  numeradas del catálogo y puede formular recomendaciones adicionales. Una
+  recomendación sin una base válida se conserva con procedencia
+  `llm_suggested`: es una sugerencia no verificada y nunca se presenta como
+  conocimiento del catálogo. Las referencias adicionales se descartan.
+  Para la decisión operacional se comprueba si las cinco primeras bases del
+  catálogo quedaron contextualizadas y vinculadas con entradas distintas. Su
+  cobertura neutraliza únicamente una solicitud genérica de revisión emitida
+  por el LLM; el juez sigue aplicando el resto de sus reglas, como los umbrales,
+  las abstenciones, los errores y la coherencia entre salidas. Un identificador
+  inventado dentro del resumen hace que este se elimine y mantiene la revisión
+  humana.
 
 ## Resultados principales
 
@@ -145,8 +150,9 @@ auditor en un panel independiente: informa `approve`, `review` o `reject` y
 desglosa sus comprobaciones sin modificar la decisión del juez ni añadir una
 entrada a la traza operacional. En la tarjeta del mitigador se presenta primero
 la contextualización de Mistral; si no existe, se muestra el texto del catálogo.
-También se conserva debajo la base catalogada y se muestran exclusivamente las
-recomendaciones procedentes de esa entrada. La entrada cruda debe llegar
+También se conserva debajo la base catalogada. Las recomendaciones adicionales
+aparecen por separado como sugerencias `llm_suggested` no verificadas y no
+implican por sí solas una revisión humana. La entrada cruda debe llegar
 limpia. El estandarizador busca primero un éxito Mistral con el mismo hash
 exacto en la caché SQLite; en
 un *miss* necesitas `MISTRAL_API_KEY` y se llama a Mistral en vivo. Si el
@@ -224,10 +230,20 @@ python scripts\run_system_audit.py
 Esta utilidad es portable: comprueba los SHA-256 y contratos de los dos modelos
 empaquetados, distingue la taxonomía registrada durante el entrenamiento de la
 taxonomía operativa actual, verifica la coherencia de sus splits y métricas
-congeladas, la integridad del catálogo v4 y la batería reproducible de
+congeladas, comprueba que sus esquemas no contengan campos objetivo, verifica la
+integridad del catálogo v4 y ejecuta la batería reproducible de
 mutaciones del auditor. Funciona en un clon limpio y no necesita los datasets
 completos. Los datos originales
 solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
+
+La suite `pytest` conserva una prueba integral por agente y una sola prueba E2E.
+Las pruebas de agentes cubren las rutas de éxito, abstención, error controlado y
+revisión humana, además de invocar las comprobaciones congeladas de los modelos
+y del catálogo. El E2E reutiliza una única sesión MCP `stdio` y recorre siete
+registros reales del split de test: Edge-IIoTset, IoT-23, Bot-IoT y las
+modalidades de red, Linux, Windows y telemetría de TON-IoT. Cada resultado se
+persiste y se somete al auditor posterior. Las etiquetas de referencia se
+conservan fuera de las entradas operacionales.
 
 ## Estructura del repositorio
 
@@ -240,7 +256,7 @@ solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
 | `src/eval/` | Sanitización, entrenamiento y evaluación exclusivamente offline; incluye las referencias congeladas de auditoría |
 | `src/api/` | API FastAPI + visor web (`static/index.html`) |
 | `scripts/` | Utilidades offline de entrenamiento, evaluación y validación |
-| `tests/` | Suite automatizada esencial del sistema y de sus contratos operativos |
+| `tests/` | Seis pruebas integrales de agentes y una prueba E2E |
 
 El repositorio de despliegue no contiene adaptadores, agentes alternativos ni
 grafos legacy. La sanitización se conserva como herramienta offline para

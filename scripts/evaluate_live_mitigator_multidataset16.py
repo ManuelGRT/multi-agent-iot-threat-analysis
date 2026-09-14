@@ -472,6 +472,12 @@ def case_metrics(
     )
     raw_review = payload.get("requires_human_review")
     raw_requires_human_review = raw_review if isinstance(raw_review, bool) else False
+    review_reasons = list(case.explanation.review_reasons)
+    generic_llm_review_neutralized = bool(
+        raw_requires_human_review
+        and case.explanation.first_five_catalog_anchored
+        and "llm_requested_human_review" not in review_reasons
+    )
     return {
         "case_id": case.case_id,
         "manifest_id": selected["manifest_id"],
@@ -500,7 +506,8 @@ def case_metrics(
         "suggested_reference_count": suggested_references,
         "summary_discarded_for_unknown_reference": summary_discarded,
         "llm_context_summary_present": bool(case.explanation.llm_context_summary),
-        "review_reasons": list(case.explanation.review_reasons),
+        "review_reasons": review_reasons,
+        "generic_llm_review_neutralized": generic_llm_review_neutralized,
         "judge_action": case.judge.action,
         "judge_requires_human_review": case.judge.requires_human_review,
         "judge_issues": list(case.judge.issues),
@@ -567,9 +574,12 @@ def aggregate(rows: list[dict[str, Any]], eligible_counts: dict[str, int]) -> di
             row["raw_requires_human_review"] for row in successful
         ),
         "raw_review_requests_neutralized": sum(
-            row["raw_requires_human_review"]
-            and row["first_five_catalog_anchored"]
-            and row["judge_action"] == "approve"
+            row["generic_llm_review_neutralized"]
+            for row in successful
+        ),
+        "judge_reviews_after_llm_neutralization": sum(
+            row["generic_llm_review_neutralized"]
+            and row["judge_action"] != "approve"
             for row in successful
         ),
         "judge_actions": dict(sorted(Counter(row["judge_action"] for row in rows).items())),
@@ -593,7 +603,7 @@ def markdown_summary(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str
         f"- Respuestas remotas procesables: {summary['remote_successes']}",
         f"- Fallbacks: {summary['fallbacks']}",
         (
-            "- Primeras cinco recomendaciones ancladas: "
+            "- Primeras cinco bases del catalogo contextualizadas: "
             f"{summary['first_five_catalog_anchored']}"
         ),
         (
@@ -604,7 +614,7 @@ def markdown_summary(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str
         f"- Decisiones del juez: {summary['judge_actions']}",
         f"- Veredictos del auditor: {summary['audit_verdicts']}",
         "",
-        "| Tipo | Origen/perfil | LLM | Contextualizadas | Primeras 5 | Sugerencias | Referencias ajenas | Juez | Auditor |",
+        "| Tipo | Origen/perfil | LLM | Contextualizadas | Bases 1-5 | Sugerencias | Referencias ajenas | Juez | Auditor |",
         "|---|---|---:|---:|---:|---:|---:|---|---|",
     ]
     for row in rows:
@@ -908,6 +918,7 @@ def main() -> int:
                     "summary_discarded_for_unknown_reference": False,
                     "llm_context_summary_present": False,
                     "raw_requires_human_review": False,
+                    "generic_llm_review_neutralized": False,
                     "judge_action": "not_reached",
                     "case_status": "error",
                     "audit_verdict": "not_reached",

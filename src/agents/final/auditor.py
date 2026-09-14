@@ -403,12 +403,16 @@ class CaseAuditor:
             has_non_catalog_reference = any(
                 ref.source != "catalog" for ref in case.explanation.references
             )
+            has_non_catalog_item = any(
+                item.source != "catalog"
+                for item in case.explanation.mitigation_items
+            )
             add(
-                "consistencia_catalogo_sin_llm_suggested",
-                not has_non_catalog_reference,
+                "consistencia_salida_catalogo_pura",
+                not has_non_catalog_reference and not has_non_catalog_item,
                 detail=(
-                    "referencias llm_suggested con source=catalog"
-                    if has_non_catalog_reference
+                    "una salida global catalog contiene elementos no catalogados"
+                    if has_non_catalog_reference or has_non_catalog_item
                     else None
                 ),
             )

@@ -362,9 +362,13 @@ def catalog_output_issues(
     items = [_as_mapping(item) for item in raw_items] if isinstance(raw_items, list) else []
     if not items:
         issues.append("mitigation_items_missing")
+    expected_sequence = list(expected["items"])
     expected_items = Counter(
-        (item["text"], item["phase"]) for item in expected["items"]
+        (item["text"], item["phase"]) for item in expected_sequence
     )
+    expected_by_base_id = {
+        base_id: item for base_id, item in enumerate(expected_sequence, start=1)
+    }
     anchored_items: Counter[tuple[Any, Any]] = Counter()
     for item in items:
         source = item.get("source")
@@ -375,6 +379,21 @@ def catalog_output_issues(
                 issues.append("anchored_mitigation_item_invalid")
                 continue
             anchored_items[(text, phase)] += 1
+            base_id = item.get("base_id")
+            if base_id is not None:
+                if (
+                    not isinstance(base_id, int)
+                    or isinstance(base_id, bool)
+                    or base_id not in expected_by_base_id
+                ):
+                    issues.append("mitigation_base_id_invalid")
+                else:
+                    expected_base = expected_by_base_id[base_id]
+                    if (text, phase) != (
+                        expected_base["text"],
+                        expected_base["phase"],
+                    ):
+                        issues.append("mitigation_base_id_mismatch")
             if source == "catalog" and item.get("base") not in (None, ""):
                 issues.append("catalog_item_has_base")
             if source == "llm":
@@ -385,7 +404,14 @@ def catalog_output_issues(
             if bool(item.get("context_trusted", False)):
                 issues.append("mitigation_context_marked_trusted")
         elif source == "llm_suggested":
-            issues.append("llm_suggested_not_allowed")
+            if (
+                not _nonempty_text(item.get("text"))
+                or item.get("phase") not in (None, "")
+                or item.get("base") not in (None, "")
+                or item.get("base_id") is not None
+                or bool(item.get("context_trusted", False))
+            ):
+                issues.append("llm_suggested_item_invalid")
         else:
             issues.append("mitigation_item_source_invalid")
     if anchored_items != expected_items:
@@ -416,6 +442,8 @@ def catalog_output_issues(
         ):
             issues.append("reference_entry_invalid")
             continue
+        if reference.get("source") != "catalog":
+            issues.append("reference_source_invalid")
         valid_references.append(reference)
     catalog_references = Counter(
         _reference_key(item)
@@ -430,12 +458,11 @@ def catalog_output_issues(
 
     has_suggested = any(
         item.get("source") == "llm_suggested" for item in items
-    ) or any(
-        item.get("source") == "llm_suggested" for item in valid_references
     )
-    if has_suggested or bool(payload.get("has_llm_suggested", False)):
-        issues.append("llm_suggested_not_allowed")
-    if bool(payload.get("has_llm_suggested", False)) != has_suggested:
+    declared_has_suggested = payload.get("has_llm_suggested", False)
+    if not isinstance(declared_has_suggested, bool):
+        issues.append("has_llm_suggested_invalid")
+    if declared_has_suggested is not has_suggested:
         issues.append("has_llm_suggested_mismatch")
     if payload.get("source") not in {"catalog", "hybrid"}:
         issues.append("explanation_source_invalid")
@@ -444,12 +471,29 @@ def catalog_output_issues(
     ):
         issues.append("catalog_source_contains_non_catalog_item")
 
-    first_five = items[:5]
-    actually_anchored = len(first_five) == 5 and all(
-        item.get("source") == "llm"
-        and item.get("base") == item.get("text")
-        and _nonempty_text(item.get("context"))
-        for item in first_five
+    def has_anchored_context(base_id: int, expected_item: Mapping[str, Any]) -> bool:
+        """Localiza la base aunque las sugerencias alteren el orden de salida."""
+
+        for item in items:
+            if item.get("source") != "llm":
+                continue
+            item_base_id = item.get("base_id")
+            if item_base_id is not None and item_base_id != base_id:
+                continue
+            if (
+                item.get("text") == expected_item["text"]
+                and item.get("phase") == expected_item["phase"]
+                and item.get("base") == expected_item["text"]
+                and _nonempty_text(item.get("context"))
+                and not bool(item.get("context_trusted", False))
+            ):
+                return True
+        return False
+
+    first_five_expected = list(expected_by_base_id.items())[:5]
+    actually_anchored = len(first_five_expected) == 5 and all(
+        has_anchored_context(base_id, expected_item)
+        for base_id, expected_item in first_five_expected
     )
     if bool(payload.get("first_five_catalog_anchored", False)) != actually_anchored:
         issues.append("first_five_catalog_anchored_mismatch")

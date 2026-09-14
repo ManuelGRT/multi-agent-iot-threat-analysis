@@ -2,8 +2,9 @@
 
 La comprobacion no reentrena modelos ni necesita los datasets originales. Usa
 fichas portables versionadas para verificar el detector, el clasificador de 16
-tipos y sus splits; valida el catalogo operativo v4; y ejecuta la bateria de
-mutaciones del auditor sobre casos sinteticos con el contrato actual.
+tipos, sus splits y la ausencia de campos objetivo en sus esquemas; valida el
+catalogo operativo v4; y ejecuta la bateria de mutaciones del auditor sobre
+casos sinteticos con el contrato actual.
 """
 from __future__ import annotations
 
@@ -39,6 +40,10 @@ from src.contracts.case import (
     ThreatReference,
     TraceEntry,
 )
+from src.contracts.leakage import (
+    is_allowed_canonical_target_path,
+    is_predictive_target_field,
+)
 from src.mcp.common import artifacts_dir, resolve_confined_path, resolve_path
 
 
@@ -66,7 +71,7 @@ DETECTOR_RELEASE_METRICS = {
     "selective_coverage": 0.9697648376259799,
 }
 CLASSIFIER_RELEASE_HASHES = {
-    "artifact": "9175adb6f78a69962676c9aba0e9b58a59ef94e1e500c9023f4d9b184fa531b5",
+    "artifact": "8871fbced43b28156f608b73f5eb6afaac5e2e1afbdc918fdb87abb4b1bbb48b",
     "selection": "d39cf28b3ec96e1558fbc77327d5674a43644a5f880233bd59640e8370168f60",
     "eligible_records": "f4b6aa576b7c7b48b34023232e0abce9368c50f52fde9f3e40dff6a19c38e344",
     "train": "c53a855cbb787b8f34499fd3e61b6dbae3ccf4b2cf0c0c0a30dbc76b9dbe69fc",
@@ -202,6 +207,23 @@ def _feature_names(model: Any) -> list[str]:
     return [str(value) for value in method()] if callable(method) else []
 
 
+def _target_feature_names(names: list[str]) -> list[str]:
+    """Detecta campos objetivo en el esquema desplegado de un modelo."""
+
+    found: list[str] = []
+    for name in names:
+        source_path = name.split("=", 1)[0]
+        while source_path.endswith((".raw", ".present")):
+            source_path = source_path.rsplit(".", 1)[0]
+        leaf = source_path.rsplit(".", 1)[-1]
+        if (
+            is_predictive_target_field(source_path)
+            or is_predictive_target_field(leaf)
+        ) and not is_allowed_canonical_target_path(source_path):
+            found.append(name)
+    return found
+
+
 def audit_detector() -> dict[str, Any]:
     """Verifica joblib, balance 1:1, splits y metricas del detector actual."""
 
@@ -297,6 +319,8 @@ def audit_detector() -> dict[str, Any]:
     )
 
     model = None
+    names: list[str] = []
+    target_features: list[str] = []
     if model_path.is_file():
         try:
             from src.mcp import model_registry
@@ -307,6 +331,7 @@ def audit_detector() -> dict[str, Any]:
             issues.append(f"model_load:{type(exc).__name__}")
     if model is not None:
         names = _feature_names(model)
+        target_features = _target_feature_names(names)
         require(getattr(model, "task", None) == "binary_detection", "task_model")
         require(
             tuple(getattr(model, "classes", ())) == (False, True),
@@ -327,6 +352,7 @@ def audit_detector() -> dict[str, Any]:
             == DETECTOR_RELEASE_HASHES["feature_names"],
             "feature_release_sha256",
         )
+        require(not target_features, "target_features_present")
         try:
             booster_hash = hashlib.sha256(
                 model.estimator.get_booster().save_raw(raw_format="ubj")
@@ -414,6 +440,8 @@ def audit_detector() -> dict[str, Any]:
         eligible_rows=inputs.get("binary_eligible_rows"),
         corpus_rows=rows,
         splits={key: value.get("rows") for key, value in splits.items()},
+        feature_count=len(names) if model is not None else None,
+        target_feature_count=len(target_features) if model is not None else None,
         test_attack_f1=test.get("attack_f1"),
         selective_coverage=operational.get("coverage"),
     )
@@ -560,6 +588,8 @@ def audit_classifier() -> dict[str, Any]:
     )
 
     model = None
+    names: list[str] = []
+    target_features: list[str] = []
     if model_path.is_file():
         try:
             from src.mcp import model_registry
@@ -570,6 +600,7 @@ def audit_classifier() -> dict[str, Any]:
             issues.append(f"model_load:{type(exc).__name__}")
     if model is not None:
         names = _feature_names(model)
+        target_features = _target_feature_names(names)
         require(getattr(model, "task", None) == "attack_subtype", "task_model")
         require(
             tuple(map(str, getattr(model, "classes", ())))
@@ -608,6 +639,7 @@ def audit_classifier() -> dict[str, Any]:
             == CLASSIFIER_RELEASE_HASHES["feature_names"],
             "feature_release_sha256",
         )
+        require(not target_features, "target_features_present")
     require(contract.get("task") == "attack_subtype", "task_reference")
     require(contract.get("public_task") == "attack_type", "public_task")
     require(
@@ -731,6 +763,8 @@ def audit_classifier() -> dict[str, Any]:
         corpus_rows=selected_rows,
         per_class=per_class,
         splits=split_rows,
+        feature_count=len(names) if model is not None else None,
+        target_feature_count=len(target_features) if model is not None else None,
         test_accuracy=test.get("accuracy"),
         test_macro_f1=(test.get("macro") or {}).get("f1"),
         test_top3=test.get("top3_accuracy"),
@@ -925,6 +959,26 @@ def _valid_attack_case() -> CaseResult:
         ThreatReference(**value)
         for value in catalog_references(catalog_result.get("references") or {})
     ]
+    mitigation_items = [
+        MitigationItem(
+            text=item["text"],
+            phase=item["phase"],
+            source="llm",
+            base_id=item["id"],
+            base=item["text"],
+            context=f"Contextualizacion valida de la base {item['id']}.",
+            context_trusted=False,
+        )
+        for item in base_items
+    ]
+    mitigation_items.append(
+        MitigationItem(
+            text="Conservar una captura adicional para el analisis del incidente.",
+            source="llm_suggested",
+            base_id=None,
+            context_trusted=False,
+        )
+    )
     return CaseResult(
         case_id="case-auditor-valid-attack",
         canonical_event=_canonical_event(),
@@ -941,14 +995,9 @@ def _valid_attack_case() -> CaseResult:
             top_scores={"DDoS_TCP": 0.95, "DDoS_UDP": 0.03, "XSS": 0.02},
         ),
         explanation=ExplanationInfo(
-            summary="Respuesta catalogada para DDoS TCP.",
-            mitigations=[item["text"] for item in base_items],
-            mitigation_items=[
-                MitigationItem(
-                    text=item["text"], phase=item["phase"], source="catalog"
-                )
-                for item in base_items
-            ],
+            summary="Respuesta contextualizada para DDoS TCP.",
+            mitigations=[item.text for item in mitigation_items],
+            mitigation_items=mitigation_items,
             references=references,
             confidence=0.95,
             attack_type="DDoS_TCP",
@@ -962,7 +1011,9 @@ def _valid_attack_case() -> CaseResult:
             reference_quality=dict(
                 catalog_result.get("reference_quality") or {}
             ),
-            source="catalog",
+            source="hybrid",
+            has_llm_suggested=True,
+            first_five_catalog_anchored=True,
         ),
         judge=JudgeInfo(
             action="approve",

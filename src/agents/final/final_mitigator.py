@@ -10,8 +10,9 @@ Flujo en dos pasos, ambos mediante el servidor MCP ``threat_intel``:
 2. LLM (opcional): ``threat_intel.contextualize_mitigations`` encapsula la
    llamada a Mistral y contextualiza las mitigaciones al evento concreto
    (puertos, protocolo, telemetria). El agente valida y ancla la respuesta:
-   no puede incorporar tecnicas, referencias ni mitigaciones fuera del
-   catalogo. Si el LLM falla, aplica fallback total al modo catalogo.
+   las propuestas sin una base verificable se conservan con procedencia
+   ``llm_suggested`` y nunca amplian las referencias del catalogo. Si el LLM
+   falla, aplica fallback total al modo catalogo.
 
 ``source`` de la salida: ``catalog`` (solo paso 1) o ``hybrid`` (1+2).
 """
@@ -156,6 +157,7 @@ class FinalMitigator(FinalAgent):
                             "text": "escalate_to_analyst",
                             "phase": None,
                             "source": "fallback",
+                            "base_id": None,
                             "base": None,
                         }
                     ],
@@ -208,6 +210,7 @@ class FinalMitigator(FinalAgent):
                     "text": "escalate_to_analyst",
                     "phase": None,
                     "source": "fallback",
+                    "base_id": None,
                     "base": None,
                 }
             ]
@@ -257,7 +260,13 @@ class FinalMitigator(FinalAgent):
         references = catalog_references(result.get("references") or {})
         known_ids = catalog_reference_ids(result.get("references") or {})
         mitigation_items = [
-            {"text": item["text"], "phase": item["phase"], "source": "catalog", "base": None}
+            {
+                "text": item["text"],
+                "phase": item["phase"],
+                "source": "catalog",
+                "base_id": item["id"],
+                "base": None,
+            }
             for item in base_items
         ]
         if classification.get("confidence") is not None:
@@ -408,7 +417,7 @@ class FinalMitigator(FinalAgent):
                     confidence=anchored["confidence"],
                     summary=(
                         f"contextualizadas={sum(1 for i in anchored['mitigation_items'] if i['source'] == 'llm')} "
-                        "adicionales_permitidas=no "
+                        f"sugerencias_llm={sum(1 for i in anchored['mitigation_items'] if i['source'] == 'llm_suggested')} "
                         f"primeras_5_ancladas={anchored['first_five_catalog_anchored']} "
                         f"modelo={model_name}"
                     ),
@@ -439,7 +448,9 @@ class FinalMitigator(FinalAgent):
         if final_payload.get("llm_context_summary"):
             explanation_output["llm_context_summary"] = final_payload["llm_context_summary"]
             explanation_output["llm_context_trusted"] = False
-        explanation_output["has_llm_suggested"] = False
+        explanation_output["has_llm_suggested"] = bool(
+            final_payload.get("has_llm_suggested", False)
+        )
         explanation_output["first_five_catalog_anchored"] = bool(
             final_payload.get("first_five_catalog_anchored", False)
         )

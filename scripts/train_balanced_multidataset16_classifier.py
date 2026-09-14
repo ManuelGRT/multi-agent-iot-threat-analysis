@@ -67,7 +67,8 @@ from src.eval.validation_campaign import (  # noqa: E402
 
 DEFAULT_PROVIDER = "mistral"
 DEFAULT_MODEL = "mistral-small-2603"
-MODEL_NAME = "xgboost_attack_subtype_multidataset16_balanced500_20260906"
+MODEL_NAME = "xgboost_classification_final"
+DEPLOYMENT_FILENAME = "xgboost_classification_final.joblib"
 DEFAULT_CONFIDENCE_THRESHOLD = 0.65
 PORTABLE_REFERENCE_SCHEMA_VERSION = "classifier-evaluation-reference-v1"
 PORTABLE_REFERENCE_FILENAME = "classifier_multidataset16_portable_reference.json"
@@ -949,7 +950,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     model_path = (
         args.model_out.expanduser().resolve()
         if args.model_out is not None
-        else out_dir / "candidate_models" / f"{MODEL_NAME}.joblib"
+        else out_dir / "candidate_models" / DEPLOYMENT_FILENAME
     )
     persist_candidate_model(
         result,

@@ -71,7 +71,7 @@ class FinalDetector(FinalAgent):
             ],
             model_name=str(
                 result.get("model_name")
-                or "xgboost_detection_balanced_by_origin_20260905"
+                or "xgboost_detection_final"
             ),
             next_route=next_route,
             abstain=abstain,

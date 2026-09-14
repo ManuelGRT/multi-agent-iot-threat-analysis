@@ -5,9 +5,9 @@ Expone los modelos preparados del TFM:
 - Estandarizacion final: ejecuta Mistral en vivo y nunca usa adaptadores. La
   cache persistente pertenece al servidor ``case_memory`` y la coordina el
   agente estandarizador antes de invocar esta tool.
-- Deteccion: ``xgboost_detection_balanced_by_origin_20260905.joblib``.
+- Deteccion: ``xgboost_detection_final.joblib``.
 - Clasificacion:
-  ``xgboost_attack_subtype_multidataset16_balanced500_20260906.joblib``.
+  ``xgboost_classification_final.joblib``.
 """
 from __future__ import annotations
 

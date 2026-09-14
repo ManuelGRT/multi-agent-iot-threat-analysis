@@ -67,7 +67,7 @@
   .mitigacion:last-child { border-bottom: none; }
   .mitigacion-texto { margin-top: 4px; }
   .mitigacion-base { margin-top: 3px; color: var(--gris); font-size: 11px; }
-  .mitigacion-alerta { margin-top: 3px; color: var(--err); font-size: 11px; }
+  .mitigacion-alerta { margin-top: 3px; color: var(--warn); font-size: 11px; }
   #t-mit .cuerpo { max-height: 560px; overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
   .refchip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; background: var(--azul-claro); color: var(--azul); border-radius: 6px; font-size: 11.5px; text-decoration: none; }
   .refchip:hover { background: #d5d5ee; }
@@ -343,9 +343,9 @@ const AUDIT_CHECK_INFO = {
     label: "Estado coherente con el juez",
     description: "Comprueba que un caso completado haya sido aprobado sin revisión pendiente.",
   },
-  "consistencia_catalogo_sin_llm_suggested": {
-    label: "Procedencia del catálogo coherente",
-    description: "Comprueba que la salida no contenga recomendaciones ni referencias añadidas por el LLM.",
+  "consistencia_salida_catalogo_pura": {
+    label: "Salida de catálogo pura",
+    description: "Comprueba que una salida global declarada como catálogo contenga únicamente medidas y referencias catalogadas; las sugerencias se admiten en salidas híbridas.",
   },
   "traza_no_vacia": {
     label: "Traza disponible",
@@ -597,10 +597,10 @@ function formatAuditDetail(check) {
       return `Probabilidad maliciosa: ${probability()}`;
     case "consistencia_estado_vs_juez":
       return `Estado: ${status()} · Aprobado por el juez: ${auditYesNo(auditField(raw, "approved"))}`;
-    case "consistencia_catalogo_sin_llm_suggested":
+    case "consistencia_salida_catalogo_pura":
       return check.passed
-        ? "Referencias ajenas al catálogo: ninguna"
-        : "Se detectaron referencias no catalogadas en una salida declarada como catálogo";
+        ? "Todas las medidas y referencias de esta salida proceden del catálogo"
+        : "Se detectó contenido no catalogado en una salida declarada como catálogo";
     case "traza_entradas_cerradas":
       return `Pasos sin finalizar: ${auditAgentList(auditField(raw, "abiertas"), "ninguno")}`;
     case "traza_sin_duraciones_negativas":
@@ -674,11 +674,11 @@ async function replayTrace(caso) {
 }
 
 function badgeSource(src, llmName = "LLM") {
-  const m = { catalog: "ok", llm: "warn", llm_suggested: "err", fallback: "gris", hybrid: "warn", rule_based: "gris" };
+  const m = { catalog: "ok", llm: "warn", llm_suggested: "warn", fallback: "gris", hybrid: "warn", rule_based: "gris" };
   const labels = {
     catalog: "catálogo",
     llm: `${llmName} + catálogo`,
-    llm_suggested: `${llmName} · sin catálogo`,
+    llm_suggested: `${llmName} · sugerencia`,
     fallback: "fallback",
     hybrid: `${llmName} + catálogo`,
     rule_based: "reglas",
@@ -698,9 +698,6 @@ function safeReferenceUrl(value) {
 
 function detectorModelLabel(value) {
   const model = String(value || "").trim();
-  if (model === "xgboost_detection_balanced_by_origin_20260905") {
-    return "xgboost_detection_final";
-  }
   return model || "—";
 }
 
@@ -780,15 +777,17 @@ function pintarTarjetas(caso) {
   const items = mitigationItems.map(item => {
     const context = typeof item.context === "string" ? item.context.trim() : "";
     const visibleText = context || String(item.text || "");
-    const visibleSource = context ? "llm" : (item.source === "llm" ? "catalog" : item.source);
-    const catalogBase = context ? String(item.base || item.text || "").trim() : "";
+    const visibleSource = item.source === "llm_suggested"
+      ? "llm_suggested"
+      : (context ? "llm" : (item.source === "llm" ? "catalog" : item.source));
+    const catalogBase = item.source !== "llm_suggested" && context
+      ? String(item.base || item.text || "").trim()
+      : "";
     return `<div class="mitigacion">
       ${badgeSource(visibleSource, llmName)}
       <div class="mitigacion-texto">${escapeHtml(llmDisplayText(visibleText))}</div>
       ${catalogBase ? `<div class="mitigacion-base">Base catalogada: ${escapeHtml(catalogBase)}</div>` : ""}
-      ${item.source === "llm_suggested" ? `<div class="mitigacion-alerta">${firstFiveCatalogAnchored
-        ? "Recomendación adicional no respaldada por el catálogo"
-        : "Recomendación no respaldada por el catálogo · puede requerir revisión humana"}</div>` : ""}
+      ${item.source === "llm_suggested" ? '<div class="mitigacion-alerta">Sugerencia adicional no verificada por el catálogo</div>' : ""}
     </div>`;
   }).join("");
   const refs = (exp.references || []).map(r => {
@@ -803,7 +802,7 @@ function pintarTarjetas(caso) {
   $("#t-mit .cuerpo").innerHTML = visibleSummary || items || refs ? `
     <div class="kv"><span class="k">Fuente global</span><span>${badgeSource(exp.source, llmName)}</span></div>
     <div class="kv"><span class="k">Recomendaciones</span><span>${mitigationItems.length}</span></div>
-    ${firstFiveCatalogAnchored ? '<div class="kv"><span class="k">Control del juez</span><span>5 primeras respaldadas por catálogo</span></div>' : ""}
+    ${firstFiveCatalogAnchored ? '<div class="kv"><span class="k">Control del juez</span><span>Primeras cinco bases del catálogo contextualizadas</span></div>' : ""}
     ${visibleSummary ? `<p style="font-size:12.3px">${badgeSource(summarySource, llmName)} ${escapeHtml(llmDisplayText(visibleSummary))}</p>` : ""}
     ${items}${refs ? `<p style="margin:8px 0 0">${refs}</p>` : ""}`
     : '<p style="color:var(--gris)">No ejecutado.</p>';

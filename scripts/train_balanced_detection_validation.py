@@ -32,7 +32,7 @@ from src.eval.validation_campaign import (  # noqa: E402
 
 DEFAULT_SOURCE_ROOT = REPO / "artifacts" / "validation_2026"
 DEFAULT_OUT_DIR = REPO / "artifacts" / "validation_2026_balanced_detection"
-DEPLOYMENT_FILENAME = "xgboost_detection_balanced_by_origin_20260905.joblib"
+DEPLOYMENT_FILENAME = "xgboost_detection_final.joblib"
 DEFAULT_MODEL_OUT = DEFAULT_OUT_DIR / DEPLOYMENT_FILENAME
 DEFAULT_DEPLOYMENT_METADATA_OUT = DEFAULT_OUT_DIR / (
     "xgboost_detection_balanced_by_origin_20260905.json"

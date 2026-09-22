@@ -1,0 +1,53 @@
+# Entorno y cachés de Python
+.venv/
+.campaign_venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hypothesis/
+
+# Datasets crudos (públicos, descargables aparte) — ~3.8 GB
+/data/
+/build/
+/dist/
+
+# Estado local, artefactos de evaluación y modelos históricos. Los dos modelos
+# del runtime se versionan como recursos bajo src/mcp/data/models/.
+/artifacts/
+
+# Transferencias temporales
+_tmp_transfer/
+
+# Secretos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+
+# Estado y logs regenerables
+*.log
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+
+# Editores y sistema operativo
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sistema Multiagente — Visor del flujo</title>
+<style>
+  :root {
+    --azul: #000066; --azul-claro: #e8e8f5; --ok: #1a7f37; --warn: #b58105;
+    --err: #b42318; --gris: #667085; --borde: #d9dce3; --fondo: #f6f7fb;
+    --tarjeta: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--fondo); color: #1c2333; }
+  header { background: var(--azul); color: #fff; padding: 14px 24px; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; text-align: center; }
+  header p { margin: 2px 0 0; font-size: 12.5px; opacity: .8; }
+  main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 16px 24px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px; padding: 14px; }
+  .panel h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--gris); }
+  label { font-size: 12.5px; color: var(--gris); display: block; margin: 10px 0 4px; }
+  select, textarea, button { width: 100%; font: inherit; border-radius: 8px; border: 1px solid var(--borde); }
+  select { padding: 7px 8px; background: #fff; }
+  textarea { min-height: 210px; padding: 8px; font-family: Consolas, monospace; font-size: 12px; resize: vertical; }
+  button.analizar { margin-top: 14px; background: var(--azul); color: #fff; border: none; padding: 10px; font-weight: 600; cursor: pointer; }
+  button.analizar:disabled { opacity: .55; cursor: wait; }
+  .aviso { font-size: 11.5px; color: var(--gris); margin-top: 8px; line-height: 1.45; }
+
+  /* pipeline */
+  .pipeline { display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 6px 0 2px; }
+  .nodo { flex: 1; min-width: 128px; text-align: center; position: relative; padding: 10px 6px; border: 2px solid var(--borde); border-radius: 10px; background: #fff; margin-right: 26px; transition: all .3s; }
+  .nodo:last-child { margin-right: 0; }
+  .nodo::after { content: "→"; position: absolute; right: -22px; top: 50%; transform: translateY(-50%); color: var(--gris); font-size: 17px; }
+  .nodo:last-child::after { content: ""; }
+  .nodo .icono { font-size: 21px; }
+  .nodo .nombre { font-size: 12.5px; font-weight: 600; margin-top: 2px; }
+  .nodo .estado { font-size: 11px; color: var(--gris); margin-top: 2px; min-height: 14px; }
+  .nodo.pendiente { opacity: .45; }
+  .nodo.activo { border-color: var(--azul); box-shadow: 0 0 0 3px var(--azul-claro); opacity: 1; }
+  .nodo.ok { border-color: var(--ok); opacity: 1; }
+  .nodo.abstain, .nodo.fallback { border-color: var(--warn); opacity: 1; }
+  .nodo.error { border-color: var(--err); opacity: 1; }
+  .nodo.omitido { border-style: dashed; opacity: .5; }
+
+  .banner { margin-top: 12px; padding: 10px 14px; border-radius: 10px; font-size: 14px; font-weight: 600; display: none; }
+  .banner.completed { display: block; background: #e7f4ec; color: var(--ok); border: 1px solid #b5dfc4; }
+  .banner.needs_human_review { display: block; background: #fdf3d7; color: var(--warn); border: 1px solid #efd48a; }
+  .banner.error { display: block; background: #fdecea; color: var(--err); border: 1px solid #f2b8b5; }
+  .banner small { font-weight: 400; color: var(--gris); }
+
+  .tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; margin-top: 12px; }
+  .tarjeta { background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 10px; padding: 12px; font-size: 13px; }
+  .tarjeta h3 { margin: 0 0 8px; font-size: 13.5px; color: var(--azul); }
+  .kv { display: flex; justify-content: space-between; gap: 8px; padding: 2.5px 0; }
+  .kv .k { color: var(--gris); }
+  .badge { display: inline-block; padding: 1.5px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .badge.ok { background: #e7f4ec; color: var(--ok); }
+  .badge.warn { background: #fdf3d7; color: var(--warn); }
+  .badge.err { background: #fdecea; color: var(--err); }
+  .badge.gris { background: #eef0f4; color: var(--gris); }
+  .barra { height: 9px; background: #eef0f4; border-radius: 6px; position: relative; overflow: hidden; margin-top: 3px; }
+  .barra .relleno { height: 100%; border-radius: 6px; background: var(--azul); transition: width .5s; }
+  .barra.gauge .zona-gris { position: absolute; left: 40%; width: 20%; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, #d9a50533, #d9a50533 4px, transparent 4px, transparent 8px); }
+  .scorefila { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 6px; font-size: 12px; padding: 1.5px 0; }
+  .mitigacion { padding: 5px 0; border-bottom: 1px dashed var(--borde); font-size: 12.3px; line-height: 1.4; }
+  .mitigacion:last-child { border-bottom: none; }
+  .mitigacion-texto { margin-top: 4px; }
+  .mitigacion-base { margin-top: 3px; color: var(--gris); font-size: 11px; }
+  .mitigacion-alerta { margin-top: 3px; color: var(--warn); font-size: 11px; }
+  #t-mit .cuerpo { max-height: 560px; overflow-y: auto; padding-right: 8px; scrollbar-gutter: stable; }
+  .refchip { display: inline-block; margin: 2px 4px 2px 0; padding: 2px 8px; background: var(--azul-claro); color: var(--azul); border-radius: 6px; font-size: 11.5px; text-decoration: none; }
+  .refchip:hover { background: #d5d5ee; }
+
+  table.traza { width: 100%; border-collapse: collapse; font-size: 12.3px; margin-top: 6px; }
+  table.traza th, table.traza td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--borde); }
+  table.traza th { color: var(--gris); font-weight: 600; font-size: 11.5px; text-transform: uppercase; }
+  details.json { margin-top: 12px; }
+  details.json pre { background: #101828; color: #d5dbe8; padding: 12px; border-radius: 10px; overflow: auto; font-size: 11.5px; max-height: 420px; }
+  .auditoria-panel { border-style: dashed; border-color: #aeb4c2; }
+  .auditoria-flujo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 3px 0 8px; }
+  .auditoria-nodo { border: 1px solid var(--borde); border-radius: 8px; background: #fff; padding: 7px 10px; font-size: 12.5px; }
+  .auditoria-nodo.agente { border: 2px solid var(--azul); color: var(--azul); font-weight: 600; }
+  .auditoria-flecha { color: var(--gris); }
+  .auditoria-nota { color: var(--gris); font-size: 11.5px; line-height: 1.4; margin: 4px 0 10px; }
+  .auditoria-resumen { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 8px; font-size: 12.5px; }
+  .auditoria-incidencias { margin-top: 8px; font-size: 12px; }
+  .auditoria-incidencias ul { margin: 5px 0 0; padding-left: 20px; }
+  .auditoria-check-label { font-weight: 600; }
+  .auditoria-check-id { margin-top: 2px; color: var(--gris); font: 10.5px Consolas, monospace; }
+  .auditoria-check-descripcion { min-width: 220px; line-height: 1.35; }
+  .auditoria-check-detalle { min-width: 190px; max-width: 360px; line-height: 1.35; overflow-wrap: anywhere; }
+  details.auditoria-detalle { margin-top: 10px; }
+  .oculto { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sistema Multiagente para Amenazas de Ciberseguridad en Entornos IoT/IIoT</h1>
+</header>
+<main>
+  <!-- ============ ENTRADA ============ -->
+  <div class="panel">
+    <h2>Entrada</h2>
+    <select id="ejemplo"></select>
+    <label for="payload">Evento crudo (petición JSON al Endpoint <code>/cases/analyze</code>)</label>
+    <textarea id="payload" spellcheck="false"></textarea>
+    <button class="analizar" id="analizar">Analizar caso</button>
+  </div>
+
+  <!-- ============ FLUJO ============ -->
+  <div>
+    <div class="panel">
+      <h2>Flujo del caso</h2>
+      <div class="pipeline" id="pipeline"></div>
+      <div class="banner" id="banner"></div>
+    </div>
+
+    <div class="tarjetas oculto" id="tarjetas">
+      <div class="tarjeta" id="t-std"><h3>1 · Estandarizador</h3><div class="cuerpo"></div></div>
+      <div class="tarjeta" id="t-det"><h3>2 · Detector</h3><div class="cuerpo"></div></div>
+      <div class="tarjeta" id="t-cls"><h3>3 · Clasificador</h3><div class="cuerpo"></div></div>
+      <div class="tarjeta" id="t-mit"><h3>4 · Mitigador</h3><div class="cuerpo"></div></div>
+      <div class="tarjeta" id="t-juez"><h3>5 · Juez</h3><div class="cuerpo"></div></div>
+    </div>
+
+    <div class="panel oculto" id="panel-traza" style="margin-top:12px">
+      <h2>Traza del caso</h2>
+      <table class="traza"><thead><tr>
+        <th>Agente</th><th>Tool</th><th>Estado</th><th>Confianza</th><th>Resumen</th>
+      </tr></thead><tbody id="traza-body"></tbody></table>
+      <details class="json"><summary>CaseResult completo (JSON)</summary><pre id="json-out"></pre></details>
+    </div>
+
+    <div class="panel auditoria-panel oculto" id="panel-auditoria" style="margin-top:12px" aria-live="polite">
+      <h2>Auditoría posterior independiente</h2>
+      <div class="auditoria-flujo" aria-label="Flujo posterior de auditoría">
+        <span class="auditoria-nodo">CaseResult persistido</span>
+        <span class="auditoria-flecha" aria-hidden="true">→</span>
+        <span class="auditoria-nodo agente">🧾 Agente auditor</span>
+      </div>
+      <p class="auditoria-nota">Se ejecuta después del juez, sobre el caso cerrado.</p>
+      <div id="auditoria-estado"></div>
+      <div class="auditoria-resumen" id="auditoria-resumen"></div>
+      <div class="auditoria-incidencias" id="auditoria-incidencias"></div>
+      <details class="auditoria-detalle oculto" id="auditoria-detalle">
+        <summary>Comprobaciones del auditor</summary>
+        <table class="traza"><thead><tr>
+          <th>Comprobación</th><th>Descripción</th><th>Resultado</th><th>Detalle técnico</th>
+        </tr></thead><tbody id="auditoria-checks"></tbody></table>
+      </details>
+    </div>
+  </div>
+</main>
+
+<script id="demo-examples" type="application/json">
+{
+  "[IoT-23] Benigno": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "benign",
+    "payload": {
+      "dataset": "iot23",
+      "source_file": "demo_iot23_conn.csv",
+      "row_id": 124,
+      "row": {"ts":"1540487336.184154","uid":"CPNbNp2gKV9loYbdS","id.orig_h":"192.168.1.132","id.orig_p":"35056","id.resp_h":"216.239.35.8","id.resp_p":"123","proto":"udp","service":"-","duration":"0.016972","orig_bytes":"48","resp_bytes":"48","conn_state":"SF","local_orig":"-","local_resp":"-","missed_bytes":"0","history":"Dd","orig_pkts":"1","orig_ip_bytes":"76","resp_pkts":"1","resp_ip_bytes":"76","tunnel_parents":"-"}
+    }
+  },
+  "[IoT-23] Ataque": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "attack",
+    "payload": {
+      "dataset": "iot23",
+      "source_file": "demo_iot23_conn.csv",
+      "row_id": 3207,
+      "row": {"ts":"1538520821.627997","uid":"CGLDvm3X8xOnv1Rfwf","id.orig_h":"192.168.100.103","id.orig_p":"38098","id.resp_h":"66.85.157.90","id.resp_p":"443","proto":"tcp","service":"-","duration":"44325.615625","orig_bytes":"19431","resp_bytes":"19431","conn_state":"S1","local_orig":"-","local_resp":"-","missed_bytes":"4500","history":"ShADCaGcgd","orig_pkts":"8872","orig_ip_bytes":"372893","resp_pkts":"9307","resp_ip_bytes":"388975","tunnel_parents":"-"}
+    }
+  },
+  "[BoT-IoT] Benigno": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "benign",
+    "payload": {
+      "dataset": "bot_iot",
+      "source_file": "demo_bot_iot.csv",
+      "row_id": 576931,
+      "row": {"pkSeqID":"3576932","stime":"1526344600.09149","flgs":"e","flgs_number":"1","proto":"udp","proto_number":"3","saddr":"192.168.100.3","sport":"5720","daddr":"205.251.195.97","dport":"53","pkts":"2","bytes":"323","state":"CON","state_number":"2","ltime":"1526344600.38312","seq":"6753","dur":"0.291631","mean":"0.291631","stddev":"0","sum":"0.291631","min":"0.291631","max":"0.291631","spkts":"1","dpkts":"1","sbytes":"93","dbytes":"230","rate":"3.428991","srate":"0","drate":"0","TnBPSrcIP":"116736097","TnBPDstIP":"323","TnP_PSrcIP":"118038","TnP_PDstIP":"2","TnP_PerProto":"200009","TnP_Per_Dport":"68","AR_P_Proto_P_SrcIP":"17.1051","AR_P_Proto_P_DstIP":"6.85798","N_IN_Conn_P_DstIP":"1","N_IN_Conn_P_SrcIP":"20","AR_P_Proto_P_Sport":"6.85798","AR_P_Proto_P_Dport":"3.11157","Pkts_P_State_P_Protocol_P_DestIP":"2","Pkts_P_State_P_Protocol_P_SrcIP":"26"}
+    }
+  },
+  "[BoT-IoT] Ataque": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "attack",
+    "payload": {
+      "dataset": "bot_iot",
+      "source_file": "demo_bot_iot.csv",
+      "row_id": 578050,
+      "row": {"pkSeqID":"3578051","stime":"1526876123.69904","flgs":"e","flgs_number":"1","proto":"tcp","proto_number":"1","saddr":"192.168.100.150","sport":"46997","daddr":"192.168.100.3","dport":"19801","pkts":"2","bytes":"120","state":"RST","state_number":"1","ltime":"1526876123.69912","seq":"772","dur":"0.000073","mean":"0.000073","stddev":"0","sum":"0.000073","min":"0.000073","max":"0.000073","spkts":"1","dpkts":"1","sbytes":"60","dbytes":"60","rate":"13698.629883","srate":"0","drate":"0","TnBPSrcIP":"12000","TnBPDstIP":"12000","TnP_PSrcIP":"200","TnP_PDstIP":"200","TnP_PerProto":"200","TnP_Per_Dport":"2","AR_P_Proto_P_SrcIP":"15256.7","AR_P_Proto_P_DstIP":"15256.7","N_IN_Conn_P_DstIP":"100","N_IN_Conn_P_SrcIP":"100","AR_P_Proto_P_Sport":"15256.7","AR_P_Proto_P_Dport":"27397.3","Pkts_P_State_P_Protocol_P_DestIP":"200","Pkts_P_State_P_Protocol_P_SrcIP":"200"}
+    }
+  },
+  "[Edge-IIoTset] Benigno": {
+    "expected_profile": "network_packet",
+    "expected_outcome": "benign",
+    "payload": {
+      "dataset": "edge_iiotset",
+      "source_file": "demo_edge_iiot.csv",
+      "row_id": 119315,
+      "row": {"frame.time":" 2021 17:03:01.881333000 ","ip.src_host":"192.168.0.101","ip.dst_host":"192.168.0.128","arp.dst.proto_ipv4":"0","arp.opcode":"0.0","arp.hw.size":"0.0","arp.src.proto_ipv4":"0","icmp.checksum":"0.0","icmp.seq_le":"0.0","icmp.transmit_timestamp":"0.0","icmp.unused":"0.0","http.file_data":"0.0","http.content_length":"0.0","http.request.uri.query":"0.0","http.request.method":"0.0","http.referer":"0.0","http.request.full_uri":"0.0","http.request.version":"0.0","http.response":"0.0","http.tls_port":"0.0","tcp.ack":"5.0","tcp.ack_raw":"33541935.0","tcp.checksum":"8631.0","tcp.connection.fin":"0.0","tcp.connection.rst":"0.0","tcp.connection.syn":"0.0","tcp.connection.synack":"0.0","tcp.dstport":"1883.0","tcp.flags":"16.0","tcp.flags.ack":"1.0","tcp.len":"0.0","tcp.options":"0","tcp.payload":"0","tcp.seq":"59.0","tcp.srcport":"49197.0","udp.port":"0.0","udp.stream":"0.0","udp.time_delta":"0.0","dns.qry.name":"0.0","dns.qry.name.len":"0","dns.qry.qu":"0.0","dns.qry.type":"0.0","dns.retransmission":"0.0","dns.retransmit_request":"0.0","dns.retransmit_request_in":"0.0","mqtt.conack.flags":"0","mqtt.conflag.cleansess":"0.0","mqtt.conflags":"0.0","mqtt.hdrflags":"0.0","mqtt.len":"0.0","mqtt.msg_decoded_as":"0.0","mqtt.msg":"0","mqtt.msgtype":"0.0","mqtt.proto_len":"0.0","mqtt.protoname":"0","mqtt.topic":"0","mqtt.topic_len":"0.0","mqtt.ver":"0.0","mbtcp.len":"0.0","mbtcp.trans_id":"0.0","mbtcp.unit_id":"0.0"}
+    }
+  },
+  "[Edge-IIoTset] Ataque": {
+    "expected_profile": "network_packet",
+    "expected_outcome": "attack",
+    "payload": {
+      "dataset": "edge_iiotset",
+      "source_file": "demo_edge_iiot.csv",
+      "row_id": 50554,
+      "row": {"frame.time":" 2021 19:07:57.904459000 ","ip.src_host":"192.168.0.128","ip.dst_host":"31.172.176.71","arp.dst.proto_ipv4":"0","arp.opcode":"0.0","arp.hw.size":"0.0","arp.src.proto_ipv4":"0","icmp.checksum":"0.0","icmp.seq_le":"0.0","icmp.transmit_timestamp":"0.0","icmp.unused":"0.0","http.file_data":"0.0","http.content_length":"0.0","http.request.uri.query":"0.0","http.request.method":"0.0","http.referer":"0.0","http.request.full_uri":"0.0","http.request.version":"0.0","http.response":"0.0","http.tls_port":"0.0","tcp.ack":"121.0","tcp.ack_raw":"1548597051.0","tcp.checksum":"46871.0","tcp.connection.fin":"0.0","tcp.connection.rst":"1.0","tcp.connection.syn":"0.0","tcp.connection.synack":"0.0","tcp.dstport":"21444.0","tcp.flags":"20.0","tcp.flags.ack":"1.0","tcp.len":"0.0","tcp.options":"0.0","tcp.payload":"0","tcp.seq":"1.0","tcp.srcport":"80.0","udp.port":"0.0","udp.stream":"0.0","udp.time_delta":"0.0","dns.qry.name":"0.0","dns.qry.name.len":"0.0","dns.qry.qu":"0.0","dns.qry.type":"0.0","dns.retransmission":"0.0","dns.retransmit_request":"0.0","dns.retransmit_request_in":"0.0","mqtt.conack.flags":"0.0","mqtt.conflag.cleansess":"0.0","mqtt.conflags":"0.0","mqtt.hdrflags":"0.0","mqtt.len":"0.0","mqtt.msg_decoded_as":"0.0","mqtt.msg":"0.0","mqtt.msgtype":"0.0","mqtt.proto_len":"0.0","mqtt.protoname":"0.0","mqtt.topic":"0.0","mqtt.topic_len":"0.0","mqtt.ver":"0.0","mbtcp.len":"0.0","mbtcp.trans_id":"0.0","mbtcp.unit_id":"0.0"}
+    }
+  },
+  "[TON-IoT] Benigno": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "benign",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_network.csv",
+      "row_id": 118143,
+      "row": {"src_ip":"192.168.1.180","src_port":"54248","dst_ip":"192.168.1.190","dst_port":"53","proto":"udp","service":"dns","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"59","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"elasticsearch","dns_qclass":"1","dns_qtype":"1","dns_rcode":"0","dns_AA":"F","dns_RD":"T","dns_RA":"F","dns_rejected":"F","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
+    }
+  },
+  "[TON-IoT] Ataque": {
+    "expected_profile": "network_flow",
+    "expected_outcome": "attack",
+    "payload": {
+      "dataset": "ton_iot",
+      "source_file": "demo_ton_network.csv",
+      "row_id": 186828,
+      "row": {"src_ip":"192.168.1.32","src_port":"53921","dst_ip":"192.168.1.103","dst_port":"1236","proto":"tcp","service":"-","duration":"0","src_bytes":"0","dst_bytes":"0","conn_state":"S0","missed_bytes":"0","src_pkts":"1","src_ip_bytes":"44","dst_pkts":"0","dst_ip_bytes":"0","dns_query":"-","dns_qclass":"0","dns_qtype":"0","dns_rcode":"0","dns_AA":"-","dns_RD":"-","dns_RA":"-","dns_rejected":"-","ssl_version":"-","ssl_cipher":"-","ssl_resumed":"-","ssl_established":"-","ssl_subject":"-","ssl_issuer":"-","http_trans_depth":"-","http_method":"-","http_uri":"-","http_version":"-","http_request_body_len":"0","http_response_body_len":"0","http_status_code":"0","http_user_agent":"-","http_orig_mime_types":"-","http_resp_mime_types":"-","weird_name":"-","weird_addl":"-","weird_notice":"-"}
+    }
+  },
+  "JSON libre": {
+    "expected_profile": "unknown",
+    "expected_outcome": "custom",
+    "payload": {"dataset":"generic","source_file":"demo_free_input.json","row_id":0,"row":{}}
+  }
+}
+</script>
+<script>
+const EJEMPLOS = JSON.parse(document.querySelector("#demo-examples").textContent);
+
+const NODOS = [
+  { id: "orchestrator", icono: "🧭", nombre: "Orquestador" },
+  { id: "final_standardizer", icono: "📐", nombre: "Estandarizador" },
+  { id: "final_detector", icono: "🔎", nombre: "Detector" },
+  { id: "final_classifier", icono: "🏷️", nombre: "Clasificador" },
+  { id: "final_mitigator", icono: "🛡️", nombre: "Mitigador" },
+  { id: "final_judge", icono: "⚖️", nombre: "Juez" },
+];
+
+const AUDIT_CHECK_INFO = {
+  "consistencia_sin_estado_error": {
+    label: "Estado final válido",
+    description: "Comprueba que el caso no haya terminado con error.",
+  },
+  "consistencia_errores_derivados": {
+    label: "Errores atendidos",
+    description: "Comprueba que los errores hayan llevado a revisión o a un error controlado.",
+  },
+  "consistencia_veredicto_deteccion_presente": {
+    label: "Detección disponible",
+    description: "Comprueba que un caso completado tenga veredicto benigno o malicioso.",
+  },
+  "consistencia_benigno_sin_tipo_ataque": {
+    label: "Benigno sin tipo de ataque",
+    description: "Comprueba que un caso benigno no tenga asignado un tipo de ataque.",
+  },
+  "consistencia_abstencion_flaggeada": {
+    label: "Abstención del detector atendida",
+    description: "Comprueba que una abstención del detector solicite revisión humana.",
+  },
+  "consistencia_abstencion_estandarizador_flaggeada": {
+    label: "Abstención del estandarizador atendida",
+    description: "Comprueba que una estandarización fallida se derive al juez para revisión.",
+  },
+  "consistencia_malicioso_con_tipo_ataque": {
+    label: "Ataque con tipo asignado",
+    description: "Comprueba que un caso malicioso completado tenga un tipo de ataque.",
+  },
+  "consistencia_probabilidad_en_rango": {
+    label: "Probabilidad válida",
+    description: "Comprueba que la probabilidad de detección esté entre 0 y 1.",
+  },
+  "consistencia_etiqueta_vs_probabilidad": {
+    label: "Etiqueta coherente con la probabilidad",
+    description: "Comprueba que benigno o malicioso coincida con el umbral de detección.",
+  },
+  "consistencia_modelo_por_tipo": {
+    label: "Modelo de tipos correcto",
+    description: "Comprueba que el clasificador use directamente la tarea de 16 tipos de ataque.",
+  },
+  "consistencia_tipo_ataque_en_taxonomia": {
+    label: "Tipo de ataque reconocido",
+    description: "Comprueba que el tipo predicho pertenezca a las clases admitidas por la taxonomía declarada.",
+  },
+  "consistencia_tipo_ataque_presente": {
+    label: "Tipo de ataque presente",
+    description: "Comprueba que el clasificador por tipos haya devuelto un tipo de ataque.",
+  },
+  "consistencia_version_taxonomia": {
+    label: "Taxonomía vigente",
+    description: "Comprueba que el modelo use una versión de taxonomía reconocida por el sistema.",
+  },
+  "consistencia_top_scores_tipos": {
+    label: "Top-3 de tipos válido",
+    description: "Comprueba que sus etiquetas sean admitidas y sus puntuaciones estén entre 0 y 1.",
+  },
+  "consistencia_tipo_ataque_vs_top_scores": {
+    label: "Tipo coherente con el top-3",
+    description: "Comprueba que el tipo elegido tenga la mayor puntuación y coincida con la confianza.",
+  },
+  "consistencia_mitigacion_tipo_ataque": {
+    label: "Mitigación para el tipo correcto",
+    description: "Comprueba que el mitigador conserve el tipo de ataque predicho.",
+  },
+  "consistencia_mitigacion_taxonomia": {
+    label: "Taxonomía de mitigación coherente",
+    description: "Comprueba que clasificador y mitigador identifiquen la misma versión de clases.",
+  },
+  "consistencia_mitigacion_catalogo_tipado": {
+    label: "Catálogo específico válido",
+    description: "Comprueba que se use el catálogo v4 y la taxonomía vigente para el tipo predicho.",
+  },
+  "consistencia_contenido_catalogo_tipado": {
+    label: "Contenido respaldado por el catálogo",
+    description: "Comprueba que medidas, fases y referencias catalogadas coincidan con la entrada v4 del tipo predicho.",
+  },
+  "consistencia_umbral_clasificacion_operativo": {
+    label: "Umbral operativo correcto",
+    description: "Comprueba que la decisión del clasificador aplique el umbral operativo fijo de 0,65.",
+  },
+  "consistencia_veredicto_juez_tipo_ataque": {
+    label: "Veredicto conserva el tipo",
+    description: "Comprueba que la etiqueta y la confianza finales correspondan al tipo predicho.",
+  },
+  "consistencia_estado_vs_juez": {
+    label: "Estado coherente con el juez",
+    description: "Comprueba que un caso completado haya sido aprobado sin revisión pendiente.",
+  },
+  "consistencia_salida_catalogo_pura": {
+    label: "Salida de catálogo pura",
+    description: "Comprueba que una salida global declarada como catálogo contenga únicamente medidas y referencias catalogadas; las sugerencias se admiten en salidas híbridas.",
+  },
+  "traza_no_vacia": {
+    label: "Traza disponible",
+    description: "Comprueba que el caso conserve al menos una entrada de ejecución.",
+  },
+  "traza_entradas_cerradas": {
+    label: "Pasos de la traza finalizados",
+    description: "Comprueba que todos los pasos tengan hora de finalización.",
+  },
+  "traza_sin_duraciones_negativas": {
+    label: "Duraciones válidas",
+    description: "Comprueba que ningún paso termine antes de empezar.",
+  },
+  "traza_orden_temporal": {
+    label: "Orden temporal correcto",
+    description: "Comprueba que los pasos estén registrados cronológicamente.",
+  },
+  "traza_orden_de_agentes": {
+    label: "Orden de agentes correcto",
+    description: "Comprueba que los agentes aparezcan en el orden previsto del flujo.",
+  },
+  "traza_juez_presente": {
+    label: "Juez registrado",
+    description: "Comprueba que el juez aparezca en la traza.",
+  },
+  "traza_estandarizador_presente": {
+    label: "Estandarizador registrado",
+    description: "Comprueba que el estandarizador aparezca en la traza.",
+  },
+  "traza_detector_presente": {
+    label: "Detector registrado",
+    description: "Comprueba que el detector aparezca cuando la estandarización continúa.",
+  },
+  "traza_clasificador_presente": {
+    label: "Clasificador registrado",
+    description: "Comprueba que un caso malicioso procesado pase por el clasificador.",
+  },
+  "traza_mitigador_presente": {
+    label: "Mitigador registrado",
+    description: "Comprueba que un caso malicioso clasificado pase por el mitigador.",
+  },
+  "traza_detector_antes_de_clasificar": {
+    label: "Detección previa a la clasificación",
+    description: "Comprueba que haya detección cuando aparece el clasificador.",
+  },
+  "traza_errores_derivados": {
+    label: "Errores de traza atendidos",
+    description: "Comprueba que cualquier paso con error termine en revisión o error controlado.",
+  },
+  "leakage_evento_canonico": {
+    label: "Evento sin fuga de etiquetas",
+    description: "Comprueba que el evento estandarizado no conserve targets o etiquetas reales.",
+  },
+  "leakage_features_modelos": {
+    label: "Variables sin fuga de etiquetas",
+    description: "Comprueba que los modelos no reciban targets entre sus variables de entrada.",
+  },
+  "leakage_evento_canonico_presente": {
+    label: "Evento canónico disponible",
+    description: "Comprueba que un caso completado conserve el evento estandarizado.",
+  },
+  "umbral_mapping_confidence_derivado": {
+    label: "Mapeo incierto revisado",
+    description: "Comprueba que una estandarización con baja confianza solicite revisión humana.",
+  },
+  "umbral_zona_gris_abstiene": {
+    label: "Zona gris tratada con abstención",
+    description: "Comprueba que una probabilidad dudosa haga abstenerse al detector.",
+  },
+  "umbral_confianza_clasificacion_derivada": {
+    label: "Clasificación incierta revisada",
+    description: "Comprueba que un tipo con baja confianza solicite revisión humana.",
+  },
+};
+
+const $ = (s) => document.querySelector(s);
+const pct = (x) => (100 * (x ?? 0)).toFixed(1) + " %";
+const ratioWidth = (value) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.min(100, Math.max(0, 100 * numeric)) : 0;
+};
+const escapeHtml = (value) => String(value ?? "").replace(
+  /[&<>"']/g,
+  char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char],
+);
+
+const AUDIT_AGENT_LABELS = {
+  orchestrator: "Orquestador",
+  final_standardizer: "Estandarizador",
+  final_detector: "Detector",
+  final_classifier: "Clasificador",
+  final_mitigator: "Mitigador",
+  final_judge: "Juez",
+};
+
+const AUDIT_STATUS_LABELS = {
+  open: "abierto",
+  completed: "completado",
+  needs_human_review: "requiere revisión humana",
+  error: "error",
+};
+
+const AUDIT_ACTION_LABELS = {
+  approve: "aprobación",
+  human_interrupt: "revisión humana",
+  abstain: "abstención",
+  rework: "reprocesamiento",
+  reject: "rechazo",
+};
+
+const AUDIT_FAILURE_LABELS = {
+  llm_standardization_failed: "fallo de estandarización mediante LLM",
+  llm_column_selection_failed: "fallo al seleccionar columnas mediante LLM",
+  invalid_llm_response: "respuesta del LLM no válida",
+};
+
+function auditField(raw, field) {
+  const match = String(raw || "").match(new RegExp(`${field}=((?:\\[[^\\]]*\\])|(?:\\{[^}]*\\})|[^\\s]+)`));
+  return match ? match[1] : null;
+}
+
+function auditList(raw) {
+  const text = String(raw || "").trim();
+  if (!text || text === "[]") return [];
+  const body = text.startsWith("[") && text.endsWith("]") ? text.slice(1, -1) : text;
+  const quoted = [...body.matchAll(/'((?:\\'|[^'])*)'|"((?:\\"|[^"])*)"/g)]
+    .map(match => (match[1] ?? match[2] ?? "").replaceAll("\\'", "'").replaceAll('\\"', '"'));
+  if (quoted.length) return quoted;
+  return body.split(",").map(item => item.trim()).filter(Boolean);
+}
+
+function auditAgentLabel(value) {
+  const text = String(value ?? "");
+  for (const [agent, label] of Object.entries(AUDIT_AGENT_LABELS)) {
+    if (text === agent) return label;
+    if (text.startsWith(agent + ":")) return label + text.slice(agent.length);
+  }
+  return text;
+}
+
+function auditAgentList(raw, emptyText, separator = ", ") {
+  const agents = auditList(raw).map(auditAgentLabel);
+  return agents.length ? agents.join(separator) : emptyText;
+}
+
+function auditPercent(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "no disponible";
+  return new Intl.NumberFormat("es-ES", {
+    style: "percent",
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(numeric);
+}
+
+function auditState(value) {
+  return AUDIT_STATUS_LABELS[value] || String(value || "no disponible");
+}
+
+function auditAction(value) {
+  return AUDIT_ACTION_LABELS[value] || String(value || "no disponible");
+}
+
+function auditYesNo(value) {
+  if (["True", "true"].includes(value)) return "sí";
+  if (["False", "false"].includes(value)) return "no";
+  return "no disponible";
+}
+
+function auditDetectionLabel(value) {
+  if (["True", "true"].includes(value)) return "malicioso";
+  if (["False", "false"].includes(value)) return "benigno";
+  return "sin veredicto";
+}
+
+function formatLeakageEvidence(raw) {
+  const labels = {
+    campo_target_con_valor: "Campo objetivo con valor",
+    clave_target_anidada: "Clave objetivo anidada",
+    valor_target_anidado: "Valor objetivo anidado",
+    feature_target: "Variable objetivo recibida por el modelo",
+    evento_no_featurizable: "Evento no convertible en variables",
+    semantic_text_contiene_patron_target: "semantic_text contiene una etiqueta objetivo",
+    anomaly_summary_contiene_patron_target: "anomaly_summary contiene una etiqueta objetivo",
+  };
+  return String(raw).split("; ").map(item => {
+    const separator = item.indexOf(":");
+    const code = separator >= 0 ? item.slice(0, separator) : item;
+    const evidence = separator >= 0 ? item.slice(separator + 1) : "";
+    const label = labels[code] || code.replaceAll("_", " ");
+    return evidence ? `${label}: ${evidence}` : label;
+  }).join(" · ");
+}
+
+function formatAuditDetail(check) {
+  const raw = check.detail == null ? "" : String(check.detail).trim();
+  if (!raw) return check.passed ? "Sin incidencias." : "Sin detalle adicional.";
+
+  const status = () => auditState(auditField(raw, "status"));
+  const errors = () => auditAgentList(auditField(raw, "errors"), "ninguno");
+  const probability = () => auditPercent(auditField(raw, "probability"));
+  const verdict = () => auditDetectionLabel(auditField(raw, "is_malicious"));
+
+  switch (check.check) {
+    case "consistencia_sin_estado_error":
+    case "consistencia_errores_derivados":
+      return `Estado: ${status()} · Errores: ${errors()}`;
+    case "consistencia_veredicto_deteccion_presente":
+    case "consistencia_etiqueta_vs_probabilidad":
+      return `Veredicto observado: ${verdict()} · Probabilidad maliciosa: ${probability()}`;
+    case "consistencia_benigno_sin_tipo_ataque":
+      return `Tipo asignado: ${auditField(raw, "tipo") || "ninguno"}`;
+    case "consistencia_tipo_ataque_en_taxonomia":
+    case "consistencia_tipo_ataque_presente":
+      return `Tipo de ataque: ${auditField(raw, "tipo") || "no disponible"}`;
+    case "consistencia_modelo_por_tipo":
+      return `Tarea del modelo: ${auditField(raw, "model_task") || "no disponible"}`;
+    case "consistencia_version_taxonomia":
+      return `Versión recibida: ${auditField(raw, "recibida") || "no disponible"} · Versiones admitidas: ${auditField(raw, "soportadas") || "no disponibles"}`;
+    case "consistencia_top_scores_tipos": {
+      const invalid = auditField(raw, "valores_invalidos");
+      const invalidLabel = !invalid || invalid === "{}" ? "ninguna" : invalid;
+      return `Puntuaciones recibidas: ${auditField(raw, "cantidad") || "0"} · Incluye el tipo elegido: ${auditYesNo(auditField(raw, "incluye_elegido"))} · Etiquetas o puntuaciones inválidas: ${invalidLabel}`;
+    }
+    case "consistencia_tipo_ataque_vs_top_scores":
+      return `Tipo elegido: ${auditField(raw, "tipo") || "no disponible"} · Primero del top-3: ${auditField(raw, "top") || "no disponible"} · Confianza: ${auditPercent(auditField(raw, "confidence"))}`;
+    case "consistencia_mitigacion_tipo_ataque":
+      return `Tipo del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Tipo del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
+    case "consistencia_mitigacion_taxonomia":
+      return `Taxonomía del mitigador: ${auditField(raw, "mitigador") || "no disponible"} · Taxonomía del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
+    case "consistencia_mitigacion_catalogo_tipado":
+      return `Ámbito del catálogo: ${auditField(raw, "scope") || "no disponible"} · Versión: ${auditField(raw, "version") || "no disponible"} · Taxonomía: ${auditField(raw, "taxonomia_catalogo") || "no disponible"}`;
+    case "consistencia_contenido_catalogo_tipado":
+      return check.passed
+        ? "Medidas, fases y referencias coinciden con la entrada del catálogo"
+        : `Incidencias del contenido: ${auditField(raw, "issues") || raw || "no disponibles"}`;
+    case "consistencia_umbral_clasificacion_operativo":
+      return `Umbral recibido: ${auditPercent(auditField(raw, "recibido"))} · Umbral esperado: ${auditPercent(auditField(raw, "esperado"))}`;
+    case "consistencia_veredicto_juez_tipo_ataque":
+      return `Veredicto del juez: ${auditField(raw, "juez") || "no disponible"} · Resultado del clasificador: ${auditField(raw, "clasificador") || "no disponible"}`;
+    case "consistencia_abstencion_flaggeada":
+      return `Estado: ${status()} · Acción del juez: ${auditAction(auditField(raw, "action"))}`;
+    case "consistencia_abstencion_estandarizador_flaggeada": {
+      const code = auditField(raw, "failure_code");
+      return `Estado: ${status()} · Acción del juez: ${auditAction(auditField(raw, "action"))}`
+        + ` · Motivo: ${AUDIT_FAILURE_LABELS[code] || code || "no disponible"}`;
+    }
+    case "consistencia_probabilidad_en_rango":
+      return `Probabilidad maliciosa: ${probability()}`;
+    case "consistencia_estado_vs_juez":
+      return `Estado: ${status()} · Aprobado por el juez: ${auditYesNo(auditField(raw, "approved"))}`;
+    case "consistencia_salida_catalogo_pura":
+      return check.passed
+        ? "Todas las medidas y referencias de esta salida proceden del catálogo"
+        : "Se detectó contenido no catalogado en una salida declarada como catálogo";
+    case "traza_entradas_cerradas":
+      return `Pasos sin finalizar: ${auditAgentList(auditField(raw, "abiertas"), "ninguno")}`;
+    case "traza_sin_duraciones_negativas":
+      return `Pasos con duración negativa: ${auditAgentList(raw, "ninguno")}`;
+    case "traza_orden_de_agentes":
+      return `Secuencia observada: ${auditAgentList(auditField(raw, "agentes"), "ninguna", " → ")}`;
+    case "traza_errores_derivados":
+      return `Agentes con error: ${auditAgentList(auditField(raw, "agentes_con_error"), "ninguno")}`;
+    case "leakage_evento_canonico":
+    case "leakage_features_modelos":
+      return formatLeakageEvidence(raw);
+    case "leakage_evento_canonico_presente":
+      return check.passed ? "Ausencia admitida porque el caso no se completó" : "Evento canónico ausente en un caso completado";
+    case "umbral_mapping_confidence_derivado":
+      return `Confianza del mapeo: ${auditPercent(auditField(raw, "mapping_confidence"))}`;
+    case "umbral_zona_gris_abstiene":
+      return `Probabilidad maliciosa: ${probability()}`;
+    case "umbral_confianza_clasificacion_derivada":
+      return `Confianza de clasificación: ${auditPercent(auditField(raw, "confidence"))} · Umbral aplicado: ${auditPercent(auditField(raw, "threshold"))}`;
+    default:
+      return raw;
+  }
+}
+
+function initEjemplos() {
+  const sel = $("#ejemplo");
+  Object.keys(EJEMPLOS).forEach(k => sel.add(new Option(k, k)));
+  sel.onchange = () => {
+    const spec = EJEMPLOS[sel.value];
+    $("#payload").value = JSON.stringify(spec.payload, null, 2);
+  };
+  sel.onchange();
+}
+
+function initPipeline() {
+  const p = $("#pipeline");
+  p.innerHTML = "";
+  NODOS.forEach(n => {
+    const d = document.createElement("div");
+    d.className = "nodo pendiente"; d.id = "nodo-" + n.id;
+    d.innerHTML = `<div class="icono">${escapeHtml(n.icono)}</div><div class="nombre">${escapeHtml(n.nombre)}</div><div class="estado"></div>`;
+    p.appendChild(d);
+  });
+}
+
+function setNodo(id, clase, texto) {
+  const d = $("#nodo-" + id);
+  if (!d) return;
+  d.className = "nodo " + clase;
+  d.querySelector(".estado").textContent = texto || "";
+}
+
+async function replayTrace(caso) {
+  initPipeline();
+  const porAgente = {};
+  (caso.trace || []).forEach(t => { (porAgente[t.agent] ||= []).push(t); });
+  for (const n of NODOS) {
+    const entradas = porAgente[n.id];
+    if (!entradas) { setNodo(n.id, "omitido", "omitido"); continue; }
+    setNodo(n.id, "activo", "en curso…");
+    await new Promise(r => setTimeout(r, 420));
+    const ultima = entradas[entradas.length - 1];
+    const estados = entradas.map(e => e.status);
+    let clase = "ok", txt = "ok";
+    if (estados.includes("error")) { clase = "error"; txt = "error"; }
+    else if (estados.includes("abstain")) { clase = "abstain"; txt = "abstención → juez"; }
+    else if (estados.includes("fallback")) { clase = "fallback"; txt = "fallback"; }
+    if (ultima.confidence != null) txt += " · " + pct(ultima.confidence);
+    setNodo(n.id, clase, txt);
+  }
+}
+
+function badgeSource(src, llmName = "LLM") {
+  const m = { catalog: "ok", llm: "warn", llm_suggested: "warn", fallback: "gris", hybrid: "warn", rule_based: "gris" };
+  const labels = {
+    catalog: "catálogo",
+    llm: `${llmName} + catálogo`,
+    llm_suggested: `${llmName} · sugerencia`,
+    fallback: "fallback",
+    hybrid: `${llmName} + catálogo`,
+    rule_based: "reglas",
+  };
+  return `<span class="badge ${m[src] || "gris"}">${escapeHtml(labels[src] || src || "—")}</span>`;
+}
+
+function safeReferenceUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value), window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function detectorModelLabel(value) {
+  const model = String(value || "").trim();
+  return model || "—";
+}
+
+function mistralModelLabel(value) {
+  const model = String(value || "").trim();
+  return /mistral/i.test(model) ? "Mistral" : (model || "—");
+}
+
+function traceSummaryLabel(value) {
+  return String(value ?? "").replace(
+    /modelo=\S*mistral\S*/gi,
+    "modelo=Mistral",
+  );
+}
+
+function llmDisplayText(value) {
+  return String(value ?? "").replace(/\*+/g, "");
+}
+
+function pintarTarjetas(caso) {
+  $("#tarjetas").classList.remove("oculto");
+  const std = caso.standardization || {}, det = caso.detection || {},
+        cls = caso.classification || {}, exp = caso.explanation || {}, juez = caso.judge || {};
+
+  $("#t-std .cuerpo").innerHTML = `
+    <div class="kv"><span class="k">Modelo</span><span>${escapeHtml(mistralModelLabel(std.model))}</span></div>
+    <div class="kv"><span class="k">Proveedor</span><span>${escapeHtml(mistralModelLabel(std.provider))}</span></div>
+    <div class="kv"><span class="k">Acceso a caché</span><span>${std.from_cache ? "Sí (Estandarizado Previamente)" : "No (Llamada en Vivo)"}</span></div>
+    <div class="kv"><span class="k">Modalidad</span><span>${escapeHtml(std.modality ?? "—")}</span></div>
+    <div class="kv"><span class="k">Confianza de mapeo</span><span>${pct(std.mapping_confidence)}</span></div>
+    <div class="barra"><div class="relleno" style="width:${ratioWidth(std.mapping_confidence)}%"></div></div>
+    ${std.abstain ? `<p><span class="badge warn">ABSTENCIÓN → revisión humana</span><br><small>${escapeHtml(std.failure_code ?? "standardization_failed")}</small></p>`
+      : (std.mapping_confidence ?? 1) < 0.5 ? '<p><span class="badge warn">mapeo &lt; 0,5 → revisión humana</span></p>' : ""}`;
+
+  const verd = det.abstain ? '<span class="badge warn">SIN VEREDICTO · ABSTENCIÓN</span>'
+    : det.is_malicious == null ? '<span class="badge gris">sin veredicto</span>'
+    : det.is_malicious ? '<span class="badge err">MALICIOSO</span>' : '<span class="badge ok">benigno</span>';
+  $("#t-det .cuerpo").innerHTML = `
+    <div class="kv"><span class="k">Veredicto</span><span>${verd}</span></div>
+    <div class="kv"><span class="k">Probabilidad maliciosa</span><span>${pct(det.probability)}</span></div>
+    <div class="barra gauge"><div class="zona-gris"></div><div class="relleno" style="width:${ratioWidth(det.probability)}%"></div></div>
+    <div class="kv" style="margin-top:4px"><span class="k">Zona gris [0,4–0,6]</span>
+      <span>${det.abstain ? '<span class="badge warn">ABSTENCIÓN</span>' : "no aplicada"}</span></div>
+    ${det.abstain ? '<p style="color:var(--gris);font-size:11.5px">El booleano interno del umbral no se considera un veredicto durante la abstención.</p>' : ""}
+    <div class="kv"><span class="k">Modelo</span><span style="font-size:11px">${escapeHtml(detectorModelLabel(det.model_name))}</span></div>`;
+
+  if (cls.attack_type) {
+    const decisionThreshold = Number.isFinite(Number(cls.decision_threshold))
+      ? Number(cls.decision_threshold) : 0.65;
+    const filas = Object.entries(cls.top_scores || {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([f, s]) => `<div class="scorefila"><span>${escapeHtml(f)}</span>
+        <div class="barra"><div class="relleno" style="width:${ratioWidth(s)}%"></div></div>
+        <span>${pct(s)}</span></div>`).join("");
+    $("#t-cls .cuerpo").innerHTML = `
+      <div class="kv"><span class="k">Tipo de ataque</span><span><b>${escapeHtml(cls.attack_type)}</b></span></div>
+      <div class="kv"><span class="k">Confianza</span><span>${pct(cls.confidence)}
+        ${cls.confidence < decisionThreshold ? ` <span class="badge warn">&lt; ${pct(decisionThreshold)} → revisión</span>` : ""}</span></div>
+      <p style="margin:6px 0 2px;color:var(--gris);font-size:11.5px">Distribución top-3 de tipos de ataque</p>${filas}`;
+  } else {
+    let classifierMessage;
+    if (det.abstain) {
+      classifierMessage = "No ejecutado: el detector se abstuvo.";
+    } else if (det.is_malicious === false) {
+      classifierMessage = "No ejecutado: el detector clasificó el evento como benigno.";
+    } else if (det.is_malicious === true) {
+      classifierMessage = "Sin tipo disponible: el clasificador falló o devolvió una salida inválida; el caso requiere revisión.";
+    } else {
+      classifierMessage = "No ejecutado: no existe un veredicto de detección.";
+    }
+    $("#t-cls .cuerpo").innerHTML = `<p style="color:var(--gris)">${classifierMessage}</p>`;
+  }
+
+  const llmName = String(exp.model_name || "").includes("::mistral::") ? "Mistral" : "LLM";
+  const mitigationItems = exp.mitigation_items?.length ? exp.mitigation_items
+    : (exp.mitigations || []).map(text => ({ text, source: exp.source }));
+  const firstFiveCatalogAnchored = exp.first_five_catalog_anchored === true;
+  const items = mitigationItems.map(item => {
+    const context = typeof item.context === "string" ? item.context.trim() : "";
+    const visibleText = context || String(item.text || "");
+    const visibleSource = item.source === "llm_suggested"
+      ? "llm_suggested"
+      : (context ? "llm" : (item.source === "llm" ? "catalog" : item.source));
+    const catalogBase = item.source !== "llm_suggested" && context
+      ? String(item.base || item.text || "").trim()
+      : "";
+    return `<div class="mitigacion">
+      ${badgeSource(visibleSource, llmName)}
+      <div class="mitigacion-texto">${escapeHtml(llmDisplayText(visibleText))}</div>
+      ${catalogBase ? `<div class="mitigacion-base">Base catalogada: ${escapeHtml(catalogBase)}</div>` : ""}
+      ${item.source === "llm_suggested" ? '<div class="mitigacion-alerta">Sugerencia adicional no verificada por el catálogo</div>' : ""}
+    </div>`;
+  }).join("");
+  const refs = (exp.references || []).map(r => {
+    const id = r.attack_id || r.capec_id || r.name || "ref";
+    const url = safeReferenceUrl(r.url);
+    return url ? `<a class="refchip" href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(id)}</a>`
+               : `<span class="refchip">${escapeHtml(id)}</span>`;
+  }).join("");
+  const llmSummary = typeof exp.llm_context_summary === "string" ? exp.llm_context_summary.trim() : "";
+  const visibleSummary = llmSummary || String(exp.summary || "");
+  const summarySource = llmSummary ? "llm" : (exp.source === "hybrid" ? "catalog" : exp.source);
+  $("#t-mit .cuerpo").innerHTML = visibleSummary || items || refs ? `
+    <div class="kv"><span class="k">Fuente global</span><span>${badgeSource(exp.source, llmName)}</span></div>
+    <div class="kv"><span class="k">Recomendaciones</span><span>${mitigationItems.length}</span></div>
+    ${firstFiveCatalogAnchored ? '<div class="kv"><span class="k">Control del juez</span><span>Primeras cinco bases del catálogo contextualizadas</span></div>' : ""}
+    ${visibleSummary ? `<p style="font-size:12.3px">${badgeSource(summarySource, llmName)} ${escapeHtml(llmDisplayText(visibleSummary))}</p>` : ""}
+    ${items}${refs ? `<p style="margin:8px 0 0">${refs}</p>` : ""}`
+    : '<p style="color:var(--gris)">No ejecutado.</p>';
+
+  const acc = { approve: "ok", human_interrupt: "warn", abstain: "warn", rework: "warn", reject: "err" }[juez.action] || "gris";
+  const judgeIssues = Array.isArray(juez.issues)
+    ? juez.issues.map(issue => escapeHtml(issue)).join(", ")
+    : "";
+  $("#t-juez .cuerpo").innerHTML = `
+    <div class="kv"><span class="k">Acción</span><span><span class="badge ${acc}">${escapeHtml(juez.action ?? "—")}</span></span></div>
+    <div class="kv"><span class="k">Etiqueta final</span><span>${escapeHtml(juez.final_label ?? "—")}</span></div>
+    <div class="kv"><span class="k">Confianza final</span><span>${pct(juez.final_confidence)}</span></div>
+    <div class="kv"><span class="k">Revisión humana</span><span>${juez.requires_human_review ? "sí" : "no"}</span></div>
+    ${judgeIssues ? `<p style="font-size:12px"><span class="k">Incidencias:</span> ${judgeIssues}</p>` : ""}`;
+}
+
+function pintarTraza(caso) {
+  $("#panel-traza").classList.remove("oculto");
+  $("#traza-body").innerHTML = (caso.trace || []).map(t => {
+    const errorText = t.error == null ? "" : String(t.error);
+    const errorBadge = errorText
+      ? ` <span class="badge err" title="${escapeHtml(errorText)}">causa: ${escapeHtml(errorText.slice(0, 90))}</span>`
+      : "";
+    const statusClass = {ok:"ok",abstain:"warn",fallback:"warn",error:"err"}[t.status] || "gris";
+    return `<tr><td>${escapeHtml(t.agent)}</td><td>${escapeHtml(t.tool ?? "—")}</td>
+      <td><span class="badge ${statusClass}">${escapeHtml(t.status ?? "—")}</span></td>
+      <td>${t.confidence != null ? pct(t.confidence) : "—"}</td>
+      <td style="font-size:11.5px">${escapeHtml(traceSummaryLabel(t.summary))}${errorBadge}</td></tr>`;
+  }).join("");
+  $("#json-out").textContent = JSON.stringify(caso, null, 2);
+}
+
+function limpiarAuditoria() {
+  $("#panel-auditoria").classList.add("oculto");
+  $("#auditoria-estado").replaceChildren();
+  $("#auditoria-resumen").replaceChildren();
+  $("#auditoria-incidencias").replaceChildren();
+  $("#auditoria-checks").replaceChildren();
+  $("#auditoria-detalle").classList.add("oculto");
+  $("#auditoria-detalle").open = false;
+}
+
+function pintarAuditoria(report) {
+  const panel = $("#panel-auditoria");
+  panel.classList.remove("oculto");
+
+  const estado = $("#auditoria-estado");
+  estado.replaceChildren();
+  const estados = {
+    approve: { clase: "ok", texto: "APROBADA" },
+    review: { clase: "warn", texto: "REVISIÓN" },
+    reject: { clase: "err", texto: "RECHAZADA" },
+  };
+  const meta = estados[report.verdict] || { clase: "gris", texto: String(report.verdict || "desconocido") };
+  const badge = document.createElement("span");
+  badge.className = "badge " + meta.clase;
+  badge.textContent = meta.texto;
+  estado.append("Veredicto del auditor: ", badge);
+
+  const checks = Array.isArray(report.checks) ? report.checks : [];
+  const superados = checks.filter(c => c.passed).length;
+  const resumen = $("#auditoria-resumen");
+  resumen.replaceChildren();
+  const datoChecks = document.createElement("span");
+  datoChecks.textContent = `Comprobaciones superadas: ${superados}/${checks.length}`;
+  resumen.append(datoChecks);
+
+  const incidencias = $("#auditoria-incidencias");
+  incidencias.replaceChildren();
+  const issues = Array.isArray(report.issues) ? report.issues : [];
+  if (issues.length) {
+    const titulo = document.createElement("strong");
+    titulo.textContent = "Incidencias:";
+    const lista = document.createElement("ul");
+    issues.forEach(issue => {
+      const item = document.createElement("li");
+      item.textContent = String(issue);
+      lista.appendChild(item);
+    });
+    incidencias.append(titulo, lista);
+  } else {
+    incidencias.textContent = "Sin incidencias.";
+  }
+
+  const cuerpo = $("#auditoria-checks");
+  cuerpo.replaceChildren();
+  [...checks].sort((a, b) => Number(a.passed) - Number(b.passed)).forEach(check => {
+    const fila = document.createElement("tr");
+    const info = AUDIT_CHECK_INFO[check.check] || {
+      label: String(check.check || "Comprobación técnica").replaceAll("_", " "),
+      description: "Comprobación técnica del auditor.",
+    };
+    const nombre = document.createElement("td");
+    const etiqueta = document.createElement("div");
+    etiqueta.className = "auditoria-check-label";
+    etiqueta.textContent = info.label;
+    const identificador = document.createElement("div");
+    identificador.className = "auditoria-check-id";
+    identificador.textContent = String(check.check || "—");
+    nombre.append(etiqueta, identificador);
+    const descripcion = document.createElement("td");
+    descripcion.className = "auditoria-check-descripcion";
+    descripcion.textContent = info.description;
+    const resultado = document.createElement("td");
+    const resultadoBadge = document.createElement("span");
+    resultadoBadge.className = "badge " + (check.passed ? "ok" : "err");
+    resultadoBadge.textContent = check.passed ? "superado" : "fallo";
+    resultado.appendChild(resultadoBadge);
+    const detalle = document.createElement("td");
+    detalle.className = "auditoria-check-detalle";
+    detalle.textContent = formatAuditDetail(check);
+    if (check.detail != null && String(check.detail).trim()) {
+      detalle.title = String(check.detail);
+    }
+    fila.append(nombre, descripcion, resultado, detalle);
+    cuerpo.appendChild(fila);
+  });
+  $("#auditoria-detalle").classList.toggle("oculto", checks.length === 0);
+}
+
+async function cargarAuditoria(caso) {
+  const panel = $("#panel-auditoria");
+  panel.classList.remove("oculto");
+  const estado = $("#auditoria-estado");
+  estado.textContent = "Auditando el CaseResult persistido…";
+  try {
+    const resp = await fetch(`/cases/${encodeURIComponent(caso.case_id)}/audit`);
+    if (!resp.ok) {
+      const error = await resp.json().catch(() => ({}));
+      throw new Error(error.detail || resp.statusText);
+    }
+    pintarAuditoria(await resp.json());
+  } catch (error) {
+    estado.replaceChildren();
+    const badge = document.createElement("span");
+    badge.className = "badge err";
+    badge.textContent = "AUDITORÍA NO DISPONIBLE";
+    const detalle = document.createElement("span");
+    detalle.textContent = ` ${error.message}`;
+    estado.append(badge, detalle);
+  }
+}
+
+async function analizar() {
+  const btn = $("#analizar");
+  let payload;
+  try { payload = JSON.parse($("#payload").value); }
+  catch { alert("El JSON de entrada no es válido"); return; }
+
+  btn.disabled = true; btn.textContent = "Analizando…";
+  $("#banner").className = "banner"; $("#tarjetas").classList.add("oculto");
+  $("#panel-traza").classList.add("oculto");
+  limpiarAuditoria();
+  initPipeline();
+  try {
+    const resp = await fetch("/cases/analyze", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || resp.statusText);
+    const caso = await resp.json();
+    await replayTrace(caso);
+    const b = $("#banner");
+    b.className = "banner " + caso.status;
+    const dur = caso.finished_at && caso.created_at
+      ? ((new Date(caso.finished_at) - new Date(caso.created_at)) / 1000).toFixed(1) + " s" : "";
+    const txt = { completed: "Caso completado, aprobado y persistido",
+                  needs_human_review: "Caso persistido y derivado a revisión humana",
+                  error: "Caso persistido con error" }[caso.status] || caso.status;
+    b.innerHTML = `${escapeHtml(txt)} &nbsp;<small>· ${escapeHtml(caso.case_id)} ${dur ? "· " + escapeHtml(dur) : ""}</small>`;
+    pintarTarjetas(caso);
+    pintarTraza(caso);
+    await cargarAuditoria(caso);
+  } catch (e) {
+    const b = $("#banner");
+    b.className = "banner error";
+    b.textContent = "Error: " + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = "Analizar caso";
+  }
+}
+
+initEjemplos();
+initPipeline();
+$("#analizar").onclick = analizar;
+</script>
+</body>
+</html>

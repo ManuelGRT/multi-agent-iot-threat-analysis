@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tfm_multiagent"
+version = "0.1.0"
+description = "Arquitectura multiagente para deteccion, clasificacion y explicacion de eventos IoT/IIoT."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.110",
+    "httpx>=0.27",
+    "langgraph>=0.2",
+    "mcp[cli]>=1.2,<2",
+    "joblib==1.5.3",
+    "numpy==2.5.1",
+    "pydantic>=2.7",
+    "scikit-learn==1.8.0",
+    "uvicorn>=0.29",
+    # Los joblib desplegados fueron serializados con XGBoost 3.3.0. En Linux,
+    # la distribucion CPU evita instalar dependencias CUDA innecesarias.
+    "xgboost-cpu==3.3.0; platform_system == 'Linux'",
+    "xgboost==3.3.0; platform_system != 'Linux'",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+]
+ollama = [
+    "langchain-core>=1.0",
+    "langchain-ollama>=1.1",
+]
+llm-training = [
+    "torch>=2.2",
+    "transformers>=4.45",
+    "accelerate>=0.34",
+    "peft>=0.12",
+]
+evaluation = [
+    "jsonschema>=4.0",
+]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+exclude = ["src.eval*"]
+
+[tool.setuptools.package-data]
+"src.api" = ["static/index.html"]
+"src.mcp" = [
+    "data/threat_intel_catalog.json",
+    "data/models/xgboost_detection_final.joblib",
+    "data/models/xgboost_classification_final.joblib",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

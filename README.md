@@ -1,0 +1,274 @@
+# Sistema Multiagente para el Análisis de Amenazas IoT/IIoT
+
+Trabajo Fin de Máster (Máster en Inteligencia Artificial Aplicada). Este
+proyecto convierte un flujo clásico de detección de intrusiones —acoplado a un
+único dataset— en un **sistema multiagente**: los eventos de seguridad de
+cualquier fuente IoT/IIoT se transforman a un formato común (el *evento
+canónico*) y una cadena de agentes especializados los analiza, propone
+mitigaciones verificables y deja una traza completa auditable de cada decisión.
+
+## ¿Cómo funciona?
+
+Cada evento recorre este flujo, coordinado por el orquestador final activo
+`src/orchestration/mcp_graph.py` (LangGraph) sobre una capa de herramientas MCP
+(Model Context Protocol):
+
+```
+entrada cruda → Estandarizador → Detector → Clasificador → Mitigador → Juez
+                                    │ (zona gris)              │
+                                    └──────► revisión humana ◄─┘
+```
+
+| Agente | Qué hace | Qué decide |
+|---|---|---|
+| **Estandarizador** | Recibe una entrada cruda ya limpia (`row` o `text`). Consulta mediante el servidor MCP `case_memory` una caché SQLite por hash exacto, que reutiliza únicamente éxitos previos de Mistral y reconstruye la identidad del caso actual. En un *cache miss*, solicita a `inference` que Mistral seleccione las columnas y genere el evento canónico, y devuelve el éxito a `case_memory` para almacenarlo | Confianza del mapeo; si no hay *hit* y Mistral falla, la respuesta es inválida o la confianza es baja (< 0,5), se abstiene y el juez deriva el caso a revisión humana |
+| **Detector** | Modelo XGBoost binario: ¿es malicioso? | Veredicto y probabilidad; en la zona gris [0,4–0,6] **se abstiene** |
+| **Clasificador** | Modelo XGBoost multiclase balanceado: identifica directamente uno de los 16 tipos de ataque | Tipo, confianza y top-3 de tipos; si la confianza es < 0,65, el caso va a revisión |
+| **Mitigador** | Invoca `threat_intel.suggest_mitigations` para consultar por `attack_type` el **catálogo verificable** (ATT&CK + CAPEC) y `threat_intel.contextualize_mitigations` para solicitar la contextualización con Mistral | Si el LLM falla conserva el catálogo; las recomendaciones adicionales se mantienen como `llm_suggested` no verificadas y las referencias adicionales se descartan |
+| **Juez** | Aplica reglas deterministas sobre el caso completo y comprueba que clasificación y mitigación conserven el mismo tipo | Aprobar o derivar a revisión humana |
+| **Auditor** | Revisa a posteriori el caso cerrado, incluida la coherencia del tipo entre clasificador, catálogo, mitigador, juez y persistencia | Aprobar, revisar o rechazar |
+
+Ideas clave del diseño:
+
+- **La entrada limpia es una precondición.** La sanitización anti-leakage y la
+  separación de columnas target se realizan al preparar los datos de
+  entrenamiento, validación y evaluación, siempre fuera del grafo. El runtime
+  final no limpia ni inspecciona targets dentro del `row`: presupone una entrada
+  preparada. La salida canónica generada por Mistral sí se valida antes de
+  alcanzar los modelos. La API pública no acepta eventos preestandarizados.
+- **Mistral es obligatorio en cada *cache miss*.** El estandarizador accede a
+  la caché exclusivamente a través del servidor `case_memory`. Esta se indexa
+  por el hash exacto del contenido limpio y solo reutiliza respuestas Mistral
+  exitosas para duplicados. En un *hit* se reconstruyen la identidad y la
+  procedencia actuales y se reutiliza la selección que Mistral hizo para ese
+  mismo contenido; no aparece una heurística determinista. Si no hay *hit* y
+  Mistral falla, el sistema se abstiene y entrega el caso al juez para revisión
+  humana. No existe ningún adaptador en el runtime. El mecanismo *single-flight*
+  evita llamadas repetidas para una misma clave dentro de cada proceso; entre
+  procesos, SQLite aplica la política del primer éxito escrito, aunque dos
+  *misses* simultáneos pueden llegar a invocar Mistral.
+- **Todo caso pasa por el juez y queda auditable**: también los benignos se
+  revisan operacionalmente y todos producen un `CaseResult` con su traza. El
+  `CaseAuditor` es una comprobación posterior e independiente.
+- **El tipo es la única etiqueta multiclase operacional.** El clasificador no
+  deriva familias amplias: devuelve uno de los 16 tipos junto con su confianza
+  y el top-3. Ese mismo tipo identifica directamente la entrada del catálogo,
+  se conserva en el veredicto del juez y queda indexado en la memoria de casos.
+- **Producción usa MCP real por `stdio`.** Los agentes acceden por defecto a
+  los tres servidores mediante el SDK oficial y llamadas MCP sobre procesos
+  `stdio`. Cada caso reutiliza una sesión por servidor y la cierra después de
+  persistir el resultado. El modo `inprocess` conserva el mismo contrato, pero
+  queda reservado para la demostración rápida y las pruebas que no evalúan el
+  transporte.
+- **El LLM del mitigador se consume mediante MCP y está anclado**: el agente
+  no accede directamente a Mistral; solicita la contextualización al servidor
+  `threat_intel`. El modelo redacta la explicación, contextualiza las bases
+  numeradas del catálogo y puede formular recomendaciones adicionales. Una
+  recomendación sin una base válida se conserva con procedencia
+  `llm_suggested`: es una sugerencia no verificada y nunca se presenta como
+  conocimiento del catálogo. Las referencias adicionales se descartan.
+  Para la decisión operacional se comprueba si las cinco primeras bases del
+  catálogo quedaron contextualizadas y vinculadas con entradas distintas. Su
+  cobertura neutraliza únicamente una solicitud genérica de revisión emitida
+  por el LLM; el juez sigue aplicando el resto de sus reglas, como los umbrales,
+  las abstenciones, los errores y la coherencia entre salidas. Un identificador
+  inventado dentro del resumen hace que este se elimine y mantiene la revisión
+  humana.
+
+## Resultados principales
+
+La campaña estandarizó correctamente 34.635 registros de 4 datasets públicos.
+Los splits se construyeron sin solapamientos y se congelaron antes de
+experimentar. Para el detector resultaron elegibles 33.635 filas, de las que se
+seleccionaron 23.604 tras el balance por clase y origen:
+
+| Qué se mide | Resultado |
+|---|---|
+| Detector global balanceado por clase y origen (corpus n=23.604; test n=3.572) | F1 de ataque 0,9600; con abstención: **0,9723 sobre lo decidido**, derivando el 3,02 % a revisión |
+| Clasificador de 16 tipos (test balanceado, n=1.200) | Accuracy 0,8908; macro-F1 0,8917; top-3 0,9800; con umbral 0,65: F1 0,9237 sobre 1.088 decisiones |
+| Catálogo de amenazas v4 | Cobertura estructural 16/16: una entrada específica y al menos cinco mitigaciones verificables por tipo |
+| Auditor | 16/16 defectos inyectados detectados; 0 falsos rechazos |
+
+**Límite declarado:** las evaluaciones balanceadas por origen emplean registros
+de test de fuentes representadas durante el entrenamiento; no son pruebas
+*leave-one-dataset-out* ni demuestran transferencia a una fuente no vista. Los
+resultados valen para los dominios representados. Las fichas versionadas de
+evaluación fijan los artefactos, los splits y las métricas desplegadas sin
+necesidad de incorporar los datasets completos al repositorio.
+
+## Instalación y ejecución online
+
+```powershell
+# 1. Instalar normalmente (Python 3.12+)
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+
+# 2. Opcional para desarrollo: instalar tests y comprobarlos
+python -m pip install ".[test]"
+$env:MCP_CLIENT_MODE="inprocess"
+python -m pytest -q
+
+# 3. Configurar Mistral y arrancar API + frontend en modo productivo
+$env:MISTRAL_API_KEY="..."
+$env:MCP_CLIENT_MODE="stdio" # valor predeterminado; se explicita tras los tests
+uvicorn src.api.app:app --host 0.0.0.0 --port 8000
+```
+
+Los modelos activos, el catálogo y el frontend forman parte del paquete. No es
+necesario ejecutar el repositorio en modo editable ni descargar artefactos de
+entrenamiento. Abre `http://localhost:8000` para enviar uno de los ejemplos
+crudos del visor o llamar a la API.
+
+El clasificador de 16 tipos incluido es el valor predeterminado. Solo si se
+necesita desplegar otro artefacto compatible debe definirse
+`TFM_ATTACK_TYPE_MODEL` con su ruta; la configuración anterior
+`TFM_FAMILY_MODEL` ya no se admite.
+
+Con Docker, guarda `MISTRAL_API_KEY` en un `.env` local no versionado y ejecuta:
+
+```powershell
+docker compose up --build
+```
+
+La API y el frontend quedarán disponibles en `http://localhost:8000`. Docker
+fija `MCP_CLIENT_MODE=stdio` por defecto. La clave se inyecta únicamente por
+entorno; nunca debe incorporarse a la imagen ni al repositorio.
+
+## Probar el sistema con el visor web
+
+```powershell
+$env:MCP_CLIENT_MODE="inprocess"
+uvicorn src.api.app:app --port 8000
+```
+
+Abre `http://localhost:8000`: un visor con ejemplos precargados muestra el
+flujo completo (pipeline por agente, decisiones, mitigaciones con referencias
+y la traza del caso). Tras cerrarlo y persistirlo, el visor ejecuta el agente
+auditor en un panel independiente: informa `approve`, `review` o `reject` y
+desglosa sus comprobaciones sin modificar la decisión del juez ni añadir una
+entrada a la traza operacional. En la tarjeta del mitigador se presenta primero
+la contextualización de Mistral; si no existe, se muestra el texto del catálogo.
+También se conserva debajo la base catalogada. Las recomendaciones adicionales
+aparecen por separado como sugerencias `llm_suggested` no verificadas y no
+implican por sí solas una revisión humana. La entrada cruda debe llegar
+limpia. El estandarizador busca primero un éxito Mistral con el mismo hash
+exacto en la caché SQLite; en
+un *miss* necesitas `MISTRAL_API_KEY` y se llama a Mistral en vivo. Si el
+proveedor no responde o devuelve una salida inválida, el caso termina en el
+juez como abstención y revisión humana. La ruta final nunca usa adaptadores.
+`INGEST_LLM_TIMEOUT_SECONDS` permite acotar cada llamada (por ejemplo, `60`
+en una demo; una fila tabular realiza selección y extracción por separado).
+En el endpoint final, todos los casos se persisten en la memoria SQLite y, si
+el detector confirma un caso malicioso, el mitigador intenta siempre la
+contextualización anclada llamando a `threat_intel` mediante MCP. Es el proceso
+de ese servidor el que accede a Mistral. Si el modelo no está disponible, el
+caso conserva las contramedidas y referencias verificables del catálogo. Los
+clientes Mistral admiten hasta tres reintentos por defecto ante fallos
+transitorios de conexión (incluidos DNS y timeout de conexión), con esperas
+breves de 1, 2 y 4 segundos. `MISTRAL_CONNECTION_RETRIES` permite ajustar o
+desactivar ese máximo. En mitigación, los intentos se detienen antes si agotan
+el presupuesto total descrito a continuación. La estandarización no dispone de
+una ruta offline ni determinista para sustituir a Mistral en un *cache miss*;
+el fallback al catálogo pertenece únicamente al mitigador.
+
+`MITIGATOR_LLM_TIMEOUT_SECONDS` limita cada intento HTTP interno a 60 segundos.
+`MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS` acota en 105 segundos la operación
+completa, incluidos los reintentos, por debajo de los 120 segundos de
+`MCP_STDIO_TIMEOUT_SECONDS`. Los tres reintentos siguen disponibles ante
+fallos rápidos; si consumen el presupuesto total, `threat_intel` devuelve un
+error controlado y el agente conserva el catálogo antes de que venza MCP.
+
+El modo `inprocess` del bloque anterior evita crear procesos MCP durante una
+demostración local. Para probar el mismo visor atravesando el protocolo real,
+elimina esa variable o asígnale `stdio`.
+
+También puedes llamar a la API directamente:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/cases/analyze -Method Post `
+  -ContentType "application/json" `
+  -Body '{"dataset":"iot23","row":{"id.orig_h":"10.0.0.2","id.resp_h":"10.0.0.3","id.orig_p":4444,"id.resp_p":23,"proto":"tcp","orig_pkts":120,"orig_ip_bytes":4096},"row_id":42}'
+
+# Con el case_id devuelto, recalcula la auditoría posterior sin mutar el caso
+Invoke-RestMethod http://127.0.0.1:8000/cases/<case_id>/audit
+```
+
+Devuelve el `CaseResult` completo. La persistencia y la contextualización LLM
+anclada son políticas obligatorias de `/cases/analyze`, no parámetros del
+cliente. El proveedor online está fijado a Mistral y el servidor `threat_intel`
+selecciona el modelo mediante `MITIGATOR_LLM_MODEL`; si falla, hay *fallback*
+total al catálogo.
+La superficie pública se limita a `POST /cases/analyze`, que acepta `row` o
+`text`, `GET /cases/{case_id}/audit` y `GET /health`. Los endpoints antiguos
+responden `404`; un campo `canonical_event` enviado al endpoint vigente se
+rechaza por contrato con `422`.
+
+### Estado persistente
+
+El runtime usa por defecto `artifacts/` como único directorio escribible para
+su estado, configurable mediante `TFM_STATE_DIR`. En él, el servidor
+`case_memory` gestiona dos ficheros SQLite independientes:
+`mistral_standardization_v2.sqlite3` para la caché y `case_memory.db` para los
+casos y sus trazas. Se mantienen separados porque tienen esquemas distintos,
+pero siempre se ubican en la misma carpeta. Los modelos y el catálogo son
+recursos de solo lectura empaquetados y no se escriben durante la operación.
+Los overrides de fichero antiguos `TFM_STANDARDIZATION_CACHE_DB` y
+`TFM_CASE_MEMORY_DB` se aceptan solo por compatibilidad: si se declaran, deben
+resolver ambos SQLite en esa misma carpeta.
+Cuando se usan las rutas predeterminadas, `case_memory` copia una caché válida
+de la ubicación histórica `artifacts/cache/` al nuevo directorio común en su
+primer acceso y conserva el fichero original como respaldo.
+
+## Auditoría del sistema
+
+```powershell
+python scripts\run_system_audit.py
+```
+
+Esta utilidad es portable: comprueba los SHA-256 y contratos de los dos modelos
+empaquetados, distingue la taxonomía registrada durante el entrenamiento de la
+taxonomía operativa actual, verifica la coherencia de sus splits y métricas
+congeladas, comprueba que sus esquemas no contengan campos objetivo, verifica la
+integridad del catálogo v4 y ejecuta la batería reproducible de
+mutaciones del auditor. Funciona en un clon limpio y no necesita los datasets
+completos. Los datos originales
+solo son necesarios para reentrenar o recalcular las predicciones fila a fila.
+
+La suite `pytest` conserva una prueba integral por agente y una sola prueba E2E.
+Las pruebas de agentes cubren las rutas de éxito, abstención, error controlado y
+revisión humana, además de invocar las comprobaciones congeladas de los modelos
+y del catálogo. El E2E reutiliza una única sesión MCP `stdio` y recorre siete
+registros reales del split de test: Edge-IIoTset, IoT-23, Bot-IoT y las
+modalidades de red, Linux, Windows y telemetría de TON-IoT. Cada resultado se
+persiste y se somete al auditor posterior. Las etiquetas de referencia se
+conservan fuera de las entradas operacionales.
+
+## Estructura del repositorio
+
+| Carpeta | Contenido |
+|---|---|
+| `src/contracts/` | Esquemas Pydantic: evento canónico, salidas de agentes, `CaseResult` y traza |
+| `src/agents/final/` | Cinco agentes operacionales y el auditor posterior independiente |
+| `src/mcp/` | Tres servidores MCP: inferencia, persistencia de caché/casos/trazas y catálogo de amenazas con contextualización Mistral; incluye modelos y catálogo empaquetados |
+| `src/orchestration/` | Grafo LangGraph del flujo final y su estado |
+| `src/eval/` | Sanitización, entrenamiento y evaluación exclusivamente offline; incluye las referencias congeladas de auditoría |
+| `src/api/` | API FastAPI + visor web (`static/index.html`) |
+| `scripts/` | Utilidades offline de entrenamiento, evaluación y validación |
+| `tests/` | Seis pruebas integrales de agentes y una prueba E2E |
+
+El repositorio de despliegue no contiene adaptadores, agentes alternativos ni
+grafos legacy. La sanitización se conserva como herramienta offline para
+preparar entrenamiento y evaluación; nunca forma parte de `/cases/analyze`.
+En operación, toda lectura o escritura de la caché, los casos y sus trazas pasa
+por `case_memory`. La caché solo almacena éxitos Mistral y reconstruye la
+identidad y procedencia del registro duplicado actual.
+
+## Reglas del proyecto
+
+1. **No relanzar llamadas masivas al proveedor LLM**: los resultados de la
+   campaña experimental están congelados en sus artefactos.
+2. **Ninguna columna target puede usarse como feature** (hay verificación
+   automática y un caso trampa en la auditoría).
+3. La suite de tests debe quedar en verde tras cada cambio.

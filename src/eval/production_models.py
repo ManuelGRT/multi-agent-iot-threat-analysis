@@ -1,0 +1,768 @@
+"""Training helpers used by the deployed predictive agents.
+
+The validation campaign already owns ingestion, target authority and feature
+sanitisation. This module accepts only :class:`PreparedRecord` objects and
+preserves their ``train``/``val``/``test`` split. It trains the global binary
+detector and provides the shared helper used by the current 16-type classifier.
+Both fit their :class:`~sklearn.feature_extraction.DictVectorizer` on train
+only. Saving is opt-in and atomic.
+"""
+from __future__ import annotations
+
+from collections import Counter, defaultdict
+from dataclasses import dataclass
+import hashlib
+import json
+import os
+from pathlib import Path
+import tempfile
+from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
+
+import numpy as np
+from sklearn.feature_extraction import DictVectorizer
+
+from src.contracts.inference import (
+    ProductionModelError,
+    ProductionTask,
+    ProductionXGBoostModel,
+    _validated_encoded_predictions,
+)
+from src.eval.binary_balancing import balance_binary_records, logical_binary_origin
+from src.eval.model_metrics import compute_classification_metrics
+from src.eval.validation_campaign import PreparedRecord
+
+
+EstimatorFactory = Callable[..., Any]
+
+SPLITS = ("train", "val", "test")
+BINARY_GRAY_ZONE = (0.4, 0.6)
+
+BASE_XGBOOST_PARAMETERS: Mapping[str, Any] = {
+    "n_estimators": 300,
+    "max_depth": 6,
+    "learning_rate": 0.1,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "random_state": 42,
+    "n_jobs": 1,
+    "tree_method": "hist",
+    "verbosity": 0,
+}
+
+
+class EstimatorFactoryProtocol(Protocol):
+    def __call__(
+        self,
+        *,
+        task: ProductionTask,
+        n_classes: int,
+        parameters: Mapping[str, Any],
+    ) -> Any: ...
+
+
+@dataclass(slots=True)
+class CandidateTrainingResult:
+    model: ProductionXGBoostModel
+    report: dict[str, Any]
+    artifact_path: Path | None = None
+
+
+def train_global_detector(
+    records: Sequence[PreparedRecord] | Iterable[PreparedRecord],
+    *,
+    model_path: str | Path | None = None,
+    estimator_factory: EstimatorFactoryProtocol | None = None,
+    parameter_overrides: Mapping[str, Any] | None = None,
+    balance_seed: int = 42,
+) -> CandidateTrainingResult:
+    """Train a 1:1 detector inside every frozen split and logical origin."""
+
+    values = tuple(records)
+    labelled: list[tuple[PreparedRecord, bool]] = []
+    skipped = Counter()
+    for record in values:
+        if "binary" not in record.tasks:
+            skipped["task_not_declared"] += 1
+        elif not isinstance(record.target_is_attack, bool):
+            skipped["missing_or_invalid_target"] += 1
+        else:
+            labelled.append((record, record.target_is_attack))
+
+    result = _train_candidate(
+        labelled,
+        task="binary_detection",
+        skipped=dict(sorted(skipped.items())),
+        estimator_factory=estimator_factory,
+        parameter_overrides=parameter_overrides,
+        taxonomy_mapping=None,
+        balance_seed=balance_seed,
+    )
+    if model_path is not None:
+        _persist_result(result, model_path)
+    return result
+
+
+def train_labelled_attack_subtype_classifier(
+    labelled_records: Sequence[tuple[PreparedRecord, str]]
+    | Iterable[tuple[PreparedRecord, str]],
+    *,
+    taxonomy_mapping: Mapping[str, Any],
+    model_path: str | Path | None = None,
+    estimator_factory: EstimatorFactoryProtocol | None = None,
+    parameter_overrides: Mapping[str, Any] | None = None,
+    seed: int = 42,
+) -> CandidateTrainingResult:
+    """Entrena un clasificador de subtipos sobre filas ya mapeadas/balanceadas.
+
+    La preparacion de la taxonomia y el balanceo se mantienen fuera de esta
+    funcion para que puedan auditarse antes de ajustar el estimador. Aqui se
+    vuelven a aplicar las invariantes de deduplicacion y split como defensa en
+    profundidad.
+    """
+
+    labelled = tuple(labelled_records)
+    if not taxonomy_mapping.get("version"):
+        raise ProductionModelError("taxonomy_mapping requiere una version")
+    declared_classes = taxonomy_mapping.get(
+        "training_classes", taxonomy_mapping.get("attack_classes")
+    )
+    if declared_classes is not None:
+        declared = {str(label) for label in declared_classes}
+        observed = {str(label) for _record, label in labelled}
+        if observed != declared:
+            raise ProductionModelError(
+                "Las etiquetas observadas no coinciden con training_classes: "
+                f"missing={sorted(declared - observed)}, "
+                f"unexpected={sorted(observed - declared)}"
+            )
+    result = _train_candidate(
+        labelled,
+        task="attack_subtype",
+        skipped={},
+        estimator_factory=estimator_factory,
+        parameter_overrides=parameter_overrides,
+        taxonomy_mapping=taxonomy_mapping,
+        random_state=seed,
+    )
+    if model_path is not None:
+        _persist_result(result, model_path)
+    return result
+
+
+def persist_candidate_model(
+    result: CandidateTrainingResult,
+    path: str | Path,
+    *,
+    confidence_threshold: float | None = None,
+    model_name: str | None = None,
+) -> CandidateTrainingResult:
+    """Persiste atómicamente un candidato evaluado y su contrato operativo."""
+
+    if result.artifact_path is not None:
+        raise ProductionModelError("El candidato ya fue persistido")
+    if confidence_threshold is not None:
+        if isinstance(confidence_threshold, bool) or not isinstance(
+            confidence_threshold, (int, float)
+        ):
+            raise ProductionModelError("confidence_threshold debe ser numérico")
+        if not 0.0 <= float(confidence_threshold) <= 1.0:
+            raise ProductionModelError("confidence_threshold debe estar entre 0 y 1")
+        result.model.confidence_threshold = float(confidence_threshold)
+    if model_name is not None:
+        normalised_name = str(model_name).strip()
+        if not normalised_name:
+            raise ProductionModelError("model_name no puede estar vacío")
+        result.model.model_name = normalised_name
+    result.report["operational_contract"] = {
+        "confidence_threshold": result.model.confidence_threshold,
+        "model_name": result.model.model_name,
+        "task": result.model.task,
+        "taxonomy_version": result.model.family_mapping_version,
+    }
+    _persist_result(result, path)
+    return result
+
+
+def deduplicate_labelled_records(
+    labelled_records: Sequence[tuple[PreparedRecord, bool | str]]
+    | Iterable[tuple[PreparedRecord, bool | str]],
+) -> tuple[tuple[tuple[PreparedRecord, bool | str], ...], dict[str, Any]]:
+    """Global task-aware deduplication safe for frozen splits and targets.
+
+    A fingerprint spanning splits or carrying conflicting labels is removed in
+    full.  A same-split/same-label duplicate keeps the lexicographically lowest
+    manifest id, irrespective of source dataset.
+    """
+
+    values = tuple(labelled_records)
+    groups: dict[str, list[tuple[PreparedRecord, bool | str]]] = defaultdict(list)
+    for record, label in values:
+        if not isinstance(record.feature_fingerprint, str) or not record.feature_fingerprint:
+            raise ProductionModelError(
+                f"feature_fingerprint invalido en {record.manifest_id!r}"
+            )
+        groups[record.feature_fingerprint].append((record, label))
+
+    kept: list[tuple[PreparedRecord, bool | str]] = []
+    same_split_removed: list[str] = []
+    unsafe_removed: list[str] = []
+    removed_groups: list[dict[str, Any]] = []
+    same_groups = 0
+    cross_groups = 0
+    conflict_groups = 0
+
+    for fingerprint in sorted(groups):
+        group = sorted(groups[fingerprint], key=lambda item: item[0].manifest_id)
+        splits = {record.split for record, _label in group}
+        labels = {_label_key(label) for _record, label in group}
+        reasons: list[str] = []
+        if len(splits) > 1:
+            cross_groups += 1
+            reasons.append("cross_split")
+        if len(labels) > 1:
+            conflict_groups += 1
+            reasons.append("conflicting_labels")
+        if reasons:
+            identifiers = [record.manifest_id for record, _label in group]
+            unsafe_removed.extend(identifiers)
+            removed_groups.append(
+                {
+                    "feature_fingerprint": fingerprint,
+                    "reasons": reasons,
+                    "manifest_ids": identifiers,
+                    "splits": sorted(splits),
+                    "labels": sorted(labels),
+                }
+            )
+            continue
+
+        kept.append(group[0])
+        if len(group) > 1:
+            same_groups += 1
+            identifiers = [record.manifest_id for record, _label in group[1:]]
+            same_split_removed.extend(identifiers)
+            removed_groups.append(
+                {
+                    "feature_fingerprint": fingerprint,
+                    "reasons": ["same_split_same_label"],
+                    "manifest_ids": [record.manifest_id for record, _label in group],
+                    "kept_manifest_id": group[0][0].manifest_id,
+                }
+            )
+
+    split_order = {name: index for index, name in enumerate(SPLITS)}
+    kept.sort(
+        key=lambda item: (
+            split_order.get(item[0].split, len(split_order)),
+            item[0].dataset,
+            item[0].manifest_id,
+        )
+    )
+    report = {
+        "scope": "task_global",
+        "input_rows": len(values),
+        "output_rows": len(kept),
+        "same_split_same_label_groups": same_groups,
+        "same_split_rows_removed": len(same_split_removed),
+        "same_split_removed_ids": sorted(same_split_removed),
+        "cross_split_groups": cross_groups,
+        "conflicting_label_groups": conflict_groups,
+        "unsafe_rows_removed": len(unsafe_removed),
+        "unsafe_removed_ids": sorted(unsafe_removed),
+        "removed_groups": removed_groups,
+        "final_cross_split_overlap_count": _cross_split_overlap_count(kept),
+    }
+    return tuple(kept), report
+
+
+def _train_candidate(
+    labelled: Sequence[tuple[PreparedRecord, bool | str]],
+    *,
+    task: ProductionTask,
+    skipped: Mapping[str, int],
+    estimator_factory: EstimatorFactoryProtocol | None,
+    parameter_overrides: Mapping[str, Any] | None,
+    taxonomy_mapping: Mapping[str, Any] | None,
+    random_state: int = 42,
+    balance_seed: int | None = None,
+) -> CandidateTrainingResult:
+    deduplicated, dedup_report = deduplicate_labelled_records(labelled)
+    balancing_report: dict[str, Any] | None = None
+    if task == "binary_detection":
+        if balance_seed is None:
+            raise ProductionModelError(
+                "binary_detection requiere una semilla de balanceo"
+            )
+        labels_by_id = {
+            record.manifest_id: label for record, label in deduplicated
+        }
+        balanced_records, balancing_report = balance_binary_records(
+            (record for record, _label in deduplicated),
+            seed=balance_seed,
+        )
+        deduplicated = tuple(
+            (record, labels_by_id[record.manifest_id])
+            for record in balanced_records
+        )
+    by_split: dict[str, list[tuple[PreparedRecord, bool | str]]] = {
+        split: [] for split in SPLITS
+    }
+    for item in deduplicated:
+        split = item[0].split
+        if split not in by_split:
+            raise ProductionModelError(
+                f"Split no soportado en {item[0].manifest_id!r}: {split!r}"
+            )
+        by_split[split].append(item)
+
+    missing = [split for split in SPLITS if not by_split[split]]
+    if missing:
+        raise ProductionModelError(
+            f"{task} no tiene filas tras deduplicar en splits: {', '.join(missing)}"
+        )
+
+    train_labels = [label for _record, label in by_split["train"]]
+    if task == "binary_detection":
+        classes: tuple[bool | str, ...] = (False, True)
+        if set(train_labels) != {False, True}:
+            raise ProductionModelError(
+                "binary_detection requiere False y True en train tras deduplicar"
+            )
+    else:
+        classes = tuple(sorted({str(label) for label in train_labels}))
+        if len(classes) < 2:
+            raise ProductionModelError(
+                f"{task} requiere al menos dos clases en train tras deduplicar"
+            )
+
+    class_to_index = {label: index for index, label in enumerate(classes)}
+    for split in SPLITS:
+        unknown = sorted(
+            {
+                str(label)
+                for _record, label in by_split[split]
+                if label not in class_to_index
+            }
+        )
+        if unknown:
+            raise ProductionModelError(
+                f"{task}: {split} contiene clases ausentes de train: {unknown}"
+            )
+
+    vectorizer = DictVectorizer(sparse=True, sort=True)
+    train_features = [dict(record.features) for record, _label in by_split["train"]]
+    x_train = vectorizer.fit_transform(train_features)
+    if x_train.shape[1] == 0:
+        raise ProductionModelError(f"{task}: DictVectorizer no encontro features en train")
+    y_train = np.asarray(
+        [class_to_index[label] for _record, label in by_split["train"]],
+        dtype=np.int64,
+    )
+
+    parameters = _effective_parameters(
+        task,
+        len(classes),
+        parameter_overrides=parameter_overrides,
+        random_state=random_state,
+    )
+    factory = estimator_factory or _default_estimator_factory
+    estimator = factory(task=task, n_classes=len(classes), parameters=dict(parameters))
+    if not callable(getattr(estimator, "fit", None)):
+        raise TypeError("estimator_factory debe devolver un objeto con fit")
+    if not callable(getattr(estimator, "predict", None)):
+        raise TypeError("estimator_factory debe devolver un objeto con predict")
+    if not callable(getattr(estimator, "predict_proba", None)):
+        raise TypeError("estimator_factory debe devolver un objeto con predict_proba")
+    estimator.fit(x_train, y_train)
+
+    feature_names = [str(value) for value in vectorizer.get_feature_names_out()]
+    feature_schema_sha256 = _json_sha256(feature_names)
+    model = ProductionXGBoostModel(
+        vectorizer=vectorizer,
+        estimator=estimator,
+        encoded_classes=classes,
+        task=task,
+        feature_schema_sha256=feature_schema_sha256,
+        family_mapping_version=(
+            str(taxonomy_mapping["version"])
+            if taxonomy_mapping is not None and taxonomy_mapping.get("version")
+            else None
+        ),
+    )
+
+    metrics: dict[str, Any] = {}
+    for split in ("val", "test"):
+        records_in_split = by_split[split]
+        features = [dict(record.features) for record, _label in records_in_split]
+        transformed = vectorizer.transform(features)
+        truth = np.asarray(
+            [class_to_index[label] for _record, label in records_in_split],
+            dtype=np.int64,
+        )
+        predictions = _validated_encoded_predictions(
+            estimator.predict(transformed),
+            expected_size=len(records_in_split),
+            n_classes=len(classes),
+            context=f"{task}/{split}",
+        )
+        split_metrics = {
+            "global": compute_classification_metrics(
+                truth,
+                predictions,
+                classes=classes,
+                positive_index=(classes.index(True) if task == "binary_detection" else None),
+            ),
+            "by_dataset": _metrics_by_dataset(
+                records_in_split,
+                predictions,
+                classes=classes,
+                class_to_index=class_to_index,
+                positive_index=(classes.index(True) if task == "binary_detection" else None),
+            ),
+        }
+        if task == "binary_detection":
+            probabilities = np.asarray(estimator.predict_proba(transformed), dtype=float)
+            expected_shape = (len(records_in_split), len(classes))
+            if probabilities.shape != expected_shape or not np.all(
+                np.isfinite(probabilities)
+            ):
+                raise ProductionModelError(
+                    f"{task}/{split}: predict_proba devolvio "
+                    f"shape={probabilities.shape}; esperado={expected_shape} "
+                    "y valores finitos"
+                )
+            positive_scores = probabilities[:, classes.index(True)]
+            split_metrics["by_origin"] = _metrics_by_origin(
+                records_in_split,
+                predictions,
+                classes=classes,
+                class_to_index=class_to_index,
+                positive_index=classes.index(True),
+            )
+            split_metrics["operational"] = _operational_binary_metrics(
+                truth,
+                predictions,
+                positive_scores,
+                classes=classes,
+            )
+            split_metrics["operational_by_origin"] = (
+                _operational_metrics_by_origin(
+                    records_in_split,
+                    truth,
+                    predictions,
+                    positive_scores,
+                    classes=classes,
+                )
+            )
+        metrics[split] = split_metrics
+
+    report: dict[str, Any] = {
+        "task": task,
+        "model": "xgboost",
+        "parameters": dict(parameters),
+        "classes": list(classes),
+        "input_rows": len(labelled),
+        "skipped_rows": dict(skipped),
+        "deduplication": dedup_report,
+        "balancing": balancing_report,
+        "supports": {
+            split: _support_report(items) for split, items in by_split.items()
+        },
+        "data_sha256": {
+            "eligible": _labelled_records_sha256(labelled),
+            **{
+                split: _labelled_records_sha256(items)
+                for split, items in by_split.items()
+            },
+        },
+        "features": {
+            "count": len(feature_names),
+            "names_sha256": feature_schema_sha256,
+        },
+        "metrics": metrics,
+        "artifact": None,
+    }
+    if taxonomy_mapping is not None:
+        report["taxonomy_mapping"] = dict(taxonomy_mapping)
+    return CandidateTrainingResult(model=model, report=report)
+
+
+def _metrics_by_dataset(
+    records: Sequence[tuple[PreparedRecord, bool | str]],
+    predictions: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+    class_to_index: Mapping[bool | str, int],
+    positive_index: int | None,
+) -> dict[str, Any]:
+    indices: dict[str, list[int]] = defaultdict(list)
+    for index, (record, _label) in enumerate(records):
+        indices[record.dataset].append(index)
+    output: dict[str, Any] = {}
+    for dataset, positions in sorted(indices.items()):
+        truth = np.asarray(
+            [class_to_index[records[index][1]] for index in positions],
+            dtype=np.int64,
+        )
+        predicted = np.asarray([predictions[index] for index in positions], dtype=np.int64)
+        output[dataset] = compute_classification_metrics(
+            truth,
+            predicted,
+            classes=classes,
+            positive_index=positive_index,
+        )
+    return output
+
+
+def _metrics_by_origin(
+    records: Sequence[tuple[PreparedRecord, bool | str]],
+    predictions: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+    class_to_index: Mapping[bool | str, int],
+    positive_index: int | None,
+) -> dict[str, Any]:
+    indices: dict[str, list[int]] = defaultdict(list)
+    for index, (record, _label) in enumerate(records):
+        indices[logical_binary_origin(record)].append(index)
+    output: dict[str, Any] = {}
+    for origin, positions in sorted(indices.items()):
+        truth = np.asarray(
+            [class_to_index[records[index][1]] for index in positions],
+            dtype=np.int64,
+        )
+        predicted = np.asarray(
+            [predictions[index] for index in positions], dtype=np.int64
+        )
+        output[origin] = compute_classification_metrics(
+            truth,
+            predicted,
+            classes=classes,
+            positive_index=positive_index,
+        )
+    return output
+
+
+def _operational_metrics_by_origin(
+    records: Sequence[tuple[PreparedRecord, bool | str]],
+    truth: np.ndarray,
+    predictions: np.ndarray,
+    positive_scores: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+) -> dict[str, Any]:
+    indices: dict[str, list[int]] = defaultdict(list)
+    for index, (record, _label) in enumerate(records):
+        indices[logical_binary_origin(record)].append(index)
+    return {
+        origin: _operational_binary_metrics(
+            truth[positions],
+            predictions[positions],
+            positive_scores[positions],
+            classes=classes,
+        )
+        for origin, raw_positions in sorted(indices.items())
+        for positions in [np.asarray(raw_positions, dtype=np.int64)]
+    }
+
+
+def _operational_binary_metrics(
+    truth: np.ndarray,
+    predictions: np.ndarray,
+    positive_scores: np.ndarray,
+    *,
+    classes: Sequence[bool | str],
+) -> dict[str, Any]:
+    low, high = BINARY_GRAY_ZONE
+    if truth.shape != predictions.shape or truth.shape != positive_scores.shape:
+        raise ProductionModelError(
+            "Metricas operacionales: vectores con tamanos distintos"
+        )
+    decided_mask = (positive_scores < low) | (positive_scores > high)
+    abstained_mask = ~decided_mask
+    decided_truth = truth[decided_mask]
+    decided_predictions = predictions[decided_mask]
+    abstained_labels = Counter(
+        _report_label(classes[int(index)]) for index in truth[abstained_mask]
+    )
+    total = int(len(truth))
+    decided = int(np.sum(decided_mask))
+    payload: dict[str, Any] = {
+        "decision_threshold": 0.5,
+        "gray_zone_inclusive": [low, high],
+        "total_rows": total,
+        "decided_rows": decided,
+        "abstained_rows": total - decided,
+        "coverage": decided / total if total else 0.0,
+        "abstention_rate": (total - decided) / total if total else 0.0,
+        "abstained_class_counts": dict(sorted(abstained_labels.items())),
+        "decided_metrics": None,
+    }
+    if decided:
+        payload["decided_metrics"] = compute_classification_metrics(
+            decided_truth,
+            decided_predictions,
+            classes=classes,
+            positive_index=classes.index(True),
+        )
+    return payload
+
+
+def _support_report(
+    records: Sequence[tuple[PreparedRecord, bool | str]],
+) -> dict[str, Any]:
+    by_dataset: dict[str, Counter[str]] = defaultdict(Counter)
+    class_counts: Counter[str] = Counter()
+    for record, label in records:
+        label_text = _report_label(label)
+        class_counts[label_text] += 1
+        by_dataset[record.dataset][label_text] += 1
+    return {
+        "rows": len(records),
+        "class_counts": dict(sorted(class_counts.items())),
+        "by_dataset": {
+            dataset: {
+                "rows": sum(counts.values()),
+                "class_counts": dict(sorted(counts.items())),
+            }
+            for dataset, counts in sorted(by_dataset.items())
+        },
+    }
+
+
+def _effective_parameters(
+    task: ProductionTask,
+    n_classes: int,
+    *,
+    parameter_overrides: Mapping[str, Any] | None,
+    random_state: int = 42,
+) -> dict[str, Any]:
+    if isinstance(random_state, bool) or not isinstance(random_state, int):
+        raise ProductionModelError("random_state debe ser un entero")
+    parameters = dict(BASE_XGBOOST_PARAMETERS)
+    parameters["random_state"] = random_state
+    uses_binary_objective = n_classes == 2
+    parameters.update(
+        {
+            "objective": "binary:logistic" if uses_binary_objective else "multi:softprob",
+            "eval_metric": "logloss" if uses_binary_objective else "mlogloss",
+        }
+    )
+    if n_classes > 2:
+        parameters["num_class"] = n_classes
+    overrides = dict(parameter_overrides or {})
+    forbidden = {"objective", "eval_metric", "num_class", "random_state", "n_jobs"}
+    invalid = sorted(forbidden.intersection(overrides))
+    if invalid:
+        raise ProductionModelError(
+            f"No se pueden sobrescribir parametros de contrato: {invalid}"
+        )
+    parameters.update(overrides)
+    return parameters
+
+
+def _default_estimator_factory(
+    *, task: ProductionTask, n_classes: int, parameters: Mapping[str, Any]
+) -> Any:
+    del task, n_classes
+    try:
+        from xgboost import XGBClassifier
+    except ImportError as exc:  # pragma: no cover - exercised only without evaluation extra
+        raise RuntimeError(
+            "xgboost no esta instalado; instala el extra 'evaluation'"
+        ) from exc
+    return XGBClassifier(**dict(parameters))
+
+
+def _persist_result(result: CandidateTrainingResult, path: str | Path) -> None:
+    target = Path(path).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_joblib_dump(result.model, target)
+    result.artifact_path = target
+    result.report["artifact"] = {
+        "path": str(target),
+        "sha256": _file_sha256(target),
+        "bytes": target.stat().st_size,
+    }
+
+
+def _atomic_joblib_dump(model: ProductionXGBoostModel, target: Path) -> None:
+    import joblib
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        joblib.dump(model, temporary, compress=3)
+        # Windows rejects fsync on a read-only descriptor (EBADF), hence r+b.
+        with temporary.open("r+b") as stream:
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _labelled_records_sha256(
+    values: Sequence[tuple[PreparedRecord, bool | str]],
+) -> str:
+    payload = [
+        {
+            "manifest_id": record.manifest_id,
+            "dataset": record.dataset,
+            "split": record.split,
+            "content_hash": record.content_hash,
+            "feature_fingerprint": record.feature_fingerprint,
+            "label": label,
+        }
+        for record, label in sorted(values, key=lambda item: item[0].manifest_id)
+    ]
+    return _json_sha256(payload)
+
+
+def _json_sha256(value: Any) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cross_split_overlap_count(
+    values: Sequence[tuple[PreparedRecord, bool | str]],
+) -> int:
+    splits_by_fingerprint: dict[str, set[str]] = defaultdict(set)
+    for record, _label in values:
+        splits_by_fingerprint[record.feature_fingerprint].add(record.split)
+    return sum(len(splits) > 1 for splits in splits_by_fingerprint.values())
+
+
+def _label_key(label: bool | str) -> str:
+    if isinstance(label, bool):
+        return "attack" if label else "benign"
+    return str(label)
+
+
+def _report_label(label: bool | str) -> str:
+    return _label_key(label)
+
+
+__all__ = [
+    "BASE_XGBOOST_PARAMETERS",
+    "CandidateTrainingResult",
+    "ProductionModelError",
+    "ProductionXGBoostModel",
+    "deduplicate_labelled_records",
+    "persist_candidate_model",
+    "train_global_detector",
+    "train_labelled_attack_subtype_classifier",
+]

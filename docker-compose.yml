@@ -1,0 +1,27 @@
+# docker-compose.yml
+services:
+  api:
+    build:
+      context: .
+    init: true
+    restart: unless-stopped
+    read_only: true
+    ports:
+      - "8000:8000"
+    environment:
+      MISTRAL_API_KEY: "${MISTRAL_API_KEY:?Define MISTRAL_API_KEY en el archivo .env}"
+      INGEST_LLM_MODEL: "${INGEST_LLM_MODEL:-mistral-small-2603}"
+      MITIGATOR_LLM_MODEL: "${MITIGATOR_LLM_MODEL:-mistral-small-2603}"
+      MITIGATOR_LLM_TIMEOUT_SECONDS: "${MITIGATOR_LLM_TIMEOUT_SECONDS:-60}"
+      MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS: "${MITIGATOR_LLM_TOTAL_TIMEOUT_SECONDS:-105}"
+      MCP_CLIENT_MODE: "${MCP_CLIENT_MODE:-stdio}"
+      MCP_STDIO_TIMEOUT_SECONDS: "${MCP_STDIO_TIMEOUT_SECONDS:-120}"
+      TFM_STATE_DIR: /var/lib/tfm_multiagent
+      TFM_ATTACK_TYPE_MODEL: "${TFM_ATTACK_TYPE_MODEL:-}"
+    volumes:
+      - runtime_state:/var/lib/tfm_multiagent
+    tmpfs:
+      - /tmp
+
+volumes:
+  runtime_state:
